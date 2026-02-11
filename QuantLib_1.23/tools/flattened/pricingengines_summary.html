@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – pricingengines</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/pricingengines</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened/pricingengines.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">255</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">253</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">2</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">1.3 MiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">1.8 MiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>pricingengines
+├── asian
+│   ├── all.hpp
+│   ├── analytic_cont_geom_av_price.cpp
+│   ├── analytic_cont_geom_av_price.hpp
+│   ├── analytic_discr_geom_av_price.cpp
+│   ├── analytic_discr_geom_av_price.hpp
+│   ├── analytic_discr_geom_av_strike.cpp
+│   ├── analytic_discr_geom_av_strike.hpp
+│   ├── fdblackscholesasianengine.cpp
+│   ├── fdblackscholesasianengine.hpp
+│   ├── Makefile.am
+│   ├── mc_discr_arith_av_price.cpp
+│   ├── mc_discr_arith_av_price.hpp
+│   ├── mc_discr_arith_av_price_heston.cpp
+│   ├── mc_discr_arith_av_price_heston.hpp
+│   ├── mc_discr_arith_av_strike.cpp
+│   ├── mc_discr_arith_av_strike.hpp
+│   ├── mc_discr_geom_av_price.cpp
+│   ├── mc_discr_geom_av_price.hpp
+│   ├── mc_discr_geom_av_price_heston.cpp
+│   ├── mc_discr_geom_av_price_heston.hpp
+│   ├── mcdiscreteasianengine.hpp
+│   └── mcdiscreteasianenginebase.hpp
+├── barrier
+│   ├── all.hpp
+│   ├── analyticbarrierengine.cpp
+│   ├── analyticbarrierengine.hpp
+│   ├── analyticbinarybarrierengine.cpp
+│   ├── analyticbinarybarrierengine.hpp
+│   ├── binomialbarrierengine.hpp
+│   ├── discretizedbarrieroption.cpp
+│   ├── discretizedbarrieroption.hpp
+│   ├── fdblackscholesbarrierengine.cpp
+│   ├── fdblackscholesbarrierengine.hpp
+│   ├── fdblackscholesrebateengine.cpp
+│   ├── fdblackscholesrebateengine.hpp
+│   ├── fdhestonbarrierengine.cpp
+│   ├── fdhestonbarrierengine.hpp
+│   ├── fdhestonrebateengine.cpp
+│   ├── fdhestonrebateengine.hpp
+│   ├── Makefile.am
+│   ├── mcbarrierengine.cpp
+│   └── mcbarrierengine.hpp
+├── basket
+│   ├── all.hpp
+│   ├── fd2dblackscholesvanillaengine.cpp
+│   ├── fd2dblackscholesvanillaengine.hpp
+│   ├── kirkengine.cpp
+│   ├── kirkengine.hpp
+│   ├── Makefile.am
+│   ├── mcamericanbasketengine.cpp
+│   ├── mcamericanbasketengine.hpp
+│   ├── mceuropeanbasketengine.cpp
+│   ├── mceuropeanbasketengine.hpp
+│   ├── stulzengine.cpp
+│   └── stulzengine.hpp
+├── bond
+│   ├── all.hpp
+│   ├── bondfunctions.cpp
+│   ├── bondfunctions.hpp
+│   ├── discountingbondengine.cpp
+│   ├── discountingbondengine.hpp
+│   └── Makefile.am
+├── capfloor
+│   ├── all.hpp
+│   ├── analyticcapfloorengine.cpp
+│   ├── analyticcapfloorengine.hpp
+│   ├── bacheliercapfloorengine.cpp
+│   ├── bacheliercapfloorengine.hpp
+│   ├── blackcapfloorengine.cpp
+│   ├── blackcapfloorengine.hpp
+│   ├── discretizedcapfloor.cpp
+│   ├── discretizedcapfloor.hpp
+│   ├── gaussian1dcapfloorengine.cpp
+│   ├── gaussian1dcapfloorengine.hpp
+│   ├── Makefile.am
+│   ├── mchullwhiteengine.cpp
+│   ├── mchullwhiteengine.hpp
+│   ├── treecapfloorengine.cpp
+│   └── treecapfloorengine.hpp
+├── cliquet
+│   ├── all.hpp
+│   ├── analyticcliquetengine.cpp
+│   ├── analyticcliquetengine.hpp
+│   ├── analyticperformanceengine.cpp
+│   ├── analyticperformanceengine.hpp
+│   ├── Makefile.am
+│   ├── mcperformanceengine.cpp
+│   └── mcperformanceengine.hpp
+├── credit
+│   ├── all.hpp
+│   ├── integralcdsengine.cpp
+│   ├── integralcdsengine.hpp
+│   ├── isdacdsengine.cpp
+│   ├── isdacdsengine.hpp
+│   ├── Makefile.am
+│   ├── midpointcdsengine.cpp
+│   └── midpointcdsengine.hpp
+├── forward
+│   ├── all.hpp
+│   ├── forwardengine.hpp
+│   ├── forwardperformanceengine.hpp
+│   ├── Makefile.am
+│   ├── mcforwardeuropeanbsengine.cpp
+│   ├── mcforwardeuropeanbsengine.hpp
+│   ├── mcforwardeuropeanhestonengine.cpp
+│   ├── mcforwardeuropeanhestonengine.hpp
+│   ├── mcforwardvanillaengine.hpp
+│   ├── mcvarianceswapengine.hpp
+│   └── replicatingvarianceswapengine.hpp
+├── inflation
+│   ├── all.hpp
+│   ├── inflationcapfloorengines.cpp
+│   ├── inflationcapfloorengines.hpp
+│   └── Makefile.am
+├── lookback
+│   ├── all.hpp
+│   ├── analyticcontinuousfixedlookback.cpp
+│   ├── analyticcontinuousfixedlookback.hpp
+│   ├── analyticcontinuousfloatinglookback.cpp
+│   ├── analyticcontinuousfloatinglookback.hpp
+│   ├── analyticcontinuouspartialfixedlookback.cpp
+│   ├── analyticcontinuouspartialfixedlookback.hpp
+│   ├── analyticcontinuouspartialfloatinglookback.cpp
+│   ├── analyticcontinuouspartialfloatinglookback.hpp
+│   ├── Makefile.am
+│   ├── mclookbackengine.cpp
+│   └── mclookbackengine.hpp
+├── quanto
+│   ├── all.hpp
+│   ├── Makefile.am
+│   └── quantoengine.hpp
+├── swap
+│   ├── all.hpp
+│   ├── cvaswapengine.cpp
+│   ├── cvaswapengine.hpp
+│   ├── discountingswapengine.cpp
+│   ├── discountingswapengine.hpp
+│   ├── discretizedswap.cpp
+│   ├── discretizedswap.hpp
+│   ├── Makefile.am
+│   ├── treeswapengine.cpp
+│   └── treeswapengine.hpp
+├── swaption
+│   ├── all.hpp
+│   ├── basketgeneratingengine.cpp
+│   ├── basketgeneratingengine.hpp
+│   ├── blackswaptionengine.cpp
+│   ├── blackswaptionengine.hpp
+│   ├── discretizedswaption.cpp
+│   ├── discretizedswaption.hpp
+│   ├── fdg2swaptionengine.cpp
+│   ├── fdg2swaptionengine.hpp
+│   ├── fdhullwhiteswaptionengine.cpp
+│   ├── fdhullwhiteswaptionengine.hpp
+│   ├── g2swaptionengine.hpp
+│   ├── gaussian1dfloatfloatswaptionengine.cpp
+│   ├── gaussian1dfloatfloatswaptionengine.hpp
+│   ├── gaussian1djamshidianswaptionengine.cpp
+│   ├── gaussian1djamshidianswaptionengine.hpp
+│   ├── gaussian1dnonstandardswaptionengine.cpp
+│   ├── gaussian1dnonstandardswaptionengine.hpp
+│   ├── gaussian1dswaptionengine.cpp
+│   ├── gaussian1dswaptionengine.hpp
+│   ├── jamshidianswaptionengine.cpp
+│   ├── jamshidianswaptionengine.hpp
+│   ├── Makefile.am
+│   ├── treeswaptionengine.cpp
+│   └── treeswaptionengine.hpp
+├── vanilla
+│   ├── all.hpp
+│   ├── analyticbsmhullwhiteengine.cpp
+│   ├── analyticbsmhullwhiteengine.hpp
+│   ├── analyticcevengine.cpp
+│   ├── analyticcevengine.hpp
+│   ├── analyticdigitalamericanengine.cpp
+│   ├── analyticdigitalamericanengine.hpp
+│   ├── analyticdividendeuropeanengine.cpp
+│   ├── analyticdividendeuropeanengine.hpp
+│   ├── analyticeuropeanengine.cpp
+│   ├── analyticeuropeanengine.hpp
+│   ├── analyticeuropeanvasicekengine.cpp
+│   ├── analyticeuropeanvasicekengine.hpp
+│   ├── analyticgjrgarchengine.cpp
+│   ├── analyticgjrgarchengine.hpp
+│   ├── analytich1hwengine.cpp
+│   ├── analytich1hwengine.hpp
+│   ├── analytichestonengine.cpp
+│   ├── analytichestonengine.hpp
+│   ├── analytichestonhullwhiteengine.cpp
+│   ├── analytichestonhullwhiteengine.hpp
+│   ├── analyticptdhestonengine.cpp
+│   ├── analyticptdhestonengine.hpp
+│   ├── baroneadesiwhaleyengine.cpp
+│   ├── baroneadesiwhaleyengine.hpp
+│   ├── batesengine.cpp
+│   ├── batesengine.hpp
+│   ├── binomialengine.hpp
+│   ├── bjerksundstenslandengine.cpp
+│   ├── bjerksundstenslandengine.hpp
+│   ├── coshestonengine.cpp
+│   ├── coshestonengine.hpp
+│   ├── discretizedvanillaoption.cpp
+│   ├── discretizedvanillaoption.hpp
+│   ├── exponentialfittinghestonengine.cpp
+│   ├── exponentialfittinghestonengine.hpp
+│   ├── fdbatesvanillaengine.cpp
+│   ├── fdbatesvanillaengine.hpp
+│   ├── fdblackscholesshoutengine.cpp
+│   ├── fdblackscholesshoutengine.hpp
+│   ├── fdblackscholesvanillaengine.cpp
+│   ├── fdblackscholesvanillaengine.hpp
+│   ├── fdcevvanillaengine.cpp
+│   ├── fdcevvanillaengine.hpp
+│   ├── fdcirvanillaengine.cpp
+│   ├── fdcirvanillaengine.hpp
+│   ├── fdconditions.hpp
+│   ├── fddividendengine.hpp
+│   ├── fddividendshoutengine.hpp
+│   ├── fdhestonhullwhitevanillaengine.cpp
+│   ├── fdhestonhullwhitevanillaengine.hpp
+│   ├── fdhestonvanillaengine.cpp
+│   ├── fdhestonvanillaengine.hpp
+│   ├── fdmultiperiodengine.hpp
+│   ├── fdsabrvanillaengine.cpp
+│   ├── fdsabrvanillaengine.hpp
+│   ├── fdshoutengine.hpp
+│   ├── fdsimplebsswingengine.cpp
+│   ├── fdsimplebsswingengine.hpp
+│   ├── fdstepconditionengine.hpp
+│   ├── fdvanillaengine.cpp
+│   ├── fdvanillaengine.hpp
+│   ├── hestonexpansionengine.cpp
+│   ├── hestonexpansionengine.hpp
+│   ├── integralengine.cpp
+│   ├── integralengine.hpp
+│   ├── jumpdiffusionengine.cpp
+│   ├── jumpdiffusionengine.hpp
+│   ├── juquadraticengine.cpp
+│   ├── juquadraticengine.hpp
+│   ├── Makefile.am
+│   ├── mcamericanengine.cpp
+│   ├── mcamericanengine.hpp
+│   ├── mcdigitalengine.cpp
+│   ├── mcdigitalengine.hpp
+│   ├── mceuropeanengine.hpp
+│   ├── mceuropeangjrgarchengine.hpp
+│   ├── mceuropeanhestonengine.hpp
+│   ├── mchestonhullwhiteengine.cpp
+│   ├── mchestonhullwhiteengine.hpp
+│   └── mcvanillaengine.hpp
+├── all.hpp
+├── americanpayoffatexpiry.cpp
+├── americanpayoffatexpiry.hpp
+├── americanpayoffathit.cpp
+├── americanpayoffathit.hpp
+├── blackcalculator.cpp
+├── blackcalculator.hpp
+├── blackformula.cpp
+├── blackformula.hpp
+├── blackscholescalculator.cpp
+├── blackscholescalculator.hpp
+├── genericmodelengine.hpp
+├── greeks.cpp
+├── greeks.hpp
+├── latticeshortratemodelengine.hpp
+├── Makefile.am
+├── mclongstaffschwartzengine.hpp
+└── mcsimulation.hpp</pre>
+
+  <h2>✅ Rendered Files (253)</h2>
+  <details open><summary>253 files · 1.3 MiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>all.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>americanpayoffatexpiry.cpp</code></td><td class="size">6.0 KiB</td></tr>
+<tr><td><code>americanpayoffatexpiry.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>americanpayoffathit.cpp</code></td><td class="size">7.9 KiB</td></tr>
+<tr><td><code>americanpayoffathit.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>asian/Makefile.am</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>asian/all.hpp</code></td><td class="size">847 B</td></tr>
+<tr><td><code>asian/analytic_cont_geom_av_price.cpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>asian/analytic_cont_geom_av_price.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>asian/analytic_discr_geom_av_price.cpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>asian/analytic_discr_geom_av_price.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>asian/analytic_discr_geom_av_strike.cpp</code></td><td class="size">5.4 KiB</td></tr>
+<tr><td><code>asian/analytic_discr_geom_av_strike.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>asian/fdblackscholesasianengine.cpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>asian/fdblackscholesasianengine.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>asian/mc_discr_arith_av_price.cpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>asian/mc_discr_arith_av_price.hpp</code></td><td class="size">11.7 KiB</td></tr>
+<tr><td><code>asian/mc_discr_arith_av_price_heston.cpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>asian/mc_discr_arith_av_price_heston.hpp</code></td><td class="size">14.2 KiB</td></tr>
+<tr><td><code>asian/mc_discr_arith_av_strike.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>asian/mc_discr_arith_av_strike.hpp</code></td><td class="size">8.7 KiB</td></tr>
+<tr><td><code>asian/mc_discr_geom_av_price.cpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>asian/mc_discr_geom_av_price.hpp</code></td><td class="size">9.1 KiB</td></tr>
+<tr><td><code>asian/mc_discr_geom_av_price_heston.cpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>asian/mc_discr_geom_av_price_heston.hpp</code></td><td class="size">11.2 KiB</td></tr>
+<tr><td><code>asian/mcdiscreteasianengine.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>asian/mcdiscreteasianenginebase.hpp</code></td><td class="size">7.9 KiB</td></tr>
+<tr><td><code>barrier/Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>barrier/all.hpp</code></td><td class="size">704 B</td></tr>
+<tr><td><code>barrier/analyticbarrierengine.cpp</code></td><td class="size">9.1 KiB</td></tr>
+<tr><td><code>barrier/analyticbarrierengine.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>barrier/analyticbinarybarrierengine.cpp</code></td><td class="size">11.2 KiB</td></tr>
+<tr><td><code>barrier/analyticbinarybarrierengine.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>barrier/binomialbarrierengine.hpp</code></td><td class="size">8.9 KiB</td></tr>
+<tr><td><code>barrier/discretizedbarrieroption.cpp</code></td><td class="size">8.6 KiB</td></tr>
+<tr><td><code>barrier/discretizedbarrieroption.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>barrier/fdblackscholesbarrierengine.cpp</code></td><td class="size">8.6 KiB</td></tr>
+<tr><td><code>barrier/fdblackscholesbarrierengine.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>barrier/fdblackscholesrebateengine.cpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>barrier/fdblackscholesrebateengine.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>barrier/fdhestonbarrierengine.cpp</code></td><td class="size">9.5 KiB</td></tr>
+<tr><td><code>barrier/fdhestonbarrierengine.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>barrier/fdhestonrebateengine.cpp</code></td><td class="size">6.6 KiB</td></tr>
+<tr><td><code>barrier/fdhestonrebateengine.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>barrier/mcbarrierengine.cpp</code></td><td class="size">9.0 KiB</td></tr>
+<tr><td><code>barrier/mcbarrierengine.hpp</code></td><td class="size">14.0 KiB</td></tr>
+<tr><td><code>basket/Makefile.am</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>basket/all.hpp</code></td><td class="size">423 B</td></tr>
+<tr><td><code>basket/fd2dblackscholesvanillaengine.cpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>basket/fd2dblackscholesvanillaengine.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>basket/kirkengine.cpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>basket/kirkengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>basket/mcamericanbasketengine.cpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>basket/mcamericanbasketengine.hpp</code></td><td class="size">12.0 KiB</td></tr>
+<tr><td><code>basket/mceuropeanbasketengine.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>basket/mceuropeanbasketengine.hpp</code></td><td class="size">11.7 KiB</td></tr>
+<tr><td><code>basket/stulzengine.cpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>basket/stulzengine.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>blackcalculator.cpp</code></td><td class="size">11.8 KiB</td></tr>
+<tr><td><code>blackcalculator.hpp</code></td><td class="size">4.7 KiB</td></tr>
+<tr><td><code>blackformula.cpp</code></td><td class="size">34.3 KiB</td></tr>
+<tr><td><code>blackformula.hpp</code></td><td class="size">18.8 KiB</td></tr>
+<tr><td><code>blackscholescalculator.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>blackscholescalculator.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>bond/Makefile.am</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>bond/all.hpp</code></td><td class="size">236 B</td></tr>
+<tr><td><code>bond/bondfunctions.cpp</code></td><td class="size">21.3 KiB</td></tr>
+<tr><td><code>bond/bondfunctions.hpp</code></td><td class="size">11.5 KiB</td></tr>
+<tr><td><code>bond/discountingbondengine.cpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>bond/discountingbondengine.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>capfloor/Makefile.am</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>capfloor/all.hpp</code></td><td class="size">567 B</td></tr>
+<tr><td><code>capfloor/analyticcapfloorengine.cpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>capfloor/analyticcapfloorengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>capfloor/bacheliercapfloorengine.cpp</code></td><td class="size">7.2 KiB</td></tr>
+<tr><td><code>capfloor/bacheliercapfloorengine.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>capfloor/blackcapfloorengine.cpp</code></td><td class="size">8.0 KiB</td></tr>
+<tr><td><code>capfloor/blackcapfloorengine.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>capfloor/discretizedcapfloor.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>capfloor/discretizedcapfloor.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>capfloor/gaussian1dcapfloorengine.cpp</code></td><td class="size">10.8 KiB</td></tr>
+<tr><td><code>capfloor/gaussian1dcapfloorengine.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>capfloor/mchullwhiteengine.cpp</code></td><td class="size">4.7 KiB</td></tr>
+<tr><td><code>capfloor/mchullwhiteengine.hpp</code></td><td class="size">9.7 KiB</td></tr>
+<tr><td><code>capfloor/treecapfloorengine.cpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>capfloor/treecapfloorengine.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>cliquet/Makefile.am</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>cliquet/all.hpp</code></td><td class="size">315 B</td></tr>
+<tr><td><code>cliquet/analyticcliquetengine.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>cliquet/analyticcliquetengine.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>cliquet/analyticperformanceengine.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>cliquet/analyticperformanceengine.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>cliquet/mcperformanceengine.cpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>cliquet/mcperformanceengine.hpp</code></td><td class="size">9.7 KiB</td></tr>
+<tr><td><code>credit/Makefile.am</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>credit/all.hpp</code></td><td class="size">294 B</td></tr>
+<tr><td><code>credit/integralcdsengine.cpp</code></td><td class="size">7.6 KiB</td></tr>
+<tr><td><code>credit/integralcdsengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>credit/isdacdsengine.cpp</code></td><td class="size">15.6 KiB</td></tr>
+<tr><td><code>credit/isdacdsengine.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>credit/midpointcdsengine.cpp</code></td><td class="size">7.4 KiB</td></tr>
+<tr><td><code>credit/midpointcdsengine.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>forward/Makefile.am</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>forward/all.hpp</code></td><td class="size">580 B</td></tr>
+<tr><td><code>forward/forwardengine.hpp</code></td><td class="size">7.2 KiB</td></tr>
+<tr><td><code>forward/forwardperformanceengine.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>forward/mcforwardeuropeanbsengine.cpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>forward/mcforwardeuropeanbsengine.hpp</code></td><td class="size">10.0 KiB</td></tr>
+<tr><td><code>forward/mcforwardeuropeanhestonengine.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>forward/mcforwardeuropeanhestonengine.hpp</code></td><td class="size">12.9 KiB</td></tr>
+<tr><td><code>forward/mcforwardvanillaengine.hpp</code></td><td class="size">7.3 KiB</td></tr>
+<tr><td><code>forward/mcvarianceswapengine.hpp</code></td><td class="size">12.8 KiB</td></tr>
+<tr><td><code>forward/replicatingvarianceswapengine.hpp</code></td><td class="size">8.5 KiB</td></tr>
+<tr><td><code>genericmodelengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>greeks.cpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>greeks.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>inflation/Makefile.am</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>inflation/all.hpp</code></td><td class="size">192 B</td></tr>
+<tr><td><code>inflation/inflationcapfloorengines.cpp</code></td><td class="size">7.9 KiB</td></tr>
+<tr><td><code>inflation/inflationcapfloorengines.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>latticeshortratemodelengine.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>lookback/Makefile.am</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>lookback/all.hpp</code></td><td class="size">499 B</td></tr>
+<tr><td><code>lookback/analyticcontinuousfixedlookback.cpp</code></td><td class="size">5.6 KiB</td></tr>
+<tr><td><code>lookback/analyticcontinuousfixedlookback.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>lookback/analyticcontinuousfloatinglookback.cpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>lookback/analyticcontinuousfloatinglookback.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>lookback/analyticcontinuouspartialfixedlookback.cpp</code></td><td class="size">6.3 KiB</td></tr>
+<tr><td><code>lookback/analyticcontinuouspartialfixedlookback.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>lookback/analyticcontinuouspartialfloatinglookback.cpp</code></td><td class="size">7.0 KiB</td></tr>
+<tr><td><code>lookback/analyticcontinuouspartialfloatinglookback.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>lookback/mclookbackengine.cpp</code></td><td class="size">9.1 KiB</td></tr>
+<tr><td><code>lookback/mclookbackengine.hpp</code></td><td class="size">11.5 KiB</td></tr>
+<tr><td><code>mclongstaffschwartzengine.hpp</code></td><td class="size">12.1 KiB</td></tr>
+<tr><td><code>mcsimulation.hpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>quanto/Makefile.am</code></td><td class="size">620 B</td></tr>
+<tr><td><code>quanto/all.hpp</code></td><td class="size">177 B</td></tr>
+<tr><td><code>quanto/quantoengine.hpp</code></td><td class="size">7.3 KiB</td></tr>
+<tr><td><code>swap/Makefile.am</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>swap/all.hpp</code></td><td class="size">343 B</td></tr>
+<tr><td><code>swap/cvaswapengine.cpp</code></td><td class="size">8.5 KiB</td></tr>
+<tr><td><code>swap/cvaswapengine.hpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>swap/discountingswapengine.cpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>swap/discountingswapengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>swap/discretizedswap.cpp</code></td><td class="size">6.6 KiB</td></tr>
+<tr><td><code>swap/discretizedswap.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>swap/treeswapengine.cpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>swap/treeswapengine.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>swaption/Makefile.am</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>swaption/all.hpp</code></td><td class="size">928 B</td></tr>
+<tr><td><code>swaption/basketgeneratingengine.cpp</code></td><td class="size">10.8 KiB</td></tr>
+<tr><td><code>swaption/basketgeneratingengine.hpp</code></td><td class="size">10.6 KiB</td></tr>
+<tr><td><code>swaption/blackswaptionengine.cpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>swaption/blackswaptionengine.hpp</code></td><td class="size">14.2 KiB</td></tr>
+<tr><td><code>swaption/discretizedswaption.cpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>swaption/discretizedswaption.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>swaption/fdg2swaptionengine.cpp</code></td><td class="size">4.9 KiB</td></tr>
+<tr><td><code>swaption/fdg2swaptionengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>swaption/fdhullwhiteswaptionengine.cpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>swaption/fdhullwhiteswaptionengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>swaption/g2swaptionengine.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>swaption/gaussian1dfloatfloatswaptionengine.cpp</code></td><td class="size">34.4 KiB</td></tr>
+<tr><td><code>swaption/gaussian1dfloatfloatswaptionengine.hpp</code></td><td class="size">6.3 KiB</td></tr>
+<tr><td><code>swaption/gaussian1djamshidianswaptionengine.cpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>swaption/gaussian1djamshidianswaptionengine.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>swaption/gaussian1dnonstandardswaptionengine.cpp</code></td><td class="size">23.7 KiB</td></tr>
+<tr><td><code>swaption/gaussian1dnonstandardswaptionengine.hpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>swaption/gaussian1dswaptionengine.cpp</code></td><td class="size">16.9 KiB</td></tr>
+<tr><td><code>swaption/gaussian1dswaptionengine.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>swaption/jamshidianswaptionengine.cpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>swaption/jamshidianswaptionengine.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>swaption/treeswaptionengine.cpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>swaption/treeswaptionengine.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>vanilla/Makefile.am</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>vanilla/all.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>vanilla/analyticbsmhullwhiteengine.cpp</code></td><td class="size">5.4 KiB</td></tr>
+<tr><td><code>vanilla/analyticbsmhullwhiteengine.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>vanilla/analyticcevengine.cpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>vanilla/analyticcevengine.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>vanilla/analyticdigitalamericanengine.cpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>vanilla/analyticdigitalamericanengine.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>vanilla/analyticdividendeuropeanengine.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>vanilla/analyticdividendeuropeanengine.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>vanilla/analyticeuropeanengine.cpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>vanilla/analyticeuropeanengine.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>vanilla/analyticeuropeanvasicekengine.cpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>vanilla/analyticeuropeanvasicekengine.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>vanilla/analyticgjrgarchengine.cpp</code></td><td class="size">12.8 KiB</td></tr>
+<tr><td><code>vanilla/analyticgjrgarchengine.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>vanilla/analytich1hwengine.cpp</code></td><td class="size">5.6 KiB</td></tr>
+<tr><td><code>vanilla/analytich1hwengine.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>vanilla/analytichestonengine.cpp</code></td><td class="size">33.0 KiB</td></tr>
+<tr><td><code>vanilla/analytichestonengine.hpp</code></td><td class="size">10.4 KiB</td></tr>
+<tr><td><code>vanilla/analytichestonhullwhiteengine.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>vanilla/analytichestonhullwhiteengine.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>vanilla/analyticptdhestonengine.cpp</code></td><td class="size">15.3 KiB</td></tr>
+<tr><td><code>vanilla/analyticptdhestonengine.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>vanilla/baroneadesiwhaleyengine.cpp</code></td><td class="size">10.6 KiB</td></tr>
+<tr><td><code>vanilla/baroneadesiwhaleyengine.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>vanilla/batesengine.cpp</code></td><td class="size">5.4 KiB</td></tr>
+<tr><td><code>vanilla/batesengine.hpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>vanilla/binomialengine.hpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>vanilla/bjerksundstenslandengine.cpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>vanilla/bjerksundstenslandengine.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>vanilla/coshestonengine.cpp</code></td><td class="size">11.2 KiB</td></tr>
+<tr><td><code>vanilla/coshestonengine.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>vanilla/discretizedvanillaoption.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>vanilla/discretizedvanillaoption.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>vanilla/exponentialfittinghestonengine.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>vanilla/fdbatesvanillaengine.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>vanilla/fdbatesvanillaengine.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>vanilla/fdblackscholesshoutengine.cpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>vanilla/fdblackscholesshoutengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>vanilla/fdblackscholesvanillaengine.cpp</code></td><td class="size">9.5 KiB</td></tr>
+<tr><td><code>vanilla/fdblackscholesvanillaengine.hpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>vanilla/fdcevvanillaengine.cpp</code></td><td class="size">6.8 KiB</td></tr>
+<tr><td><code>vanilla/fdcevvanillaengine.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>vanilla/fdcirvanillaengine.cpp</code></td><td class="size">6.5 KiB</td></tr>
+<tr><td><code>vanilla/fdcirvanillaengine.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>vanilla/fdconditions.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>vanilla/fddividendengine.hpp</code></td><td class="size">9.5 KiB</td></tr>
+<tr><td><code>vanilla/fddividendshoutengine.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>vanilla/fdhestonhullwhitevanillaengine.cpp</code></td><td class="size">10.5 KiB</td></tr>
+<tr><td><code>vanilla/fdhestonhullwhitevanillaengine.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>vanilla/fdhestonvanillaengine.cpp</code></td><td class="size">11.9 KiB</td></tr>
+<tr><td><code>vanilla/fdhestonvanillaengine.hpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>vanilla/fdmultiperiodengine.hpp</code></td><td class="size">7.4 KiB</td></tr>
+<tr><td><code>vanilla/fdsabrvanillaengine.cpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>vanilla/fdsabrvanillaengine.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>vanilla/fdshoutengine.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>vanilla/fdsimplebsswingengine.cpp</code></td><td class="size">4.9 KiB</td></tr>
+<tr><td><code>vanilla/fdsimplebsswingengine.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>vanilla/fdstepconditionengine.hpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>vanilla/fdvanillaengine.cpp</code></td><td class="size">5.9 KiB</td></tr>
+<tr><td><code>vanilla/fdvanillaengine.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>vanilla/hestonexpansionengine.hpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>vanilla/integralengine.cpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>vanilla/integralengine.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>vanilla/jumpdiffusionengine.cpp</code></td><td class="size">7.8 KiB</td></tr>
+<tr><td><code>vanilla/jumpdiffusionengine.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>vanilla/juquadraticengine.cpp</code></td><td class="size">8.4 KiB</td></tr>
+<tr><td><code>vanilla/juquadraticengine.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>vanilla/mcamericanengine.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>vanilla/mcamericanengine.hpp</code></td><td class="size">16.1 KiB</td></tr>
+<tr><td><code>vanilla/mcdigitalengine.cpp</code></td><td class="size">4.7 KiB</td></tr>
+<tr><td><code>vanilla/mcdigitalengine.hpp</code></td><td class="size">10.5 KiB</td></tr>
+<tr><td><code>vanilla/mceuropeanengine.hpp</code></td><td class="size">9.5 KiB</td></tr>
+<tr><td><code>vanilla/mceuropeangjrgarchengine.hpp</code></td><td class="size">9.1 KiB</td></tr>
+<tr><td><code>vanilla/mceuropeanhestonengine.hpp</code></td><td class="size">9.2 KiB</td></tr>
+<tr><td><code>vanilla/mchestonhullwhiteengine.cpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>vanilla/mchestonhullwhiteengine.hpp</code></td><td class="size">12.0 KiB</td></tr>
+<tr><td><code>vanilla/mcvanillaengine.hpp</code></td><td class="size">6.7 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (2)</h2>
+  <details open><summary>2 files skipped</summary><table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody><tr><td><code>vanilla/exponentialfittinghestonengine.cpp</code></td><td class="size">367.6 KiB</td><td>Exceeds 48.8 KiB</td></tr>
+<tr><td><code>vanilla/hestonexpansionengine.cpp</code></td><td class="size">99.8 KiB</td><td>Exceeds 48.8 KiB</td></tr></tbody></table></details>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>48.8 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>

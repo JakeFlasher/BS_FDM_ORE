@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – processes</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/processes</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened/processes.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">42</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">42</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">188.5 KiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">188.5 KiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>processes
+├── all.hpp
+├── batesprocess.cpp
+├── batesprocess.hpp
+├── blackscholesprocess.cpp
+├── blackscholesprocess.hpp
+├── coxingersollrossprocess.cpp
+├── coxingersollrossprocess.hpp
+├── endeulerdiscretization.cpp
+├── endeulerdiscretization.hpp
+├── eulerdiscretization.cpp
+├── eulerdiscretization.hpp
+├── forwardmeasureprocess.cpp
+├── forwardmeasureprocess.hpp
+├── g2process.cpp
+├── g2process.hpp
+├── geometricbrownianprocess.cpp
+├── geometricbrownianprocess.hpp
+├── gjrgarchprocess.cpp
+├── gjrgarchprocess.hpp
+├── gsrprocess.cpp
+├── gsrprocess.hpp
+├── gsrprocesscore.cpp
+├── gsrprocesscore.hpp
+├── hestonprocess.cpp
+├── hestonprocess.hpp
+├── hullwhiteprocess.cpp
+├── hullwhiteprocess.hpp
+├── hybridhestonhullwhiteprocess.cpp
+├── hybridhestonhullwhiteprocess.hpp
+├── jointstochasticprocess.cpp
+├── jointstochasticprocess.hpp
+├── Makefile.am
+├── merton76process.cpp
+├── merton76process.hpp
+├── mfstateprocess.cpp
+├── mfstateprocess.hpp
+├── ornsteinuhlenbeckprocess.cpp
+├── ornsteinuhlenbeckprocess.hpp
+├── squarerootprocess.cpp
+├── squarerootprocess.hpp
+├── stochasticprocessarray.cpp
+└── stochasticprocessarray.hpp</pre>
+
+  <h2>✅ Rendered Files (42)</h2>
+  <details open><summary>42 files · 188.5 KiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>all.hpp</code></td><td class="size">1.0 KiB</td></tr>
+<tr><td><code>batesprocess.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>batesprocess.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>blackscholesprocess.cpp</code></td><td class="size">11.3 KiB</td></tr>
+<tr><td><code>blackscholesprocess.hpp</code></td><td class="size">8.2 KiB</td></tr>
+<tr><td><code>coxingersollrossprocess.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>coxingersollrossprocess.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>endeulerdiscretization.cpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>endeulerdiscretization.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>eulerdiscretization.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>eulerdiscretization.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>forwardmeasureprocess.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>forwardmeasureprocess.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>g2process.cpp</code></td><td class="size">7.7 KiB</td></tr>
+<tr><td><code>g2process.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>geometricbrownianprocess.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>geometricbrownianprocess.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>gjrgarchprocess.cpp</code></td><td class="size">9.1 KiB</td></tr>
+<tr><td><code>gjrgarchprocess.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>gsrprocess.cpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>gsrprocess.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>gsrprocesscore.cpp</code></td><td class="size">13.0 KiB</td></tr>
+<tr><td><code>gsrprocesscore.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>hestonprocess.cpp</code></td><td class="size">24.5 KiB</td></tr>
+<tr><td><code>hestonprocess.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>hullwhiteprocess.cpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>hullwhiteprocess.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>hybridhestonhullwhiteprocess.cpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>hybridhestonhullwhiteprocess.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>jointstochasticprocess.cpp</code></td><td class="size">10.2 KiB</td></tr>
+<tr><td><code>jointstochasticprocess.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>merton76process.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>merton76process.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>mfstateprocess.cpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>mfstateprocess.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>ornsteinuhlenbeckprocess.cpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>ornsteinuhlenbeckprocess.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>squarerootprocess.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>squarerootprocess.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>stochasticprocessarray.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>stochasticprocessarray.hpp</code></td><td class="size">2.4 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (0)</h2>
+  <p>No files were skipped.</p>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>48.8 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>

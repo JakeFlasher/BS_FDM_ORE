@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – time</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/time</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened/time.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">133</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">132</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">1</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">602.5 KiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">605.0 KiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>time
+├── calendars
+│   ├── all.hpp
+│   ├── argentina.cpp
+│   ├── argentina.hpp
+│   ├── australia.cpp
+│   ├── australia.hpp
+│   ├── austria.cpp
+│   ├── austria.hpp
+│   ├── bespokecalendar.cpp
+│   ├── bespokecalendar.hpp
+│   ├── botswana.cpp
+│   ├── botswana.hpp
+│   ├── brazil.cpp
+│   ├── brazil.hpp
+│   ├── canada.cpp
+│   ├── canada.hpp
+│   ├── china.cpp
+│   ├── china.hpp
+│   ├── czechrepublic.cpp
+│   ├── czechrepublic.hpp
+│   ├── denmark.cpp
+│   ├── denmark.hpp
+│   ├── finland.cpp
+│   ├── finland.hpp
+│   ├── france.cpp
+│   ├── france.hpp
+│   ├── germany.cpp
+│   ├── germany.hpp
+│   ├── hongkong.cpp
+│   ├── hongkong.hpp
+│   ├── hungary.cpp
+│   ├── hungary.hpp
+│   ├── iceland.cpp
+│   ├── iceland.hpp
+│   ├── india.cpp
+│   ├── india.hpp
+│   ├── indonesia.cpp
+│   ├── indonesia.hpp
+│   ├── israel.cpp
+│   ├── israel.hpp
+│   ├── italy.cpp
+│   ├── italy.hpp
+│   ├── japan.cpp
+│   ├── japan.hpp
+│   ├── jointcalendar.cpp
+│   ├── jointcalendar.hpp
+│   ├── Makefile.am
+│   ├── mexico.cpp
+│   ├── mexico.hpp
+│   ├── newzealand.cpp
+│   ├── newzealand.hpp
+│   ├── norway.cpp
+│   ├── norway.hpp
+│   ├── nullcalendar.hpp
+│   ├── poland.cpp
+│   ├── poland.hpp
+│   ├── romania.cpp
+│   ├── romania.hpp
+│   ├── russia.cpp
+│   ├── russia.hpp
+│   ├── saudiarabia.cpp
+│   ├── saudiarabia.hpp
+│   ├── singapore.cpp
+│   ├── singapore.hpp
+│   ├── slovakia.cpp
+│   ├── slovakia.hpp
+│   ├── southafrica.cpp
+│   ├── southafrica.hpp
+│   ├── southkorea.cpp
+│   ├── southkorea.hpp
+│   ├── sweden.cpp
+│   ├── sweden.hpp
+│   ├── switzerland.cpp
+│   ├── switzerland.hpp
+│   ├── taiwan.cpp
+│   ├── taiwan.hpp
+│   ├── target.cpp
+│   ├── target.hpp
+│   ├── thailand.cpp
+│   ├── thailand.hpp
+│   ├── turkey.cpp
+│   ├── turkey.hpp
+│   ├── ukraine.cpp
+│   ├── ukraine.hpp
+│   ├── unitedkingdom.cpp
+│   ├── unitedkingdom.hpp
+│   ├── unitedstates.cpp
+│   ├── unitedstates.hpp
+│   ├── weekendsonly.cpp
+│   └── weekendsonly.hpp
+├── daycounters
+│   ├── actual360.hpp
+│   ├── actual364.hpp
+│   ├── actual365fixed.cpp
+│   ├── actual365fixed.hpp
+│   ├── actualactual.cpp
+│   ├── actualactual.hpp
+│   ├── all.hpp
+│   ├── business252.cpp
+│   ├── business252.hpp
+│   ├── Makefile.am
+│   ├── one.hpp
+│   ├── simpledaycounter.cpp
+│   ├── simpledaycounter.hpp
+│   ├── thirty360.cpp
+│   ├── thirty360.hpp
+│   ├── thirty365.cpp
+│   └── thirty365.hpp
+├── all.hpp
+├── asx.cpp
+├── asx.hpp
+├── businessdayconvention.cpp
+├── businessdayconvention.hpp
+├── calendar.cpp
+├── calendar.hpp
+├── date.cpp
+├── date.hpp
+├── dategenerationrule.cpp
+├── dategenerationrule.hpp
+├── daycounter.hpp
+├── ecb.cpp
+├── ecb.hpp
+├── frequency.cpp
+├── frequency.hpp
+├── imm.cpp
+├── imm.hpp
+├── Makefile.am
+├── period.cpp
+├── period.hpp
+├── schedule.cpp
+├── schedule.hpp
+├── timeunit.cpp
+├── timeunit.hpp
+├── weekday.cpp
+└── weekday.hpp</pre>
+
+  <h2>✅ Rendered Files (132)</h2>
+  <details open><summary>132 files · 602.5 KiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>all.hpp</code></td><td class="size">620 B</td></tr>
+<tr><td><code>asx.cpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>asx.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>businessdayconvention.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>businessdayconvention.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>calendar.cpp</code></td><td class="size">12.2 KiB</td></tr>
+<tr><td><code>calendar.hpp</code></td><td class="size">9.5 KiB</td></tr>
+<tr><td><code>calendars/Makefile.am</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>calendars/all.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>calendars/argentina.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>calendars/australia.cpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>calendars/australia.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>calendars/austria.cpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>calendars/austria.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>calendars/bespokecalendar.cpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>calendars/bespokecalendar.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/botswana.cpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>calendars/botswana.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>calendars/brazil.cpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>calendars/brazil.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>calendars/canada.cpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>calendars/canada.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>calendars/china.cpp</code></td><td class="size">13.5 KiB</td></tr>
+<tr><td><code>calendars/china.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>calendars/czechrepublic.cpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>calendars/czechrepublic.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>calendars/denmark.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>calendars/denmark.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>calendars/finland.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/finland.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>calendars/france.cpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>calendars/france.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>calendars/germany.cpp</code></td><td class="size">6.5 KiB</td></tr>
+<tr><td><code>calendars/germany.hpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>calendars/hongkong.cpp</code></td><td class="size">11.4 KiB</td></tr>
+<tr><td><code>calendars/hongkong.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>calendars/hungary.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/hungary.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>calendars/iceland.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/iceland.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>calendars/india.cpp</code></td><td class="size">11.5 KiB</td></tr>
+<tr><td><code>calendars/india.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>calendars/indonesia.cpp</code></td><td class="size">9.7 KiB</td></tr>
+<tr><td><code>calendars/indonesia.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>calendars/israel.cpp</code></td><td class="size">20.1 KiB</td></tr>
+<tr><td><code>calendars/israel.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>calendars/italy.cpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>calendars/italy.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>calendars/japan.cpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>calendars/japan.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>calendars/jointcalendar.cpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>calendars/jointcalendar.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>calendars/mexico.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>calendars/mexico.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/newzealand.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>calendars/newzealand.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>calendars/norway.cpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>calendars/norway.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>calendars/nullcalendar.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>calendars/poland.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/poland.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>calendars/romania.cpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>calendars/romania.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>calendars/russia.cpp</code></td><td class="size">9.3 KiB</td></tr>
+<tr><td><code>calendars/russia.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>calendars/saudiarabia.cpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>calendars/saudiarabia.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>calendars/singapore.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>calendars/singapore.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/slovakia.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>calendars/slovakia.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>calendars/southafrica.cpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>calendars/southafrica.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>calendars/southkorea.cpp</code></td><td class="size">11.1 KiB</td></tr>
+<tr><td><code>calendars/southkorea.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>calendars/sweden.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>calendars/sweden.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>calendars/switzerland.cpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>calendars/switzerland.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>calendars/taiwan.cpp</code></td><td class="size">11.6 KiB</td></tr>
+<tr><td><code>calendars/taiwan.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/target.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>calendars/target.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>calendars/thailand.cpp</code></td><td class="size">10.8 KiB</td></tr>
+<tr><td><code>calendars/thailand.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>calendars/turkey.cpp</code></td><td class="size">8.0 KiB</td></tr>
+<tr><td><code>calendars/turkey.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/ukraine.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>calendars/ukraine.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>calendars/unitedkingdom.cpp</code></td><td class="size">6.3 KiB</td></tr>
+<tr><td><code>calendars/unitedkingdom.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>calendars/unitedstates.cpp</code></td><td class="size">15.9 KiB</td></tr>
+<tr><td><code>calendars/unitedstates.hpp</code></td><td class="size">7.5 KiB</td></tr>
+<tr><td><code>calendars/weekendsonly.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>calendars/weekendsonly.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>date.cpp</code></td><td class="size">34.5 KiB</td></tr>
+<tr><td><code>date.hpp</code></td><td class="size">14.0 KiB</td></tr>
+<tr><td><code>dategenerationrule.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>dategenerationrule.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>daycounter.hpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>daycounters/Makefile.am</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>daycounters/actual360.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>daycounters/actual364.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>daycounters/actual365fixed.cpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>daycounters/actual365fixed.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>daycounters/actualactual.cpp</code></td><td class="size">12.9 KiB</td></tr>
+<tr><td><code>daycounters/actualactual.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>daycounters/all.hpp</code></td><td class="size">540 B</td></tr>
+<tr><td><code>daycounters/business252.cpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>daycounters/business252.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>daycounters/one.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>daycounters/simpledaycounter.cpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>daycounters/simpledaycounter.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>daycounters/thirty360.cpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>daycounters/thirty360.hpp</code></td><td class="size">6.3 KiB</td></tr>
+<tr><td><code>daycounters/thirty365.cpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>daycounters/thirty365.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ecb.cpp</code></td><td class="size">10.3 KiB</td></tr>
+<tr><td><code>ecb.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>frequency.cpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>frequency.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>imm.cpp</code></td><td class="size">6.8 KiB</td></tr>
+<tr><td><code>imm.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>period.cpp</code></td><td class="size">14.3 KiB</td></tr>
+<tr><td><code>period.hpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>schedule.cpp</code></td><td class="size">26.0 KiB</td></tr>
+<tr><td><code>schedule.hpp</code></td><td class="size">8.1 KiB</td></tr>
+<tr><td><code>timeunit.cpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>timeunit.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>weekday.cpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>weekday.hpp</code></td><td class="size">3.0 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (1)</h2>
+  <details open><summary>1 files skipped</summary><table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody><tr><td><code>calendars/argentina.cpp</code></td><td class="size">2.5 KiB</td><td>Binary file</td></tr></tbody></table></details>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>48.8 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>

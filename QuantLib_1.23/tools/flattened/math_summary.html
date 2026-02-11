@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – math</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/math</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened/math.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">271</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">268</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">3</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">1.1 MiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">9.2 MiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>math
+├── copulas
+│   ├── alimikhailhaqcopula.cpp
+│   ├── alimikhailhaqcopula.hpp
+│   ├── all.hpp
+│   ├── claytoncopula.cpp
+│   ├── claytoncopula.hpp
+│   ├── farliegumbelmorgensterncopula.cpp
+│   ├── farliegumbelmorgensterncopula.hpp
+│   ├── frankcopula.cpp
+│   ├── frankcopula.hpp
+│   ├── galamboscopula.cpp
+│   ├── galamboscopula.hpp
+│   ├── gaussiancopula.cpp
+│   ├── gaussiancopula.hpp
+│   ├── gumbelcopula.cpp
+│   ├── gumbelcopula.hpp
+│   ├── huslerreisscopula.cpp
+│   ├── huslerreisscopula.hpp
+│   ├── independentcopula.cpp
+│   ├── independentcopula.hpp
+│   ├── Makefile.am
+│   ├── marshallolkincopula.cpp
+│   ├── marshallolkincopula.hpp
+│   ├── maxcopula.cpp
+│   ├── maxcopula.hpp
+│   ├── mincopula.cpp
+│   ├── mincopula.hpp
+│   ├── plackettcopula.cpp
+│   └── plackettcopula.hpp
+├── distributions
+│   ├── all.hpp
+│   ├── binomialdistribution.hpp
+│   ├── bivariatenormaldistribution.cpp
+│   ├── bivariatenormaldistribution.hpp
+│   ├── bivariatestudenttdistribution.cpp
+│   ├── bivariatestudenttdistribution.hpp
+│   ├── chisquaredistribution.cpp
+│   ├── chisquaredistribution.hpp
+│   ├── gammadistribution.cpp
+│   ├── gammadistribution.hpp
+│   ├── Makefile.am
+│   ├── normaldistribution.cpp
+│   ├── normaldistribution.hpp
+│   ├── poissondistribution.hpp
+│   ├── studenttdistribution.cpp
+│   └── studenttdistribution.hpp
+├── integrals
+│   ├── all.hpp
+│   ├── discreteintegrals.cpp
+│   ├── discreteintegrals.hpp
+│   ├── exponentialintegrals.cpp
+│   ├── exponentialintegrals.hpp
+│   ├── filonintegral.cpp
+│   ├── filonintegral.hpp
+│   ├── gaussianorthogonalpolynomial.cpp
+│   ├── gaussianorthogonalpolynomial.hpp
+│   ├── gaussianquadratures.cpp
+│   ├── gaussianquadratures.hpp
+│   ├── gausslaguerrecosinepolynomial.hpp
+│   ├── gausslobattointegral.cpp
+│   ├── gausslobattointegral.hpp
+│   ├── integral.cpp
+│   ├── integral.hpp
+│   ├── kronrodintegral.cpp
+│   ├── kronrodintegral.hpp
+│   ├── Makefile.am
+│   ├── momentbasedgaussianpolynomial.hpp
+│   ├── segmentintegral.cpp
+│   ├── segmentintegral.hpp
+│   ├── simpsonintegral.hpp
+│   ├── trapezoidintegral.hpp
+│   └── twodimensionalintegral.hpp
+├── interpolations
+│   ├── abcdinterpolation.hpp
+│   ├── all.hpp
+│   ├── backwardflatinterpolation.hpp
+│   ├── backwardflatlinearinterpolation.hpp
+│   ├── bicubicsplineinterpolation.hpp
+│   ├── bilinearinterpolation.hpp
+│   ├── convexmonotoneinterpolation.hpp
+│   ├── cubicinterpolation.hpp
+│   ├── extrapolation.hpp
+│   ├── flatextrapolation2d.hpp
+│   ├── forwardflatinterpolation.hpp
+│   ├── interpolation2d.hpp
+│   ├── kernelinterpolation.hpp
+│   ├── kernelinterpolation2d.hpp
+│   ├── lagrangeinterpolation.hpp
+│   ├── linearinterpolation.hpp
+│   ├── loginterpolation.hpp
+│   ├── Makefile.am
+│   ├── mixedinterpolation.hpp
+│   ├── multicubicspline.hpp
+│   ├── sabrinterpolation.hpp
+│   └── xabrinterpolation.hpp
+├── matrixutilities
+│   ├── all.hpp
+│   ├── basisincompleteordered.cpp
+│   ├── basisincompleteordered.hpp
+│   ├── bicgstab.cpp
+│   ├── bicgstab.hpp
+│   ├── choleskydecomposition.cpp
+│   ├── choleskydecomposition.hpp
+│   ├── factorreduction.cpp
+│   ├── factorreduction.hpp
+│   ├── getcovariance.cpp
+│   ├── getcovariance.hpp
+│   ├── gmres.cpp
+│   ├── gmres.hpp
+│   ├── Makefile.am
+│   ├── pseudosqrt.cpp
+│   ├── pseudosqrt.hpp
+│   ├── qrdecomposition.cpp
+│   ├── qrdecomposition.hpp
+│   ├── sparseilupreconditioner.cpp
+│   ├── sparseilupreconditioner.hpp
+│   ├── sparsematrix.hpp
+│   ├── svd.cpp
+│   ├── svd.hpp
+│   ├── symmetricschurdecomposition.cpp
+│   ├── symmetricschurdecomposition.hpp
+│   ├── tapcorrelations.cpp
+│   ├── tapcorrelations.hpp
+│   ├── tqreigendecomposition.cpp
+│   └── tqreigendecomposition.hpp
+├── ode
+│   ├── adaptiverungekutta.hpp
+│   ├── all.hpp
+│   └── Makefile.am
+├── optimization
+│   ├── all.hpp
+│   ├── armijo.cpp
+│   ├── armijo.hpp
+│   ├── bfgs.cpp
+│   ├── bfgs.hpp
+│   ├── conjugategradient.cpp
+│   ├── conjugategradient.hpp
+│   ├── constraint.cpp
+│   ├── constraint.hpp
+│   ├── costfunction.hpp
+│   ├── differentialevolution.cpp
+│   ├── differentialevolution.hpp
+│   ├── endcriteria.cpp
+│   ├── endcriteria.hpp
+│   ├── goldstein.cpp
+│   ├── goldstein.hpp
+│   ├── leastsquare.cpp
+│   ├── leastsquare.hpp
+│   ├── levenbergmarquardt.cpp
+│   ├── levenbergmarquardt.hpp
+│   ├── linesearch.cpp
+│   ├── linesearch.hpp
+│   ├── linesearchbasedmethod.cpp
+│   ├── linesearchbasedmethod.hpp
+│   ├── lmdif.cpp
+│   ├── lmdif.hpp
+│   ├── Makefile.am
+│   ├── method.hpp
+│   ├── problem.hpp
+│   ├── projectedconstraint.hpp
+│   ├── projectedcostfunction.cpp
+│   ├── projectedcostfunction.hpp
+│   ├── projection.cpp
+│   ├── projection.hpp
+│   ├── simplex.cpp
+│   ├── simplex.hpp
+│   ├── simulatedannealing.hpp
+│   ├── spherecylinder.cpp
+│   ├── spherecylinder.hpp
+│   ├── steepestdescent.cpp
+│   └── steepestdescent.hpp
+├── randomnumbers
+│   ├── all.hpp
+│   ├── boxmullergaussianrng.hpp
+│   ├── centrallimitgaussianrng.hpp
+│   ├── faurersg.cpp
+│   ├── faurersg.hpp
+│   ├── haltonrsg.cpp
+│   ├── haltonrsg.hpp
+│   ├── inversecumulativerng.hpp
+│   ├── inversecumulativersg.hpp
+│   ├── knuthuniformrng.cpp
+│   ├── knuthuniformrng.hpp
+│   ├── latticersg.cpp
+│   ├── latticersg.hpp
+│   ├── latticerules.cpp
+│   ├── latticerules.hpp
+│   ├── lecuyeruniformrng.cpp
+│   ├── lecuyeruniformrng.hpp
+│   ├── Makefile.am
+│   ├── mt19937uniformrng.cpp
+│   ├── mt19937uniformrng.hpp
+│   ├── primitivepolynomials.cpp
+│   ├── primitivepolynomials.hpp
+│   ├── randomizedlds.hpp
+│   ├── randomsequencegenerator.hpp
+│   ├── ranluxuniformrng.hpp
+│   ├── rngtraits.hpp
+│   ├── seedgenerator.cpp
+│   ├── seedgenerator.hpp
+│   ├── sobolbrownianbridgersg.cpp
+│   ├── sobolbrownianbridgersg.hpp
+│   ├── sobolrsg.cpp
+│   ├── sobolrsg.hpp
+│   ├── stochasticcollocationinvcdf.cpp
+│   └── stochasticcollocationinvcdf.hpp
+├── solvers1d
+│   ├── all.hpp
+│   ├── bisection.hpp
+│   ├── brent.hpp
+│   ├── falseposition.hpp
+│   ├── finitedifferencenewtonsafe.hpp
+│   ├── Makefile.am
+│   ├── newton.hpp
+│   ├── newtonsafe.hpp
+│   ├── ridder.hpp
+│   └── secant.hpp
+├── statistics
+│   ├── all.hpp
+│   ├── convergencestatistics.hpp
+│   ├── discrepancystatistics.cpp
+│   ├── discrepancystatistics.hpp
+│   ├── gaussianstatistics.hpp
+│   ├── generalstatistics.cpp
+│   ├── generalstatistics.hpp
+│   ├── histogram.cpp
+│   ├── histogram.hpp
+│   ├── incrementalstatistics.cpp
+│   ├── incrementalstatistics.hpp
+│   ├── Makefile.am
+│   ├── riskstatistics.hpp
+│   ├── sequencestatistics.hpp
+│   └── statistics.hpp
+├── abcdmathfunction.cpp
+├── abcdmathfunction.hpp
+├── all.hpp
+├── array.hpp
+├── autocovariance.hpp
+├── bernsteinpolynomial.cpp
+├── bernsteinpolynomial.hpp
+├── beta.cpp
+├── beta.hpp
+├── bspline.cpp
+├── bspline.hpp
+├── comparison.hpp
+├── curve.hpp
+├── errorfunction.cpp
+├── errorfunction.hpp
+├── factorial.cpp
+├── factorial.hpp
+├── fastfouriertransform.hpp
+├── functional.hpp
+├── generallinearleastsquares.hpp
+├── incompletegamma.cpp
+├── incompletegamma.hpp
+├── initializers.hpp
+├── interpolation.hpp
+├── kernelfunctions.hpp
+├── lexicographicalview.hpp
+├── linearleastsquaresregression.hpp
+├── Makefile.am
+├── matrix.cpp
+├── matrix.hpp
+├── modifiedbessel.cpp
+├── modifiedbessel.hpp
+├── pascaltriangle.cpp
+├── pascaltriangle.hpp
+├── polynomialmathfunction.cpp
+├── polynomialmathfunction.hpp
+├── primenumbers.cpp
+├── primenumbers.hpp
+├── quadratic.cpp
+├── quadratic.hpp
+├── richardsonextrapolation.cpp
+├── richardsonextrapolation.hpp
+├── rounding.cpp
+├── rounding.hpp
+├── sampledcurve.cpp
+├── sampledcurve.hpp
+├── solver1d.hpp
+└── transformedgrid.hpp</pre>
+
+  <h2>✅ Rendered Files (268)</h2>
+  <details open><summary>268 files · 1.1 MiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>abcdmathfunction.cpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>abcdmathfunction.hpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>all.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>array.hpp</code></td><td class="size">21.5 KiB</td></tr>
+<tr><td><code>autocovariance.hpp</code></td><td class="size">7.3 KiB</td></tr>
+<tr><td><code>bernsteinpolynomial.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>bernsteinpolynomial.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>beta.cpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>beta.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>bspline.cpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>bspline.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>comparison.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>copulas/Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>copulas/alimikhailhaqcopula.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>copulas/alimikhailhaqcopula.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>copulas/all.hpp</code></td><td class="size">737 B</td></tr>
+<tr><td><code>copulas/claytoncopula.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>copulas/claytoncopula.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>copulas/farliegumbelmorgensterncopula.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>copulas/farliegumbelmorgensterncopula.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>copulas/frankcopula.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>copulas/frankcopula.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>copulas/galamboscopula.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>copulas/galamboscopula.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>copulas/gaussiancopula.cpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>copulas/gaussiancopula.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>copulas/gumbelcopula.cpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>copulas/gumbelcopula.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>copulas/huslerreisscopula.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>copulas/huslerreisscopula.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>copulas/independentcopula.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>copulas/independentcopula.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>copulas/marshallolkincopula.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>copulas/marshallolkincopula.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>copulas/maxcopula.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>copulas/maxcopula.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>copulas/mincopula.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>copulas/mincopula.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>copulas/plackettcopula.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>copulas/plackettcopula.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>curve.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>distributions/Makefile.am</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>distributions/all.hpp</code></td><td class="size">599 B</td></tr>
+<tr><td><code>distributions/binomialdistribution.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>distributions/bivariatenormaldistribution.cpp</code></td><td class="size">8.7 KiB</td></tr>
+<tr><td><code>distributions/bivariatenormaldistribution.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>distributions/bivariatestudenttdistribution.cpp</code></td><td class="size">6.7 KiB</td></tr>
+<tr><td><code>distributions/bivariatestudenttdistribution.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>distributions/chisquaredistribution.cpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>distributions/chisquaredistribution.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>distributions/gammadistribution.cpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>distributions/gammadistribution.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>distributions/normaldistribution.cpp</code></td><td class="size">8.1 KiB</td></tr>
+<tr><td><code>distributions/normaldistribution.hpp</code></td><td class="size">11.6 KiB</td></tr>
+<tr><td><code>distributions/poissondistribution.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>distributions/studenttdistribution.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>distributions/studenttdistribution.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>errorfunction.cpp</code></td><td class="size">11.5 KiB</td></tr>
+<tr><td><code>errorfunction.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>factorial.cpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>factorial.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>fastfouriertransform.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>functional.hpp</code></td><td class="size">7.3 KiB</td></tr>
+<tr><td><code>generallinearleastsquares.hpp</code></td><td class="size">5.6 KiB</td></tr>
+<tr><td><code>incompletegamma.cpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>incompletegamma.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>initializers.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>integrals/Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>integrals/all.hpp</code></td><td class="size">867 B</td></tr>
+<tr><td><code>integrals/discreteintegrals.cpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>integrals/discreteintegrals.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>integrals/exponentialintegrals.cpp</code></td><td class="size">6.8 KiB</td></tr>
+<tr><td><code>integrals/exponentialintegrals.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>integrals/filonintegral.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>integrals/filonintegral.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>integrals/gaussianorthogonalpolynomial.cpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>integrals/gaussianorthogonalpolynomial.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>integrals/gaussianquadratures.cpp</code></td><td class="size">6.0 KiB</td></tr>
+<tr><td><code>integrals/gaussianquadratures.hpp</code></td><td class="size">7.7 KiB</td></tr>
+<tr><td><code>integrals/gausslaguerrecosinepolynomial.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>integrals/gausslobattointegral.cpp</code></td><td class="size">5.9 KiB</td></tr>
+<tr><td><code>integrals/gausslobattointegral.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>integrals/integral.cpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>integrals/integral.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>integrals/kronrodintegral.cpp</code></td><td class="size">16.5 KiB</td></tr>
+<tr><td><code>integrals/kronrodintegral.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>integrals/momentbasedgaussianpolynomial.hpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>integrals/segmentintegral.cpp</code></td><td class="size">1.0 KiB</td></tr>
+<tr><td><code>integrals/segmentintegral.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>integrals/simpsonintegral.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>integrals/trapezoidintegral.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>integrals/twodimensionalintegral.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>interpolation.hpp</code></td><td class="size">6.4 KiB</td></tr>
+<tr><td><code>interpolations/Makefile.am</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>interpolations/abcdinterpolation.hpp</code></td><td class="size">10.4 KiB</td></tr>
+<tr><td><code>interpolations/all.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>interpolations/backwardflatinterpolation.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>interpolations/backwardflatlinearinterpolation.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>interpolations/bicubicsplineinterpolation.hpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>interpolations/bilinearinterpolation.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>interpolations/convexmonotoneinterpolation.hpp</code></td><td class="size">39.4 KiB</td></tr>
+<tr><td><code>interpolations/cubicinterpolation.hpp</code></td><td class="size">37.8 KiB</td></tr>
+<tr><td><code>interpolations/extrapolation.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>interpolations/flatextrapolation2d.hpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>interpolations/forwardflatinterpolation.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>interpolations/interpolation2d.hpp</code></td><td class="size">7.5 KiB</td></tr>
+<tr><td><code>interpolations/kernelinterpolation.hpp</code></td><td class="size">5.8 KiB</td></tr>
+<tr><td><code>interpolations/kernelinterpolation2d.hpp</code></td><td class="size">7.3 KiB</td></tr>
+<tr><td><code>interpolations/lagrangeinterpolation.hpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>interpolations/linearinterpolation.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>interpolations/loginterpolation.hpp</code></td><td class="size">17.4 KiB</td></tr>
+<tr><td><code>interpolations/mixedinterpolation.hpp</code></td><td class="size">13.5 KiB</td></tr>
+<tr><td><code>interpolations/multicubicspline.hpp</code></td><td class="size">21.9 KiB</td></tr>
+<tr><td><code>interpolations/sabrinterpolation.hpp</code></td><td class="size">10.2 KiB</td></tr>
+<tr><td><code>interpolations/xabrinterpolation.hpp</code></td><td class="size">12.8 KiB</td></tr>
+<tr><td><code>kernelfunctions.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>lexicographicalview.hpp</code></td><td class="size">6.0 KiB</td></tr>
+<tr><td><code>linearleastsquaresregression.hpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>matrix.cpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>matrix.hpp</code></td><td class="size">22.0 KiB</td></tr>
+<tr><td><code>matrixutilities/Makefile.am</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>matrixutilities/all.hpp</code></td><td class="size">894 B</td></tr>
+<tr><td><code>matrixutilities/basisincompleteordered.cpp</code></td><td class="size">7.1 KiB</td></tr>
+<tr><td><code>matrixutilities/basisincompleteordered.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>matrixutilities/bicgstab.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>matrixutilities/bicgstab.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>matrixutilities/choleskydecomposition.cpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>matrixutilities/choleskydecomposition.hpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>matrixutilities/factorreduction.cpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>matrixutilities/factorreduction.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>matrixutilities/getcovariance.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>matrixutilities/getcovariance.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>matrixutilities/gmres.cpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>matrixutilities/gmres.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>matrixutilities/pseudosqrt.cpp</code></td><td class="size">19.7 KiB</td></tr>
+<tr><td><code>matrixutilities/pseudosqrt.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>matrixutilities/qrdecomposition.cpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>matrixutilities/qrdecomposition.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>matrixutilities/sparseilupreconditioner.cpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>matrixutilities/sparseilupreconditioner.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>matrixutilities/sparsematrix.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>matrixutilities/svd.cpp</code></td><td class="size">16.7 KiB</td></tr>
+<tr><td><code>matrixutilities/svd.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>matrixutilities/symmetricschurdecomposition.cpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>matrixutilities/symmetricschurdecomposition.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>matrixutilities/tapcorrelations.cpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>matrixutilities/tapcorrelations.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>matrixutilities/tqreigendecomposition.cpp</code></td><td class="size">5.4 KiB</td></tr>
+<tr><td><code>matrixutilities/tqreigendecomposition.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>modifiedbessel.cpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>modifiedbessel.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>ode/Makefile.am</code></td><td class="size">626 B</td></tr>
+<tr><td><code>ode/adaptiverungekutta.hpp</code></td><td class="size">9.6 KiB</td></tr>
+<tr><td><code>ode/all.hpp</code></td><td class="size">170 B</td></tr>
+<tr><td><code>optimization/Makefile.am</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>optimization/all.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>optimization/armijo.cpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>optimization/armijo.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>optimization/bfgs.cpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>optimization/bfgs.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>optimization/conjugategradient.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>optimization/conjugategradient.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>optimization/constraint.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>optimization/constraint.hpp</code></td><td class="size">8.2 KiB</td></tr>
+<tr><td><code>optimization/costfunction.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>optimization/differentialevolution.cpp</code></td><td class="size">17.9 KiB</td></tr>
+<tr><td><code>optimization/differentialevolution.hpp</code></td><td class="size">7.0 KiB</td></tr>
+<tr><td><code>optimization/endcriteria.cpp</code></td><td class="size">7.0 KiB</td></tr>
+<tr><td><code>optimization/endcriteria.hpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>optimization/goldstein.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>optimization/goldstein.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>optimization/leastsquare.cpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>optimization/leastsquare.hpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>optimization/levenbergmarquardt.cpp</code></td><td class="size">6.7 KiB</td></tr>
+<tr><td><code>optimization/levenbergmarquardt.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>optimization/linesearch.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>optimization/linesearch.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>optimization/linesearchbasedmethod.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>optimization/linesearchbasedmethod.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>optimization/lmdif.cpp</code></td><td class="size">43.1 KiB</td></tr>
+<tr><td><code>optimization/lmdif.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>optimization/method.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>optimization/problem.hpp</code></td><td class="size">4.9 KiB</td></tr>
+<tr><td><code>optimization/projectedconstraint.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>optimization/projectedcostfunction.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>optimization/projectedcostfunction.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>optimization/projection.cpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>optimization/projection.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>optimization/simplex.cpp</code></td><td class="size">8.4 KiB</td></tr>
+<tr><td><code>optimization/simplex.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>optimization/simulatedannealing.hpp</code></td><td class="size">9.6 KiB</td></tr>
+<tr><td><code>optimization/spherecylinder.cpp</code></td><td class="size">7.1 KiB</td></tr>
+<tr><td><code>optimization/spherecylinder.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>optimization/steepestdescent.cpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>optimization/steepestdescent.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>pascaltriangle.cpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>pascaltriangle.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>polynomialmathfunction.cpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>polynomialmathfunction.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>primenumbers.cpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>primenumbers.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>quadratic.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>quadratic.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>randomnumbers/Makefile.am</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>randomnumbers/all.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>randomnumbers/boxmullergaussianrng.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>randomnumbers/centrallimitgaussianrng.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>randomnumbers/faurersg.cpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>randomnumbers/faurersg.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>randomnumbers/haltonrsg.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>randomnumbers/haltonrsg.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>randomnumbers/inversecumulativerng.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>randomnumbers/inversecumulativersg.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>randomnumbers/knuthuniformrng.cpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>randomnumbers/knuthuniformrng.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>randomnumbers/latticersg.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>randomnumbers/latticersg.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>randomnumbers/latticerules.hpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>randomnumbers/lecuyeruniformrng.cpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>randomnumbers/lecuyeruniformrng.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>randomnumbers/mt19937uniformrng.cpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>randomnumbers/mt19937uniformrng.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>randomnumbers/primitivepolynomials.hpp</code></td><td class="size">9.9 KiB</td></tr>
+<tr><td><code>randomnumbers/randomizedlds.hpp</code></td><td class="size">4.9 KiB</td></tr>
+<tr><td><code>randomnumbers/randomsequencegenerator.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>randomnumbers/ranluxuniformrng.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>randomnumbers/rngtraits.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>randomnumbers/seedgenerator.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>randomnumbers/seedgenerator.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>randomnumbers/sobolbrownianbridgersg.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>randomnumbers/sobolbrownianbridgersg.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>randomnumbers/sobolrsg.hpp</code></td><td class="size">6.2 KiB</td></tr>
+<tr><td><code>randomnumbers/stochasticcollocationinvcdf.cpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>randomnumbers/stochasticcollocationinvcdf.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>richardsonextrapolation.cpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>richardsonextrapolation.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>rounding.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>rounding.hpp</code></td><td class="size">4.7 KiB</td></tr>
+<tr><td><code>sampledcurve.cpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>sampledcurve.hpp</code></td><td class="size">6.6 KiB</td></tr>
+<tr><td><code>solver1d.hpp</code></td><td class="size">9.6 KiB</td></tr>
+<tr><td><code>solvers1d/Makefile.am</code></td><td class="size">742 B</td></tr>
+<tr><td><code>solvers1d/all.hpp</code></td><td class="size">477 B</td></tr>
+<tr><td><code>solvers1d/bisection.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>solvers1d/brent.hpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>solvers1d/falseposition.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>solvers1d/finitedifferencenewtonsafe.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>solvers1d/newton.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>solvers1d/newtonsafe.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>solvers1d/ridder.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>solvers1d/secant.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>statistics/Makefile.am</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>statistics/all.hpp</code></td><td class="size">588 B</td></tr>
+<tr><td><code>statistics/convergencestatistics.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>statistics/discrepancystatistics.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>statistics/discrepancystatistics.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>statistics/gaussianstatistics.hpp</code></td><td class="size">8.9 KiB</td></tr>
+<tr><td><code>statistics/generalstatistics.cpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>statistics/generalstatistics.hpp</code></td><td class="size">8.0 KiB</td></tr>
+<tr><td><code>statistics/histogram.cpp</code></td><td class="size">6.2 KiB</td></tr>
+<tr><td><code>statistics/histogram.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>statistics/incrementalstatistics.cpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>statistics/incrementalstatistics.hpp</code></td><td class="size">6.4 KiB</td></tr>
+<tr><td><code>statistics/riskstatistics.hpp</code></td><td class="size">7.6 KiB</td></tr>
+<tr><td><code>statistics/sequencestatistics.hpp</code></td><td class="size">11.1 KiB</td></tr>
+<tr><td><code>statistics/statistics.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>transformedgrid.hpp</code></td><td class="size">3.5 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (3)</h2>
+  <details open><summary>3 files skipped</summary><table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody><tr><td><code>randomnumbers/latticerules.cpp</code></td><td class="size">142.4 KiB</td><td>Exceeds 48.8 KiB</td></tr>
+<tr><td><code>randomnumbers/primitivepolynomials.cpp</code></td><td class="size">146.4 KiB</td><td>Exceeds 48.8 KiB</td></tr>
+<tr><td><code>randomnumbers/sobolrsg.cpp</code></td><td class="size">7.8 MiB</td><td>Exceeds 48.8 KiB</td></tr></tbody></table></details>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>48.8 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>

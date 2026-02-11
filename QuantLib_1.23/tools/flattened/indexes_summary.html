@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – indexes</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/indexes</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened/indexes.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">83</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">83</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">237.0 KiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">237.0 KiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>indexes
+├── ibor
+│   ├── all.hpp
+│   ├── aonia.hpp
+│   ├── audlibor.hpp
+│   ├── bbsw.hpp
+│   ├── bibor.cpp
+│   ├── bibor.hpp
+│   ├── bkbm.hpp
+│   ├── cadlibor.hpp
+│   ├── cdor.hpp
+│   ├── chflibor.hpp
+│   ├── dkklibor.hpp
+│   ├── eonia.cpp
+│   ├── eonia.hpp
+│   ├── estr.cpp
+│   ├── estr.hpp
+│   ├── euribor.cpp
+│   ├── euribor.hpp
+│   ├── eurlibor.cpp
+│   ├── eurlibor.hpp
+│   ├── fedfunds.cpp
+│   ├── fedfunds.hpp
+│   ├── gbplibor.hpp
+│   ├── jibar.hpp
+│   ├── jpylibor.hpp
+│   ├── libor.cpp
+│   ├── libor.hpp
+│   ├── Makefile.am
+│   ├── mosprime.hpp
+│   ├── nzdlibor.hpp
+│   ├── nzocr.hpp
+│   ├── pribor.hpp
+│   ├── robor.hpp
+│   ├── seklibor.hpp
+│   ├── shibor.cpp
+│   ├── shibor.hpp
+│   ├── sofr.cpp
+│   ├── sofr.hpp
+│   ├── sonia.cpp
+│   ├── sonia.hpp
+│   ├── thbfix.hpp
+│   ├── tibor.hpp
+│   ├── trlibor.hpp
+│   ├── usdlibor.hpp
+│   ├── wibor.hpp
+│   └── zibor.hpp
+├── inflation
+│   ├── all.hpp
+│   ├── aucpi.hpp
+│   ├── euhicp.hpp
+│   ├── frhicp.hpp
+│   ├── Makefile.am
+│   ├── ukrpi.hpp
+│   ├── uscpi.hpp
+│   └── zacpi.hpp
+├── swap
+│   ├── all.hpp
+│   ├── chfliborswap.cpp
+│   ├── chfliborswap.hpp
+│   ├── euriborswap.cpp
+│   ├── euriborswap.hpp
+│   ├── eurliborswap.cpp
+│   ├── eurliborswap.hpp
+│   ├── gbpliborswap.cpp
+│   ├── gbpliborswap.hpp
+│   ├── jpyliborswap.cpp
+│   ├── jpyliborswap.hpp
+│   ├── Makefile.am
+│   ├── usdliborswap.cpp
+│   └── usdliborswap.hpp
+├── all.hpp
+├── bmaindex.cpp
+├── bmaindex.hpp
+├── iborindex.cpp
+├── iborindex.hpp
+├── indexmanager.cpp
+├── indexmanager.hpp
+├── inflationindex.cpp
+├── inflationindex.hpp
+├── interestrateindex.cpp
+├── interestrateindex.hpp
+├── Makefile.am
+├── region.cpp
+├── region.hpp
+├── swapindex.cpp
+└── swapindex.hpp</pre>
+
+  <h2>✅ Rendered Files (83)</h2>
+  <details open><summary>83 files · 237.0 KiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>all.hpp</code></td><td class="size">498 B</td></tr>
+<tr><td><code>bmaindex.cpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>bmaindex.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>ibor/Makefile.am</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>ibor/all.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>ibor/aonia.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/audlibor.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/bbsw.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>ibor/bibor.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>ibor/bibor.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>ibor/bkbm.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>ibor/cadlibor.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>ibor/cdor.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>ibor/chflibor.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>ibor/dkklibor.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/eonia.cpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>ibor/eonia.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>ibor/estr.cpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>ibor/estr.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>ibor/euribor.cpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>ibor/euribor.hpp</code></td><td class="size">10.1 KiB</td></tr>
+<tr><td><code>ibor/eurlibor.cpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>ibor/eurlibor.hpp</code></td><td class="size">6.6 KiB</td></tr>
+<tr><td><code>ibor/fedfunds.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>ibor/fedfunds.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>ibor/gbplibor.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>ibor/jibar.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/jpylibor.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>ibor/libor.cpp</code></td><td class="size">6.3 KiB</td></tr>
+<tr><td><code>ibor/libor.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>ibor/mosprime.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/nzdlibor.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/nzocr.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/pribor.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/robor.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>ibor/seklibor.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/shibor.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>ibor/shibor.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>ibor/sofr.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>ibor/sofr.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>ibor/sonia.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>ibor/sonia.hpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>ibor/thbfix.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>ibor/tibor.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>ibor/trlibor.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/usdlibor.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>ibor/wibor.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>ibor/zibor.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>iborindex.cpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>iborindex.hpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>indexmanager.cpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>indexmanager.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>inflation/Makefile.am</code></td><td class="size">698 B</td></tr>
+<tr><td><code>inflation/all.hpp</code></td><td class="size">378 B</td></tr>
+<tr><td><code>inflation/aucpi.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>inflation/euhicp.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>inflation/frhicp.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>inflation/ukrpi.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>inflation/uscpi.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>inflation/zacpi.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>inflationindex.cpp</code></td><td class="size">15.0 KiB</td></tr>
+<tr><td><code>inflationindex.hpp</code></td><td class="size">10.3 KiB</td></tr>
+<tr><td><code>interestrateindex.cpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>interestrateindex.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>region.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>region.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>swap/Makefile.am</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>swap/all.hpp</code></td><td class="size">387 B</td></tr>
+<tr><td><code>swap/chfliborswap.cpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>swap/chfliborswap.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>swap/euriborswap.cpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>swap/euriborswap.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>swap/eurliborswap.cpp</code></td><td class="size">5.6 KiB</td></tr>
+<tr><td><code>swap/eurliborswap.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>swap/gbpliborswap.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>swap/gbpliborswap.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>swap/jpyliborswap.cpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>swap/jpyliborswap.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>swap/usdliborswap.cpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>swap/usdliborswap.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>swapindex.cpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>swapindex.hpp</code></td><td class="size">5.9 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (0)</h2>
+  <p>No files were skipped.</p>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>48.8 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>

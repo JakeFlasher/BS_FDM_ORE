@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – instruments</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/instruments</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened/instruments.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">131</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">131</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">674.0 KiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">674.0 KiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>instruments
+├── bonds
+│   ├── all.hpp
+│   ├── btp.cpp
+│   ├── btp.hpp
+│   ├── cmsratebond.cpp
+│   ├── cmsratebond.hpp
+│   ├── cpibond.cpp
+│   ├── cpibond.hpp
+│   ├── fixedratebond.cpp
+│   ├── fixedratebond.hpp
+│   ├── floatingratebond.cpp
+│   ├── floatingratebond.hpp
+│   ├── Makefile.am
+│   ├── zerocouponbond.cpp
+│   └── zerocouponbond.hpp
+├── all.hpp
+├── asianoption.cpp
+├── asianoption.hpp
+├── assetswap.cpp
+├── assetswap.hpp
+├── averagetype.cpp
+├── averagetype.hpp
+├── barrieroption.cpp
+├── barrieroption.hpp
+├── barriertype.cpp
+├── barriertype.hpp
+├── basketoption.cpp
+├── basketoption.hpp
+├── bmaswap.cpp
+├── bmaswap.hpp
+├── bond.cpp
+├── bond.hpp
+├── callabilityschedule.hpp
+├── capfloor.cpp
+├── capfloor.hpp
+├── claim.cpp
+├── claim.hpp
+├── cliquetoption.cpp
+├── cliquetoption.hpp
+├── compositeinstrument.cpp
+├── compositeinstrument.hpp
+├── cpicapfloor.cpp
+├── cpicapfloor.hpp
+├── cpiswap.cpp
+├── cpiswap.hpp
+├── creditdefaultswap.cpp
+├── creditdefaultswap.hpp
+├── dividendbarrieroption.cpp
+├── dividendbarrieroption.hpp
+├── dividendschedule.hpp
+├── dividendvanillaoption.cpp
+├── dividendvanillaoption.hpp
+├── europeanoption.cpp
+├── europeanoption.hpp
+├── fixedratebondforward.cpp
+├── fixedratebondforward.hpp
+├── floatfloatswap.cpp
+├── floatfloatswap.hpp
+├── floatfloatswaption.cpp
+├── floatfloatswaption.hpp
+├── forward.cpp
+├── forward.hpp
+├── forwardrateagreement.cpp
+├── forwardrateagreement.hpp
+├── forwardvanillaoption.cpp
+├── forwardvanillaoption.hpp
+├── futures.cpp
+├── futures.hpp
+├── impliedvolatility.cpp
+├── impliedvolatility.hpp
+├── inflationcapfloor.cpp
+├── inflationcapfloor.hpp
+├── lookbackoption.cpp
+├── lookbackoption.hpp
+├── makecapfloor.cpp
+├── makecapfloor.hpp
+├── makecds.cpp
+├── makecds.hpp
+├── makecms.cpp
+├── makecms.hpp
+├── Makefile.am
+├── makeois.cpp
+├── makeois.hpp
+├── makeswaption.cpp
+├── makeswaption.hpp
+├── makevanillaswap.cpp
+├── makevanillaswap.hpp
+├── makeyoyinflationcapfloor.cpp
+├── makeyoyinflationcapfloor.hpp
+├── multiassetoption.cpp
+├── multiassetoption.hpp
+├── nonstandardswap.cpp
+├── nonstandardswap.hpp
+├── nonstandardswaption.cpp
+├── nonstandardswaption.hpp
+├── oneassetoption.cpp
+├── oneassetoption.hpp
+├── overnightindexedswap.cpp
+├── overnightindexedswap.hpp
+├── overnightindexfuture.cpp
+├── overnightindexfuture.hpp
+├── payoffs.cpp
+├── payoffs.hpp
+├── quantobarrieroption.cpp
+├── quantobarrieroption.hpp
+├── quantoforwardvanillaoption.cpp
+├── quantoforwardvanillaoption.hpp
+├── quantovanillaoption.cpp
+├── quantovanillaoption.hpp
+├── stickyratchet.cpp
+├── stickyratchet.hpp
+├── stock.cpp
+├── stock.hpp
+├── swap.cpp
+├── swap.hpp
+├── swaption.cpp
+├── swaption.hpp
+├── vanillaoption.cpp
+├── vanillaoption.hpp
+├── vanillastorageoption.hpp
+├── vanillaswap.cpp
+├── vanillaswap.hpp
+├── vanillaswingoption.cpp
+├── vanillaswingoption.hpp
+├── varianceswap.cpp
+├── varianceswap.hpp
+├── yearonyearinflationswap.cpp
+├── yearonyearinflationswap.hpp
+├── zerocouponinflationswap.cpp
+├── zerocouponinflationswap.hpp
+├── zerocouponswap.cpp
+└── zerocouponswap.hpp</pre>
+
+  <h2>✅ Rendered Files (131)</h2>
+  <details open><summary>131 files · 674.0 KiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>all.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>asianoption.cpp</code></td><td class="size">6.6 KiB</td></tr>
+<tr><td><code>asianoption.hpp</code></td><td class="size">5.4 KiB</td></tr>
+<tr><td><code>assetswap.cpp</code></td><td class="size">17.4 KiB</td></tr>
+<tr><td><code>assetswap.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>averagetype.cpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>averagetype.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>barrieroption.cpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>barrieroption.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>barriertype.cpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>barriertype.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>basketoption.cpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>basketoption.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>bmaswap.cpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>bmaswap.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>bond.cpp</code></td><td class="size">14.7 KiB</td></tr>
+<tr><td><code>bond.hpp</code></td><td class="size">12.2 KiB</td></tr>
+<tr><td><code>bonds/Makefile.am</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>bonds/all.hpp</code></td><td class="size">410 B</td></tr>
+<tr><td><code>bonds/btp.cpp</code></td><td class="size">10.4 KiB</td></tr>
+<tr><td><code>bonds/btp.hpp</code></td><td class="size">9.6 KiB</td></tr>
+<tr><td><code>bonds/cmsratebond.cpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>bonds/cmsratebond.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>bonds/cpibond.cpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>bonds/cpibond.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>bonds/fixedratebond.cpp</code></td><td class="size">7.9 KiB</td></tr>
+<tr><td><code>bonds/fixedratebond.hpp</code></td><td class="size">4.7 KiB</td></tr>
+<tr><td><code>bonds/floatingratebond.cpp</code></td><td class="size">6.2 KiB</td></tr>
+<tr><td><code>bonds/floatingratebond.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>bonds/zerocouponbond.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>bonds/zerocouponbond.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>callabilityschedule.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>capfloor.cpp</code></td><td class="size">13.7 KiB</td></tr>
+<tr><td><code>capfloor.hpp</code></td><td class="size">5.8 KiB</td></tr>
+<tr><td><code>claim.cpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>claim.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>cliquetoption.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>cliquetoption.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>compositeinstrument.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>compositeinstrument.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>cpicapfloor.cpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>cpicapfloor.hpp</code></td><td class="size">4.9 KiB</td></tr>
+<tr><td><code>cpiswap.cpp</code></td><td class="size">7.8 KiB</td></tr>
+<tr><td><code>cpiswap.hpp</code></td><td class="size">8.3 KiB</td></tr>
+<tr><td><code>creditdefaultswap.cpp</code></td><td class="size">19.5 KiB</td></tr>
+<tr><td><code>creditdefaultswap.hpp</code></td><td class="size">17.3 KiB</td></tr>
+<tr><td><code>dividendbarrieroption.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>dividendbarrieroption.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>dividendschedule.hpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>dividendvanillaoption.cpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>dividendvanillaoption.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>europeanoption.cpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>europeanoption.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>fixedratebondforward.cpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>fixedratebondforward.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>floatfloatswap.cpp</code></td><td class="size">28.3 KiB</td></tr>
+<tr><td><code>floatfloatswap.hpp</code></td><td class="size">8.9 KiB</td></tr>
+<tr><td><code>floatfloatswaption.cpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>floatfloatswaption.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>forward.cpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>forward.hpp</code></td><td class="size">7.4 KiB</td></tr>
+<tr><td><code>forwardrateagreement.cpp</code></td><td class="size">4.9 KiB</td></tr>
+<tr><td><code>forwardrateagreement.hpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>forwardvanillaoption.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>forwardvanillaoption.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>futures.cpp</code></td><td class="size">1.2 KiB</td></tr>
+<tr><td><code>futures.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>impliedvolatility.cpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>impliedvolatility.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>inflationcapfloor.cpp</code></td><td class="size">9.0 KiB</td></tr>
+<tr><td><code>inflationcapfloor.hpp</code></td><td class="size">6.5 KiB</td></tr>
+<tr><td><code>lookbackoption.cpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>lookbackoption.hpp</code></td><td class="size">7.3 KiB</td></tr>
+<tr><td><code>makecapfloor.cpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>makecapfloor.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>makecds.cpp</code></td><td class="size">4.8 KiB</td></tr>
+<tr><td><code>makecds.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>makecms.cpp</code></td><td class="size">10.7 KiB</td></tr>
+<tr><td><code>makecms.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>makeois.cpp</code></td><td class="size">8.5 KiB</td></tr>
+<tr><td><code>makeois.hpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>makeswaption.cpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>makeswaption.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>makevanillaswap.cpp</code></td><td class="size">12.9 KiB</td></tr>
+<tr><td><code>makevanillaswap.hpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>makeyoyinflationcapfloor.cpp</code></td><td class="size">5.9 KiB</td></tr>
+<tr><td><code>makeyoyinflationcapfloor.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>multiassetoption.cpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>multiassetoption.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>nonstandardswap.cpp</code></td><td class="size">17.9 KiB</td></tr>
+<tr><td><code>nonstandardswap.hpp</code></td><td class="size">7.7 KiB</td></tr>
+<tr><td><code>nonstandardswaption.cpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>nonstandardswaption.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>oneassetoption.cpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>oneassetoption.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>overnightindexedswap.cpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>overnightindexedswap.hpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>overnightindexfuture.cpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>overnightindexfuture.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>payoffs.cpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>payoffs.hpp</code></td><td class="size">9.0 KiB</td></tr>
+<tr><td><code>quantobarrieroption.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>quantobarrieroption.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>quantoforwardvanillaoption.cpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>quantoforwardvanillaoption.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>quantovanillaoption.cpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>quantovanillaoption.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>stickyratchet.cpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>stickyratchet.hpp</code></td><td class="size">9.1 KiB</td></tr>
+<tr><td><code>stock.cpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>stock.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>swap.cpp</code></td><td class="size">6.7 KiB</td></tr>
+<tr><td><code>swap.hpp</code></td><td class="size">5.4 KiB</td></tr>
+<tr><td><code>swaption.cpp</code></td><td class="size">7.9 KiB</td></tr>
+<tr><td><code>swaption.hpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>vanillaoption.cpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>vanillaoption.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>vanillastorageoption.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>vanillaswap.cpp</code></td><td class="size">9.0 KiB</td></tr>
+<tr><td><code>vanillaswap.hpp</code></td><td class="size">6.7 KiB</td></tr>
+<tr><td><code>vanillaswingoption.cpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>vanillaswingoption.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>varianceswap.cpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>varianceswap.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>yearonyearinflationswap.cpp</code></td><td class="size">9.1 KiB</td></tr>
+<tr><td><code>yearonyearinflationswap.hpp</code></td><td class="size">6.2 KiB</td></tr>
+<tr><td><code>zerocouponinflationswap.cpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>zerocouponinflationswap.hpp</code></td><td class="size">7.1 KiB</td></tr>
+<tr><td><code>zerocouponswap.cpp</code></td><td class="size">6.8 KiB</td></tr>
+<tr><td><code>zerocouponswap.hpp</code></td><td class="size">5.1 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (0)</h2>
+  <p>No files were skipped.</p>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>48.8 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>

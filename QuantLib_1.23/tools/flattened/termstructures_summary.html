@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – termstructures</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/termstructures</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened/termstructures.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">198</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">197</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">1</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">1.2 MiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">1.2 MiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>termstructures
+├── credit
+│   ├── all.hpp
+│   ├── defaultdensitystructure.cpp
+│   ├── defaultdensitystructure.hpp
+│   ├── defaultprobabilityhelpers.cpp
+│   ├── defaultprobabilityhelpers.hpp
+│   ├── flathazardrate.cpp
+│   ├── flathazardrate.hpp
+│   ├── hazardratestructure.cpp
+│   ├── hazardratestructure.hpp
+│   ├── interpolateddefaultdensitycurve.hpp
+│   ├── interpolatedhazardratecurve.hpp
+│   ├── interpolatedsurvivalprobabilitycurve.hpp
+│   ├── Makefile.am
+│   ├── piecewisedefaultcurve.hpp
+│   ├── probabilitytraits.hpp
+│   ├── survivalprobabilitystructure.cpp
+│   └── survivalprobabilitystructure.hpp
+├── inflation
+│   ├── all.hpp
+│   ├── inflationhelpers.cpp
+│   ├── inflationhelpers.hpp
+│   ├── inflationtraits.hpp
+│   ├── interpolatedyoyinflationcurve.hpp
+│   ├── interpolatedzeroinflationcurve.hpp
+│   ├── Makefile.am
+│   ├── piecewiseyoyinflationcurve.hpp
+│   ├── piecewisezeroinflationcurve.hpp
+│   ├── seasonality.cpp
+│   └── seasonality.hpp
+├── volatility
+│   ├── capfloor
+│   │   ├── all.hpp
+│   │   ├── capfloortermvolatilitystructure.cpp
+│   │   ├── capfloortermvolatilitystructure.hpp
+│   │   ├── capfloortermvolcurve.cpp
+│   │   ├── capfloortermvolcurve.hpp
+│   │   ├── capfloortermvolsurface.cpp
+│   │   ├── capfloortermvolsurface.hpp
+│   │   ├── constantcapfloortermvol.cpp
+│   │   ├── constantcapfloortermvol.hpp
+│   │   └── Makefile.am
+│   ├── equityfx
+│   │   ├── all.hpp
+│   │   ├── andreasenhugelocalvoladapter.cpp
+│   │   ├── andreasenhugelocalvoladapter.hpp
+│   │   ├── andreasenhugevolatilityadapter.cpp
+│   │   ├── andreasenhugevolatilityadapter.hpp
+│   │   ├── andreasenhugevolatilityinterpl.cpp
+│   │   ├── andreasenhugevolatilityinterpl.hpp
+│   │   ├── blackconstantvol.hpp
+│   │   ├── blackvariancecurve.cpp
+│   │   ├── blackvariancecurve.hpp
+│   │   ├── blackvariancesurface.cpp
+│   │   ├── blackvariancesurface.hpp
+│   │   ├── blackvoltermstructure.cpp
+│   │   ├── blackvoltermstructure.hpp
+│   │   ├── fixedlocalvolsurface.cpp
+│   │   ├── fixedlocalvolsurface.hpp
+│   │   ├── gridmodellocalvolsurface.cpp
+│   │   ├── gridmodellocalvolsurface.hpp
+│   │   ├── hestonblackvolsurface.cpp
+│   │   ├── hestonblackvolsurface.hpp
+│   │   ├── impliedvoltermstructure.hpp
+│   │   ├── localconstantvol.hpp
+│   │   ├── localvolcurve.hpp
+│   │   ├── localvolsurface.cpp
+│   │   ├── localvolsurface.hpp
+│   │   ├── localvoltermstructure.cpp
+│   │   ├── localvoltermstructure.hpp
+│   │   ├── Makefile.am
+│   │   └── noexceptlocalvolsurface.hpp
+│   ├── inflation
+│   │   ├── all.hpp
+│   │   ├── constantcpivolatility.cpp
+│   │   ├── constantcpivolatility.hpp
+│   │   ├── cpivolatilitystructure.cpp
+│   │   ├── cpivolatilitystructure.hpp
+│   │   ├── Makefile.am
+│   │   ├── yoyinflationoptionletvolatilitystructure.cpp
+│   │   └── yoyinflationoptionletvolatilitystructure.hpp
+│   ├── optionlet
+│   │   ├── all.hpp
+│   │   ├── capletvariancecurve.hpp
+│   │   ├── constantoptionletvol.cpp
+│   │   ├── constantoptionletvol.hpp
+│   │   ├── Makefile.am
+│   │   ├── optionletstripper.cpp
+│   │   ├── optionletstripper.hpp
+│   │   ├── optionletstripper1.cpp
+│   │   ├── optionletstripper1.hpp
+│   │   ├── optionletstripper2.cpp
+│   │   ├── optionletstripper2.hpp
+│   │   ├── optionletvolatilitystructure.cpp
+│   │   ├── optionletvolatilitystructure.hpp
+│   │   ├── spreadedoptionletvol.cpp
+│   │   ├── spreadedoptionletvol.hpp
+│   │   ├── strippedoptionlet.cpp
+│   │   ├── strippedoptionlet.hpp
+│   │   ├── strippedoptionletadapter.cpp
+│   │   ├── strippedoptionletadapter.hpp
+│   │   └── strippedoptionletbase.hpp
+│   ├── swaption
+│   │   ├── all.hpp
+│   │   ├── cmsmarket.cpp
+│   │   ├── cmsmarket.hpp
+│   │   ├── cmsmarketcalibration.cpp
+│   │   ├── cmsmarketcalibration.hpp
+│   │   ├── gaussian1dswaptionvolatility.cpp
+│   │   ├── gaussian1dswaptionvolatility.hpp
+│   │   ├── Makefile.am
+│   │   ├── spreadedswaptionvol.cpp
+│   │   ├── spreadedswaptionvol.hpp
+│   │   ├── swaptionconstantvol.cpp
+│   │   ├── swaptionconstantvol.hpp
+│   │   ├── swaptionvolcube.cpp
+│   │   ├── swaptionvolcube.hpp
+│   │   ├── swaptionvolcube1.hpp
+│   │   ├── swaptionvolcube2.cpp
+│   │   ├── swaptionvolcube2.hpp
+│   │   ├── swaptionvoldiscrete.cpp
+│   │   ├── swaptionvoldiscrete.hpp
+│   │   ├── swaptionvolmatrix.cpp
+│   │   ├── swaptionvolmatrix.hpp
+│   │   ├── swaptionvolstructure.cpp
+│   │   └── swaptionvolstructure.hpp
+│   ├── abcd.cpp
+│   ├── abcd.hpp
+│   ├── abcdcalibration.cpp
+│   ├── abcdcalibration.hpp
+│   ├── all.hpp
+│   ├── atmadjustedsmilesection.cpp
+│   ├── atmadjustedsmilesection.hpp
+│   ├── atmsmilesection.cpp
+│   ├── atmsmilesection.hpp
+│   ├── flatsmilesection.cpp
+│   ├── flatsmilesection.hpp
+│   ├── gaussian1dsmilesection.cpp
+│   ├── gaussian1dsmilesection.hpp
+│   ├── interpolatedsmilesection.hpp
+│   ├── kahalesmilesection.cpp
+│   ├── kahalesmilesection.hpp
+│   ├── Makefile.am
+│   ├── sabr.cpp
+│   ├── sabr.hpp
+│   ├── sabrinterpolatedsmilesection.cpp
+│   ├── sabrinterpolatedsmilesection.hpp
+│   ├── sabrsmilesection.cpp
+│   ├── sabrsmilesection.hpp
+│   ├── smilesection.cpp
+│   ├── smilesection.hpp
+│   ├── smilesectionutils.cpp
+│   ├── smilesectionutils.hpp
+│   ├── spreadedsmilesection.cpp
+│   ├── spreadedsmilesection.hpp
+│   └── volatilitytype.hpp
+├── yield
+│   ├── all.hpp
+│   ├── bondhelpers.cpp
+│   ├── bondhelpers.hpp
+│   ├── bootstraptraits.hpp
+│   ├── compositezeroyieldstructure.hpp
+│   ├── discountcurve.hpp
+│   ├── drifttermstructure.hpp
+│   ├── fittedbonddiscountcurve.cpp
+│   ├── fittedbonddiscountcurve.hpp
+│   ├── flatforward.cpp
+│   ├── flatforward.hpp
+│   ├── forwardcurve.hpp
+│   ├── forwardspreadedtermstructure.hpp
+│   ├── forwardstructure.cpp
+│   ├── forwardstructure.hpp
+│   ├── impliedtermstructure.hpp
+│   ├── interpolatedsimplezerocurve.hpp
+│   ├── Makefile.am
+│   ├── nonlinearfittingmethods.cpp
+│   ├── nonlinearfittingmethods.hpp
+│   ├── oisratehelper.cpp
+│   ├── oisratehelper.hpp
+│   ├── overnightindexfutureratehelper.cpp
+│   ├── overnightindexfutureratehelper.hpp
+│   ├── piecewiseyieldcurve.hpp
+│   ├── piecewisezerospreadedtermstructure.hpp
+│   ├── quantotermstructure.hpp
+│   ├── ratehelpers.cpp
+│   ├── ratehelpers.hpp
+│   ├── ultimateforwardtermstructure.hpp
+│   ├── zerocurve.hpp
+│   ├── zerospreadedtermstructure.hpp
+│   ├── zeroyieldstructure.cpp
+│   └── zeroyieldstructure.hpp
+├── all.hpp
+├── bootstraperror.hpp
+├── bootstraphelper.hpp
+├── defaulttermstructure.cpp
+├── defaulttermstructure.hpp
+├── globalbootstrap.hpp
+├── inflationtermstructure.cpp
+├── inflationtermstructure.hpp
+├── interpolatedcurve.hpp
+├── iterativebootstrap.hpp
+├── localbootstrap.hpp
+├── Makefile.am
+├── voltermstructure.cpp
+├── voltermstructure.hpp
+├── yieldtermstructure.cpp
+└── yieldtermstructure.hpp</pre>
+
+  <h2>✅ Rendered Files (197)</h2>
+  <details open><summary>197 files · 1.2 MiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>all.hpp</code></td><td class="size">815 B</td></tr>
+<tr><td><code>bootstraperror.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>bootstraphelper.hpp</code></td><td class="size">8.5 KiB</td></tr>
+<tr><td><code>credit/Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>credit/all.hpp</code></td><td class="size">775 B</td></tr>
+<tr><td><code>credit/defaultdensitystructure.cpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>credit/defaultdensitystructure.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>credit/defaultprobabilityhelpers.cpp</code></td><td class="size">13.9 KiB</td></tr>
+<tr><td><code>credit/defaultprobabilityhelpers.hpp</code></td><td class="size">11.6 KiB</td></tr>
+<tr><td><code>credit/flathazardrate.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>credit/flathazardrate.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>credit/hazardratestructure.cpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>credit/hazardratestructure.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>credit/interpolateddefaultdensitycurve.hpp</code></td><td class="size">11.2 KiB</td></tr>
+<tr><td><code>credit/interpolatedhazardratecurve.hpp</code></td><td class="size">10.5 KiB</td></tr>
+<tr><td><code>credit/interpolatedsurvivalprobabilitycurve.hpp</code></td><td class="size">11.9 KiB</td></tr>
+<tr><td><code>credit/piecewisedefaultcurve.hpp</code></td><td class="size">11.7 KiB</td></tr>
+<tr><td><code>credit/probabilitytraits.hpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>credit/survivalprobabilitystructure.cpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>credit/survivalprobabilitystructure.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>defaulttermstructure.cpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>defaulttermstructure.hpp</code></td><td class="size">8.7 KiB</td></tr>
+<tr><td><code>globalbootstrap.hpp</code></td><td class="size">14.2 KiB</td></tr>
+<tr><td><code>inflation/Makefile.am</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>inflation/all.hpp</code></td><td class="size">586 B</td></tr>
+<tr><td><code>inflation/inflationhelpers.cpp</code></td><td class="size">10.2 KiB</td></tr>
+<tr><td><code>inflation/inflationhelpers.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>inflation/inflationtraits.hpp</code></td><td class="size">6.5 KiB</td></tr>
+<tr><td><code>inflation/interpolatedyoyinflationcurve.hpp</code></td><td class="size">13.1 KiB</td></tr>
+<tr><td><code>inflation/interpolatedzeroinflationcurve.hpp</code></td><td class="size">13.8 KiB</td></tr>
+<tr><td><code>inflation/piecewiseyoyinflationcurve.hpp</code></td><td class="size">6.2 KiB</td></tr>
+<tr><td><code>inflation/piecewisezeroinflationcurve.hpp</code></td><td class="size">6.3 KiB</td></tr>
+<tr><td><code>inflation/seasonality.cpp</code></td><td class="size">10.9 KiB</td></tr>
+<tr><td><code>inflation/seasonality.hpp</code></td><td class="size">8.0 KiB</td></tr>
+<tr><td><code>inflationtermstructure.cpp</code></td><td class="size">22.4 KiB</td></tr>
+<tr><td><code>inflationtermstructure.hpp</code></td><td class="size">17.9 KiB</td></tr>
+<tr><td><code>interpolatedcurve.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>iterativebootstrap.hpp</code></td><td class="size">17.2 KiB</td></tr>
+<tr><td><code>localbootstrap.hpp</code></td><td class="size">11.2 KiB</td></tr>
+<tr><td><code>volatility/Makefile.am</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>volatility/abcd.cpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>volatility/abcd.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>volatility/abcdcalibration.cpp</code></td><td class="size">8.1 KiB</td></tr>
+<tr><td><code>volatility/abcdcalibration.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>volatility/all.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>volatility/atmadjustedsmilesection.cpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>volatility/atmadjustedsmilesection.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>volatility/atmsmilesection.cpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>volatility/atmsmilesection.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>volatility/capfloor/Makefile.am</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>volatility/capfloor/all.hpp</code></td><td class="size">436 B</td></tr>
+<tr><td><code>volatility/capfloor/capfloortermvolatilitystructure.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>volatility/capfloor/capfloortermvolatilitystructure.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>volatility/capfloor/capfloortermvolcurve.cpp</code></td><td class="size">7.4 KiB</td></tr>
+<tr><td><code>volatility/capfloor/capfloortermvolcurve.hpp</code></td><td class="size">5.8 KiB</td></tr>
+<tr><td><code>volatility/capfloor/capfloortermvolsurface.cpp</code></td><td class="size">9.0 KiB</td></tr>
+<tr><td><code>volatility/capfloor/capfloortermvolsurface.hpp</code></td><td class="size">6.2 KiB</td></tr>
+<tr><td><code>volatility/capfloor/constantcapfloortermvol.cpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>volatility/capfloor/constantcapfloortermvol.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>volatility/equityfx/Makefile.am</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>volatility/equityfx/all.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>volatility/equityfx/andreasenhugelocalvoladapter.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>volatility/equityfx/andreasenhugelocalvoladapter.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>volatility/equityfx/andreasenhugevolatilityadapter.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>volatility/equityfx/andreasenhugevolatilityadapter.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>volatility/equityfx/andreasenhugevolatilityinterpl.cpp</code></td><td class="size">23.0 KiB</td></tr>
+<tr><td><code>volatility/equityfx/andreasenhugevolatilityinterpl.hpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>volatility/equityfx/blackconstantvol.hpp</code></td><td class="size">5.1 KiB</td></tr>
+<tr><td><code>volatility/equityfx/blackvariancecurve.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>volatility/equityfx/blackvariancecurve.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>volatility/equityfx/blackvariancesurface.cpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>volatility/equityfx/blackvariancesurface.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>volatility/equityfx/blackvoltermstructure.cpp</code></td><td class="size">7.2 KiB</td></tr>
+<tr><td><code>volatility/equityfx/blackvoltermstructure.hpp</code></td><td class="size">11.7 KiB</td></tr>
+<tr><td><code>volatility/equityfx/fixedlocalvolsurface.cpp</code></td><td class="size">7.6 KiB</td></tr>
+<tr><td><code>volatility/equityfx/fixedlocalvolsurface.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>volatility/equityfx/gridmodellocalvolsurface.cpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>volatility/equityfx/gridmodellocalvolsurface.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>volatility/equityfx/hestonblackvolsurface.cpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>volatility/equityfx/hestonblackvolsurface.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>volatility/equityfx/impliedvoltermstructure.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>volatility/equityfx/localconstantvol.hpp</code></td><td class="size">4.9 KiB</td></tr>
+<tr><td><code>volatility/equityfx/localvolcurve.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>volatility/equityfx/localvolsurface.cpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>volatility/equityfx/localvolsurface.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>volatility/equityfx/localvoltermstructure.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>volatility/equityfx/localvoltermstructure.hpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>volatility/equityfx/noexceptlocalvolsurface.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>volatility/flatsmilesection.cpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>volatility/flatsmilesection.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>volatility/gaussian1dsmilesection.cpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>volatility/gaussian1dsmilesection.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>volatility/inflation/Makefile.am</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>volatility/inflation/all.hpp</code></td><td class="size">372 B</td></tr>
+<tr><td><code>volatility/inflation/constantcpivolatility.cpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>volatility/inflation/constantcpivolatility.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>volatility/inflation/cpivolatilitystructure.cpp</code></td><td class="size">6.6 KiB</td></tr>
+<tr><td><code>volatility/inflation/cpivolatilitystructure.hpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>volatility/inflation/yoyinflationoptionletvolatilitystructure.cpp</code></td><td class="size">10.1 KiB</td></tr>
+<tr><td><code>volatility/inflation/yoyinflationoptionletvolatilitystructure.hpp</code></td><td class="size">9.4 KiB</td></tr>
+<tr><td><code>volatility/interpolatedsmilesection.hpp</code></td><td class="size">9.7 KiB</td></tr>
+<tr><td><code>volatility/kahalesmilesection.cpp</code></td><td class="size">10.8 KiB</td></tr>
+<tr><td><code>volatility/kahalesmilesection.hpp</code></td><td class="size">7.8 KiB</td></tr>
+<tr><td><code>volatility/optionlet/Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>volatility/optionlet/all.hpp</code></td><td class="size">876 B</td></tr>
+<tr><td><code>volatility/optionlet/capletvariancecurve.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>volatility/optionlet/constantoptionletvol.cpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>volatility/optionlet/constantoptionletvol.hpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletstripper.cpp</code></td><td class="size">5.8 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletstripper.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletstripper1.cpp</code></td><td class="size">8.7 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletstripper1.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletstripper2.cpp</code></td><td class="size">8.2 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletstripper2.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletvolatilitystructure.cpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>volatility/optionlet/optionletvolatilitystructure.hpp</code></td><td class="size">9.6 KiB</td></tr>
+<tr><td><code>volatility/optionlet/spreadedoptionletvol.cpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>volatility/optionlet/spreadedoptionletvol.hpp</code></td><td class="size">4.1 KiB</td></tr>
+<tr><td><code>volatility/optionlet/strippedoptionlet.cpp</code></td><td class="size">6.5 KiB</td></tr>
+<tr><td><code>volatility/optionlet/strippedoptionlet.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>volatility/optionlet/strippedoptionletadapter.cpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>volatility/optionlet/strippedoptionletadapter.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>volatility/optionlet/strippedoptionletbase.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>volatility/sabr.cpp</code></td><td class="size">8.8 KiB</td></tr>
+<tr><td><code>volatility/sabr.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>volatility/sabrinterpolatedsmilesection.cpp</code></td><td class="size">5.6 KiB</td></tr>
+<tr><td><code>volatility/sabrinterpolatedsmilesection.hpp</code></td><td class="size">6.5 KiB</td></tr>
+<tr><td><code>volatility/sabrsmilesection.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>volatility/sabrsmilesection.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>volatility/smilesection.cpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>volatility/smilesection.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>volatility/smilesectionutils.cpp</code></td><td class="size">8.5 KiB</td></tr>
+<tr><td><code>volatility/smilesectionutils.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>volatility/spreadedsmilesection.cpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>volatility/spreadedsmilesection.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>volatility/swaption/Makefile.am</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>volatility/swaption/all.hpp</code></td><td class="size">916 B</td></tr>
+<tr><td><code>volatility/swaption/cmsmarket.cpp</code></td><td class="size">11.3 KiB</td></tr>
+<tr><td><code>volatility/swaption/cmsmarket.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>volatility/swaption/cmsmarketcalibration.cpp</code></td><td class="size">26.7 KiB</td></tr>
+<tr><td><code>volatility/swaption/cmsmarketcalibration.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>volatility/swaption/gaussian1dswaptionvolatility.cpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>volatility/swaption/gaussian1dswaptionvolatility.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>volatility/swaption/spreadedswaptionvol.cpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>volatility/swaption/spreadedswaptionvol.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionconstantvol.cpp</code></td><td class="size">5.6 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionconstantvol.hpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolcube.cpp</code></td><td class="size">7.0 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolcube.hpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolcube2.cpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolcube2.hpp</code></td><td class="size">3.2 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvoldiscrete.cpp</code></td><td class="size">7.7 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvoldiscrete.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolmatrix.cpp</code></td><td class="size">15.2 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolmatrix.hpp</code></td><td class="size">8.7 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolstructure.cpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>volatility/swaption/swaptionvolstructure.hpp</code></td><td class="size">22.6 KiB</td></tr>
+<tr><td><code>volatility/volatilitytype.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>voltermstructure.cpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>voltermstructure.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>yield/Makefile.am</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>yield/all.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>yield/bondhelpers.cpp</code></td><td class="size">6.6 KiB</td></tr>
+<tr><td><code>yield/bondhelpers.hpp</code></td><td class="size">5.8 KiB</td></tr>
+<tr><td><code>yield/bootstraptraits.hpp</code></td><td class="size">12.1 KiB</td></tr>
+<tr><td><code>yield/compositezeroyieldstructure.hpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>yield/discountcurve.hpp</code></td><td class="size">11.4 KiB</td></tr>
+<tr><td><code>yield/drifttermstructure.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>yield/fittedbonddiscountcurve.cpp</code></td><td class="size">10.7 KiB</td></tr>
+<tr><td><code>yield/fittedbonddiscountcurve.hpp</code></td><td class="size">14.4 KiB</td></tr>
+<tr><td><code>yield/flatforward.cpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>yield/flatforward.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>yield/forwardcurve.hpp</code></td><td class="size">11.4 KiB</td></tr>
+<tr><td><code>yield/forwardspreadedtermstructure.hpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>yield/forwardstructure.cpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>yield/forwardstructure.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>yield/impliedtermstructure.hpp</code></td><td class="size">3.6 KiB</td></tr>
+<tr><td><code>yield/interpolatedsimplezerocurve.hpp</code></td><td class="size">10.7 KiB</td></tr>
+<tr><td><code>yield/nonlinearfittingmethods.cpp</code></td><td class="size">14.6 KiB</td></tr>
+<tr><td><code>yield/nonlinearfittingmethods.hpp</code></td><td class="size">11.6 KiB</td></tr>
+<tr><td><code>yield/oisratehelper.cpp</code></td><td class="size">8.9 KiB</td></tr>
+<tr><td><code>yield/oisratehelper.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>yield/overnightindexfutureratehelper.cpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>yield/overnightindexfutureratehelper.hpp</code></td><td class="size">3.7 KiB</td></tr>
+<tr><td><code>yield/piecewiseyieldcurve.hpp</code></td><td class="size">9.9 KiB</td></tr>
+<tr><td><code>yield/piecewisezerospreadedtermstructure.hpp</code></td><td class="size">7.5 KiB</td></tr>
+<tr><td><code>yield/quantotermstructure.hpp</code></td><td class="size">5.4 KiB</td></tr>
+<tr><td><code>yield/ratehelpers.cpp</code></td><td class="size">47.8 KiB</td></tr>
+<tr><td><code>yield/ratehelpers.hpp</code></td><td class="size">20.8 KiB</td></tr>
+<tr><td><code>yield/ultimateforwardtermstructure.hpp</code></td><td class="size">6.7 KiB</td></tr>
+<tr><td><code>yield/zerocurve.hpp</code></td><td class="size">12.7 KiB</td></tr>
+<tr><td><code>yield/zerospreadedtermstructure.hpp</code></td><td class="size">5.7 KiB</td></tr>
+<tr><td><code>yield/zeroyieldstructure.cpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>yield/zeroyieldstructure.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>yieldtermstructure.cpp</code></td><td class="size">9.0 KiB</td></tr>
+<tr><td><code>yieldtermstructure.hpp</code></td><td class="size">8.2 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (1)</h2>
+  <details open><summary>1 files skipped</summary><table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody><tr><td><code>volatility/swaption/swaptionvolcube1.hpp</code></td><td class="size">52.6 KiB</td><td>Exceeds 48.8 KiB</td></tr></tbody></table></details>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>48.8 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>
