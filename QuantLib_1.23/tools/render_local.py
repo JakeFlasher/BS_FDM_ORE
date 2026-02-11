@@ -10,6 +10,7 @@ Usage examples:
     python renderlocal.py ./my-project -o output.xml --html-out summary.html
     python renderlocal.py ./my-project --max-bytes 100000 --ignore node_modules __pycache__ .venv
     python renderlocal.py ./my-project --no-html          # XML only, skip HTML summary
+    python renderlocal.py ./my-project --no-recurse       # only top-level files
 """
 
 from __future__ import annotations
@@ -130,9 +131,11 @@ def decide_file(
 
 def collect_files(
     root: pathlib.Path, max_bytes: int, ignore_patterns: List[str],
+    no_recurse: bool = False,                                          # ← NEW
 ) -> List[FileInfo]:
     infos: List[FileInfo] = []
-    for p in sorted(root.rglob("*")):
+    entries = sorted(root.iterdir()) if no_recurse else sorted(root.rglob("*"))  # ← CHANGED
+    for p in entries:
         if p.is_symlink():
             continue
         if p.is_file():
@@ -410,6 +413,11 @@ def main() -> int:
         help="Skip summary HTML generation",
     )
     ap.add_argument(
+        "--no-recurse", action="store_true",                           # ← NEW
+        help="Only include files directly in the target directory "
+             "(skip all subdirectories)",
+    )
+    ap.add_argument(
         "--max-bytes", type=int, default=MAX_DEFAULT_BYTES,
         help=f"Max file size in bytes to include (default: {MAX_DEFAULT_BYTES} = "
              f"{bytes_human(MAX_DEFAULT_BYTES)})",
@@ -440,7 +448,8 @@ def main() -> int:
 
     # --- Scan ---
     print(f"📂 Scanning {root} ...", file=sys.stderr)
-    infos = collect_files(root, args.max_bytes, ignore_patterns)
+    infos = collect_files(root, args.max_bytes, ignore_patterns,
+                          no_recurse=args.no_recurse)                  # ← CHANGED
     rendered_count = sum(1 for i in infos if i.decision.include)
     skipped_count  = len(infos) - rendered_count
     print(
