@@ -1,0 +1,945 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>africa.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2004, 2005 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*
+    Data from http://fx.sauder.ubc.ca/currency_table.html
+    and http://www.thefinancials.com/vortex/CurrencyFormats.html
+*/
+
+#include <ql/currencies/africa.hpp>
+
+namespace QuantLib {
+
+    // South-African rand
+    /* The ISO three-letter code is ZAR; the numeric code is 710.
+       It is divided into 100 cents.
+    */
+    ZARCurrency::ZARCurrency() {
+        static ext::shared_ptr<Data> zarData(
+                                new Data("South-African rand", "ZAR", 710,
+                                         "R", "", 100,
+                                         Rounding(),
+                                         "%3% %1$.2f"));
+        data_ = zarData;
+    }
+
+    // Nigerian Naira
+    /* ISO-4217 code -> NGN
+     * Corresponding code Number -> 566
+     * The NGN ISO code has a currency exponent of 2 ( i.e subdivided into 100 kobo), 100k = 1NGN.
+     */
+    NGNCurrency::NGNCurrency() {
+        static ext::shared_ptr<Data> ngnData(
+            new Data("Nigerian Naira", "NGN", 566,
+                     "N", "K", 100,
+                     Rounding(),
+                     "%3% %1N.2f"));
+        data_ = ngnData;
+    }
+
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>america.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2004, 2005, 2008 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*
+    Data from http://fx.sauder.ubc.ca/currency_table.html
+    and http://www.thefinancials.com/vortex/CurrencyFormats.html
+*/
+
+#include <ql/currencies/america.hpp>
+
+namespace QuantLib {
+
+    // Argentinian peso
+    /* The ISO three-letter code is ARS; the numeric code is 32.
+       It is divided in 100 centavos.
+    */
+     ARSCurrency::ARSCurrency() {
+        static ext::shared_ptr<Data> arsData(
+                                   new Data("Argentinian peso", "ARS", 32,
+                                            "", "", 100,
+                                            Rounding(),
+                                            "%2% %1$.2f"));
+        data_ = arsData;
+    }
+
+    // Brazilian real
+    /* The ISO three-letter code is BRL; the numeric code is 986.
+       It is divided in 100 centavos.
+    */
+    BRLCurrency::BRLCurrency() {
+        static ext::shared_ptr<Data> brlData(
+                                    new Data("Brazilian real", "BRL", 986,
+                                             "R$", "", 100,
+                                             Rounding(),
+                                             "%3% %1$.2f"));
+        data_ = brlData;
+    }
+
+    // Canadian dollar
+    /* The ISO three-letter code is CAD; the numeric code is 124.
+       It is divided into 100 cents.
+    */
+    CADCurrency::CADCurrency() {
+        static ext::shared_ptr<Data> cadData(
+                                   new Data("Canadian dollar", "CAD", 124,
+                                            "Can$", "", 100,
+                                            Rounding(),
+                                            "%3% %1$.2f"));
+        data_ = cadData;
+    }
+
+    // Chilean peso
+    /* The ISO three-letter code is CLP; the numeric code is 152.
+      It is divided in 100 centavos.
+    */
+    CLPCurrency::CLPCurrency() {
+        static ext::shared_ptr<Data> clpData(
+                                      new Data("Chilean peso", "CLP", 152,
+                                               "Ch$", "", 100,
+                                               Rounding(),
+                                               "%3% %1$.0f"));
+        data_ = clpData;
+    }
+
+    // Colombian peso
+    /* The ISO three-letter code is COP; the numeric code is 170.
+       It is divided in 100 centavos.
+    */
+    COPCurrency::COPCurrency() {
+        static ext::shared_ptr<Data> copData(
+                                    new Data("Colombian peso", "COP", 170,
+                                             "Col$", "", 100,
+                                             Rounding(),
+                                             "%3% %1$.2f"));
+        data_ = copData;
+    }
+
+    // Mexican peso
+    /* The ISO three-letter code is MXN; the numeric code is 484.
+       It is divided in 100 centavos.
+    */
+    MXNCurrency::MXNCurrency() {
+        static ext::shared_ptr<Data> mxnData(
+                                      new Data("Mexican peso", "MXN", 484,
+                                               "Mex$", "", 100,
+                                               Rounding(),
+                                               "%3% %1$.2f"));
+        data_ = mxnData;
+    }
+
+    // Peruvian nuevo sol
+    /* The ISO three-letter code is PEN; the numeric code is 604.
+       It is divided in 100 centimos.
+    */
+    PENCurrency::PENCurrency() {
+        static ext::shared_ptr<Data> penData(
+                                new Data("Peruvian nuevo sol", "PEN", 604,
+                                         "S/.", "", 100,
+                                         Rounding(),
+                                         "%3% %1$.2f"));
+        data_ = penData;
+    }
+
+    // Peruvian inti
+    /* The ISO three-letter code was PEI.
+       It was divided in 100 centimos. A numeric code is not available;
+       as per ISO 3166-1, we assign 998 as a user-defined code.
+    */
+    PEICurrency::PEICurrency() {
+        static ext::shared_ptr<Data> peiData(
+                                new Data("Peruvian inti", "PEI", 998,
+                                         "I/.", "", 100,
+                                         Rounding(),
+                                         "%3% %1$.2f"));
+        data_ = peiData;
+    }
+
+    // Peruvian sol
+    /* The ISO three-letter code was PEH. A numeric code is not available;
+       as per ISO 3166-1, we assign 999 as a user-defined code.
+       It was divided in 100 centavos.
+    */
+    PEHCurrency::PEHCurrency() {
+        static ext::shared_ptr<Data> pehData(
+                                new Data("Peruvian sol", "PEH", 999,
+                                         "S./", "", 100,
+                                         Rounding(),
+                                         "%3% %1$.2f"));
+        data_ = pehData;
+    }
+
+    // Trinidad & Tobago dollar
+    /* The ISO three-letter code is TTD; the numeric code is 780.
+       It is divided in 100 cents.
+    */
+    TTDCurrency::TTDCurrency() {
+        static ext::shared_ptr<Data> ttdData(
+                          new Data("Trinidad & Tobago dollar", "TTD", 780,
+                                   "TT$", "", 100,
+                                   Rounding(),
+                                   "%3% %1$.2f"));
+        data_ = ttdData;
+    }
+
+    // U.S. dollar
+    /* The ISO three-letter code is USD; the numeric code is 840.
+       It is divided in 100 cents.
+    */
+    USDCurrency::USDCurrency() {
+        static ext::shared_ptr<Data> usdData(
+                                       new Data("U.S. dollar", "USD", 840,
+                                                "$", "\xA2", 100,
+                                                Rounding(),
+                                                "%3% %1$.2f"));
+        data_ = usdData;
+    }
+
+    // Venezuelan bolivar
+    /* The ISO three-letter code is VEB; the numeric code is 862.
+       It is divided in 100 centimos.
+    */
+    VEBCurrency::VEBCurrency() {
+        static ext::shared_ptr<Data> vebData(
+                                new Data("Venezuelan bolivar", "VEB", 862,
+                                         "Bs", "", 100,
+                                         Rounding(),
+                                         "%3% %1$.2f"));
+        data_ = vebData;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>asia.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2004, 2005 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*
+    Data from http://fx.sauder.ubc.ca/currency_table.html
+    and http://www.thefinancials.com/vortex/CurrencyFormats.html
+*/
+
+#include <ql/currencies/asia.hpp>
+
+namespace QuantLib {
+
+    // Bangladesh taka
+    /* The ISO three-letter code is BDT; the numeric code is 50.
+       It is divided in 100 paisa.
+    */
+    BDTCurrency::BDTCurrency() {
+        static ext::shared_ptr<Data> bdtData(
+                                    new Data("Bangladesh taka", "BDT", 50,
+                                             "Bt", "", 100,
+                                             Rounding(),
+                                             "%3% %1$.2f"));
+        data_ = bdtData;
+    }
+
+    // Chinese yuan
+    /* The ISO three-letter code is CNY; the numeric code is 156.
+       It is divided in 100 fen.
+    */
+    CNYCurrency::CNYCurrency() {
+        static ext::shared_ptr<Data> cnyData(
+                                      new Data("Chinese yuan", "CNY", 156,
+                                               "Y", "", 100,
+                                               Rounding(),
+                                               "%3% %1$.2f"));
+        data_ = cnyData;
+    }
+
+    // Hong Kong dollar
+    /* The ISO three-letter code is HKD; the numeric code is 344.
+      It is divided in 100 cents.
+    */
+    HKDCurrency::HKDCurrency() {
+        static ext::shared_ptr<Data> hkdData(
+                                  new Data("Hong Kong dollar", "HKD", 344,
+                                           "HK$", "", 100,
+                                           Rounding(),
+                                           "%3% %1$.2f"));
+        data_ = hkdData;
+    }
+
+    // Indonesian Rupiah
+    /* The ISO three-letter code is IDR; the numeric code is 360.
+       It is divided in 100 sen.
+    */
+    IDRCurrency::IDRCurrency() {
+        static ext::shared_ptr<Data> idrData(
+                                    new Data("Indonesian Rupiah", "IDR", 360,
+                                             "Rp", "", 100,
+                                             Rounding(),
+                                             "%3% %1$.2f"));
+        data_ = idrData;
+    }
+
+    // Israeli shekel
+    /* The ISO three-letter code is ILS; the numeric code is 376.
+      It is divided in 100 agorot.
+    */
+    ILSCurrency::ILSCurrency() {
+        static ext::shared_ptr<Data> ilsData(
+                                    new Data("Israeli shekel", "ILS", 376,
+                                             "NIS", "", 100,
+                                             Rounding(),
+                                             "%1$.2f %3%"));
+        data_ = ilsData;
+    }
+
+    // Indian rupee
+    /* The ISO three-letter code is INR; the numeric code is 356.
+       It is divided in 100 paise.
+    */
+    INRCurrency::INRCurrency() {
+            static ext::shared_ptr<Data> inrData(
+                                          new Data("Indian rupee", "INR", 356,
+                                                   "Rs", "", 100,
+                                                   Rounding(),
+                                                   "%3% %1$.2f"));
+            data_ = inrData;
+        }
+
+    // Iraqi dinar
+    /* The ISO three-letter code is IQD; the numeric code is 368.
+       It is divided in 1000 fils.
+    */
+    IQDCurrency::IQDCurrency() {
+        static ext::shared_ptr<Data> iqdData(
+                                       new Data("Iraqi dinar", "IQD", 368,
+                                                "ID", "", 1000,
+                                                Rounding(),
+                                                "%2% %1$.3f"));
+        data_ = iqdData;
+    }
+
+    // Iranian rial
+    /* The ISO three-letter code is IRR; the numeric code is 364.
+       It has no subdivisions.
+    */
+    IRRCurrency::IRRCurrency() {
+        static ext::shared_ptr<Data> irrData(
+                                      new Data("Iranian rial", "IRR", 364,
+                                               "Rls", "", 1,
+                                               Rounding(),
+                                               "%3% %1$.2f"));
+        data_ = irrData;
+    }
+
+    // Japanese yen
+    /* The ISO three-letter code is JPY; the numeric code is 392.
+       It is divided into 100 sen.
+    */
+    JPYCurrency::JPYCurrency() {
+        static ext::shared_ptr<Data> jpyData(
+                                      new Data("Japanese yen", "JPY", 392,
+                                               "\xA5", "", 100,
+                                               Rounding(),
+                                               "%3% %1$.0f"));
+        data_ = jpyData;
+    }
+
+    // South-Korean won
+    /* The ISO three-letter code is KRW; the numeric code is 410.
+       It is divided in 100 chon.
+    */
+    KRWCurrency::KRWCurrency() {
+        static ext::shared_ptr<Data> krwData(
+                                  new Data("South-Korean won", "KRW", 410,
+                                           "W", "", 100,
+                                           Rounding(),
+                                           "%3% %1$.0f"));
+        data_ = krwData;
+    }
+
+    // Kuwaiti dinar
+    /* The ISO three-letter code is KWD; the numeric code is 414.
+       It is divided in 1000 fils.
+    */
+    KWDCurrency::KWDCurrency() {
+        static ext::shared_ptr<Data> kwdData(
+                                     new Data("Kuwaiti dinar", "KWD", 414,
+                                              "KD", "", 1000,
+                                              Rounding(),
+                                              "%3% %1$.3f"));
+        data_ = kwdData;
+    }
+ 
+    // Kazakstani Tenge
+    /* The ISO three-letter code is KZT; the numeric code is 398.
+    It is divided in 100 tijin.
+    */
+    KZTCurrency::KZTCurrency() {
+        static ext::shared_ptr<Data> kztData(
+                                     new Data("Kazakstanti Tenge", "KZT", 398,
+                                              "Kzt", "", 100,
+                                              Rounding(),
+                                              "%3% %1$.3f"));
+        data_ = kztData;
+    }
+    // Malaysian Ringgit
+    /* The ISO three-letter code is MYR; the numeric code is 458.
+       It is divided in 100 sen.
+    */
+    MYRCurrency::MYRCurrency() {
+        static ext::shared_ptr<Data> myrData(
+                                       new Data("Malaysian Ringgit",
+                                                "MYR", 458,
+                                                "RM", "", 100,
+                                                Rounding(),
+                                                "%3% %1$.2f"));
+        data_ = myrData;
+    }
+
+    
+    // Nepal rupee
+    /* The ISO three-letter code is NPR; the numeric code is 524.
+       It is divided in 100 paise.
+    */
+    NPRCurrency::NPRCurrency() {
+        static ext::shared_ptr<Data> nprData(
+                                       new Data("Nepal rupee", "NPR", 524,
+                                                "NRs", "", 100,
+                                                Rounding(),
+                                                "%3% %1$.2f"));
+        data_ = nprData;
+    }
+
+    // Pakistani rupee
+    /* The ISO three-letter code is PKR; the numeric code is 586.
+       It is divided in 100 paisa.
+    */
+    PKRCurrency::PKRCurrency() {
+        static ext::shared_ptr<Data> pkrData(
+                                   new Data("Pakistani rupee", "PKR", 586,
+                                            "Rs", "", 100,
+                                            Rounding(),
+                                            "%3% %1$.2f"));
+        data_ = pkrData;
+    }
+
+    // Saudi riyal
+    /* The ISO three-letter code is SAR; the numeric code is 682.
+       It is divided in 100 halalat.
+    */
+    SARCurrency::SARCurrency() {
+        static ext::shared_ptr<Data> sarData(
+                                       new Data("Saudi riyal", "SAR", 682,
+                                                "SRls", "", 100,
+                                                Rounding(),
+                                                "%3% %1$.2f"));
+        data_ = sarData;
+    }
+
+    // %Singapore dollar
+    /* The ISO three-letter code is SGD; the numeric code is 702.
+       It is divided in 100 cents.
+    */
+    SGDCurrency::SGDCurrency() {
+        static ext::shared_ptr<Data> sgdData(
+                                  new Data("Singapore dollar", "SGD", 702,
+                                           "S$", "", 100,
+                                           Rounding(),
+                                           "%3% %1$.2f"));
+        data_ = sgdData;
+    }
+
+    // Thai baht
+    /* The ISO three-letter code is THB; the numeric code is 764.
+       It is divided in 100 stang.
+    */
+    THBCurrency::THBCurrency() {
+        static ext::shared_ptr<Data> thbData(
+                                         new Data("Thai baht", "THB", 764,
+                                                  "Bht", "", 100,
+                                                  Rounding(),
+                                                  "%1$.2f %3%"));
+        data_ = thbData;
+    }
+
+    // %Taiwan dollar
+    /* The ISO three-letter code is TWD; the numeric code is 901.
+       It is divided in 100 cents.
+    */
+    TWDCurrency::TWDCurrency() {
+        static ext::shared_ptr<Data> twdData(
+                                     new Data("Taiwan dollar", "TWD", 901,
+                                              "NT$", "", 100,
+                                              Rounding(),
+                                              "%3% %1$.2f"));
+        data_ = twdData;
+    }
+
+    // Vietnamese Dong
+    /* The ISO three-letter code is VND; the numeric code is 704.
+       It was divided in 100 xu.
+    */
+    VNDCurrency::VNDCurrency() {
+        static ext::shared_ptr<Data> twdData(
+                                     new Data("Vietnamese Dong", "VND", 704,
+                                              "", "", 100,
+                                              Rounding(),
+                                              "%1$.0f %3%"));
+        data_ = twdData;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>crypto.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2004, 2005 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*
+    Data from http://fx.sauder.ubc.ca/currency_table.html
+    and http://www.thefinancials.com/vortex/CurrencyFormats.html
+*/
+
+#include <ql/currencies/crypto.hpp>
+
+namespace QuantLib {
+
+    // Bitcoin
+    /* https://bitcoin.org/
+    */
+    BTCCurrency::BTCCurrency() {
+        static ext::shared_ptr<Data> btcData(
+                                    new Data("Bitcoin", "BTC", 10000,
+                                             "BTC", "", 100000,
+                                             Rounding(),
+                                             "%3% %1$.5f"));
+        data_ = btcData;
+    }
+
+    //! Ethereum
+    /*! https://www.ethereum.org/
+    */
+    ETHCurrency::ETHCurrency() {
+        static ext::shared_ptr<Data> ethData(
+                                      new Data("Ethereum", "ETH", 10001,
+                                               "ETH", "", 100000,
+                                               Rounding(),
+                                               "%3% %1$.5f"));
+        data_ = ethData;
+    }
+
+    //! Ethereum Classic
+    /*! https://ethereumclassic.github.io/
+    */
+    ETCCurrency::ETCCurrency() {
+        static ext::shared_ptr<Data> etcData(
+                                  new Data("Ethereum Classic", "ETC", 10002,
+                                           "ETC", "", 100000,
+                                           Rounding(),
+                                           "%3% %1$.5f"));
+        data_ = etcData;
+    }
+
+    //! Bitcoin Cash
+    /*! https://www.bitcoincash.org/
+    */
+    BCHCurrency::BCHCurrency() {
+        static ext::shared_ptr<Data> bchData(
+                                    new Data("Bitcoin Cash", "BCH", 10003,
+                                             "BCH", "", 100000,
+                                             Rounding(),
+                                             "%3% %1$.5f"));
+        data_ = bchData;
+    }
+
+    //! Ripple
+    /*! https://ripple.com/
+    */
+    XRPCurrency::XRPCurrency() {
+        static ext::shared_ptr<Data> xrpData(
+                                    new Data("Ripple", "XRP", 10004,
+                                             "XRP", "", 100000,
+                                             Rounding(),
+                                             "%3% %1$.5f"));
+        data_ = xrpData;
+    }
+
+    //! Litecoin
+    /*! https://litecoin.com/
+    */
+    LTCCurrency::LTCCurrency() {
+            static ext::shared_ptr<Data> ltcData(
+                                          new Data("Litecoin", "LTC", 10005,
+                                                   "LTC", "", 100000,
+                                                   Rounding(),
+                                                   "%3% %1$.5f"));
+            data_ = ltcData;
+        }
+
+    //! Dash coin
+    /*! https://www.dash.org/
+    */
+    DASHCurrency::DASHCurrency() {
+        static ext::shared_ptr<Data> dashData(
+                                       new Data("Dash coin", "DASH", 10006,
+                                                "DASH", "", 100000,
+                                                Rounding(),
+                                                "%2% %1$.5f"));
+        data_ = dashData;
+    }
+
+    //! Zcash
+    /*! https://z.cash/
+    */
+    ZECCurrency::ZECCurrency() {
+        static ext::shared_ptr<Data> zecData(
+                                      new Data("Zcash", "ZEC", 10007,
+                                               "ZEC", "", 100000,
+                                               Rounding(),
+                                               "%3% %1$.5f"));
+        data_ = zecData;
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>exchangeratemanager.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2004, 2005, 2006, 2007, 2008 StatPro Italia srl
+ Copyright (C) 2004 Decillion Pty(Ltd)
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/currencies/exchangeratemanager.hpp>
+#include <ql/currencies/europe.hpp>
+#include <ql/currencies/america.hpp>
+#include <ql/settings.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        struct valid_at {
+            Date d;
+            explicit valid_at(const Date& d) : d(d) {}
+            bool operator()(const ExchangeRateManager::Entry& e) const {
+                return d >= e.startDate && d <= e.endDate;
+            }
+        };
+
+    }
+
+    ExchangeRateManager::ExchangeRateManager() {
+        addKnownRates();
+    }
+
+    void ExchangeRateManager::add(const ExchangeRate& rate,
+                                  const Date& startDate,
+                                  const Date& endDate) {
+        Key k = hash(rate.source(), rate.target());
+        data_[k].push_front(Entry(rate,startDate,endDate));
+    }
+
+    ExchangeRate ExchangeRateManager::lookup(const Currency& source,
+                                             const Currency& target,
+                                             Date date,
+                                             ExchangeRate::Type type) const {
+
+        if (source == target)
+            return ExchangeRate(source,target,1.0);
+
+        if (date == Date())
+            date = Settings::instance().evaluationDate();
+
+        if (type == ExchangeRate::Direct) {
+            return directLookup(source,target,date);
+        } else if (!source.triangulationCurrency().empty()) {
+            const Currency& link = source.triangulationCurrency();
+            if (link == target)
+                return directLookup(source,link,date);
+            else
+                return ExchangeRate::chain(directLookup(source,link,date),
+                                           lookup(link,target,date));
+        } else if (!target.triangulationCurrency().empty()) {
+            const Currency& link = target.triangulationCurrency();
+            if (source == link)
+                return directLookup(link,target,date);
+            else
+                return ExchangeRate::chain(lookup(source,link,date),
+                                           directLookup(link,target,date));
+        } else {
+            return smartLookup(source,target,date);
+        }
+    }
+
+    void ExchangeRateManager::clear() {
+        data_.clear();
+        addKnownRates();
+    }
+
+    ExchangeRateManager::Key ExchangeRateManager::hash(
+                               const Currency& c1, const Currency& c2) const {
+        return Key(std::min(c1.numericCode(),c2.numericCode()))*1000
+             + Key(std::max(c1.numericCode(),c2.numericCode()));
+    }
+
+    bool ExchangeRateManager::hashes(ExchangeRateManager::Key k,
+                                     const Currency& c) const {
+        return c.numericCode() == k % 1000 || c.numericCode() == k/1000;
+    }
+
+    void ExchangeRateManager::addKnownRates() {
+        // currencies obsoleted by Euro
+        add(ExchangeRate(EURCurrency(), ATSCurrency(), 13.7603),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), BEFCurrency(), 40.3399),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), DEMCurrency(), 1.95583),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), ESPCurrency(), 166.386),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), FIMCurrency(), 5.94573),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), FRFCurrency(), 6.55957),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), GRDCurrency(), 340.750),
+            Date(1,January,2001), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), IEPCurrency(), 0.787564),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), ITLCurrency(), 1936.27),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), LUFCurrency(), 40.3399),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), NLGCurrency(), 2.20371),
+            Date(1,January,1999), Date::maxDate());
+        add(ExchangeRate(EURCurrency(), PTECurrency(), 200.482),
+            Date(1,January,1999), Date::maxDate());
+        // other obsoleted currencies
+        add(ExchangeRate(TRYCurrency(), TRLCurrency(), 1000000.0),
+            Date(1,January,2005), Date::maxDate());
+        add(ExchangeRate(RONCurrency(), ROLCurrency(), 10000.0),
+            Date(1,July,2005), Date::maxDate());
+        add(ExchangeRate(PENCurrency(), PEICurrency(), 1000000.0),
+            Date(1,July,1991), Date::maxDate());
+        add(ExchangeRate(PEICurrency(), PEHCurrency(), 1000.0),
+            Date(1,February,1985), Date::maxDate());
+    }
+
+    ExchangeRate ExchangeRateManager::directLookup(const Currency& source,
+                                                   const Currency& target,
+                                                   const Date& date) const {
+        if (const ExchangeRate* rate = fetch(source,target,date))
+            return *rate;
+        else
+            QL_FAIL("no direct conversion available from "
+                    << source.code() << " to " << target.code()
+                    << " for " << date);
+    }
+
+    ExchangeRate ExchangeRateManager::smartLookup(
+                                         const Currency& source,
+                                         const Currency& target,
+                                         const Date& date,
+                                         std::list<Integer> forbidden) const {
+        // direct exchange rates are preferred.
+        if (const ExchangeRate* direct = fetch(source,target,date))
+            return *direct;
+
+        // if none is found, turn to smart lookup. The source currency
+        // is forbidden to subsequent lookups in order to avoid cycles.
+        forbidden.push_back(source.numericCode());
+        std::map<Key, std::list<Entry> >::const_iterator i;
+        for (i = data_.begin(); i != data_.end(); ++i) {
+            // we look for exchange-rate data which involve our source
+            // currency...
+            if (hashes(i->first, source) && !(i->second.empty())) {
+                // ...whose other currency is not forbidden...
+                const Entry& e = i->second.front();
+                const Currency& other =
+                    source == e.rate.source() ?
+                        e.rate.target() : e.rate.source();
+                if (std::find(forbidden.begin(),forbidden.end(),
+                              other.numericCode()) == forbidden.end()) {
+                    // ...and which carries information for the requested date.
+                    if (const ExchangeRate* head = fetch(source,other,date)) {
+                        // if we can get to the target from here...
+                        try {
+                            ExchangeRate tail = smartLookup(other,target,date,
+                                                            forbidden);
+                            // ..we're done.
+                            return ExchangeRate::chain(*head,tail);
+                        } catch (Error&) {
+                            // otherwise, we just discard this rate.
+                            ;
+                        }
+                    }
+                }
+            }
+        }
+        // if the loop completed, we have no way to return the requested rate.
+        QL_FAIL("no conversion available from "
+                << source.code() << " to " << target.code()
+                << " for " << date);
+    }
+
+    const ExchangeRate* ExchangeRateManager::fetch(const Currency& source,
+                                                   const Currency& target,
+                                                   const Date& date) const {
+        const std::list<Entry>& rates = data_[hash(source,target)];
+        auto i = std::find_if(rates.begin(), rates.end(), valid_at(date));
+        return i == rates.end() ? (const ExchangeRate*)nullptr : &(i->rate);
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>oceania.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2004, 2005 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*
+    Data from http://fx.sauder.ubc.ca/currency_table.html
+    and http://www.thefinancials.com/vortex/CurrencyFormats.html
+*/
+
+#include <ql/currencies/oceania.hpp>
+
+namespace QuantLib {
+
+    // Australian dollar
+    /* The ISO three-letter code is AUD; the numeric code is 36.
+       It is divided into 100 cents.
+    */
+    AUDCurrency::AUDCurrency() {
+        static ext::shared_ptr<Data> audData(
+                                  new Data("Australian dollar", "AUD", 36,
+                                           "A$", "", 100,
+                                           Rounding(),
+                                           "%3% %1$.2f"));
+        data_ = audData;
+    }
+
+    // New Zealand dollar
+    /* The ISO three-letter code is NZD; the numeric code is 554.
+       It is divided in 100 cents.
+    */
+    NZDCurrency::NZDCurrency() {
+        static ext::shared_ptr<Data> nzdData(
+                                new Data("New Zealand dollar", "NZD", 554,
+                                         "NZ$", "", 100,
+                                         Rounding(),
+                                         "%3% %1$.2f"));
+        data_ = nzdData;
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

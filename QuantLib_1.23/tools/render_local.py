@@ -9,6 +9,7 @@ Usage examples:
     python renderlocal.py ./my-project
     python renderlocal.py ./my-project -o output.xml --html-out summary.html
     python renderlocal.py ./my-project --max-bytes 100000 --ignore node_modules __pycache__ .venv
+    python renderlocal.py ./my-project --ignore .cpp .log "*.tmp"   # extension & glob patterns
     python renderlocal.py ./my-project --no-html          # XML only, skip HTML summary
     python renderlocal.py ./my-project --no-recurse       # only top-level files
 """
@@ -16,6 +17,7 @@ Usage examples:
 from __future__ import annotations
 
 import argparse
+import fnmatch                                                         # ← NEW
 import html
 import os
 import pathlib
@@ -101,6 +103,38 @@ def read_text(path: pathlib.Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Ignore-pattern matching                                            ← NEW
+# ---------------------------------------------------------------------------
+
+def _matches_ignore(name: str, rel: str, ignore_patterns: List[str]) -> bool:
+    """Check whether a file or directory should be ignored.
+
+    Supports three styles of pattern:
+
+    1. Exact path component  – e.g. ``node_modules``, ``.git``, ``__pycache__``
+       Matches when any component in *rel* equals the pattern.
+    2. Glob / wildcard       – e.g. ``*.cpp``, ``test_*``, ``*.min.js``
+       Matched with ``fnmatch`` against the **file name** only.
+    3. Extension shorthand   – e.g. ``.cpp``, ``.log``
+       A pattern that starts with ``.`` (and contains no wildcards) is also
+       treated as a suffix match, so ``.cpp`` conveniently matches
+       ``main.cpp``, ``lib/util.cpp``, etc.
+    """
+    rel_wrapped = f"/{rel}/"
+    for pat in ignore_patterns:
+        # 1) Exact path-component match (original behaviour)
+        if f"/{pat}/" in rel_wrapped or rel == pat:
+            return True
+        # 2) Glob / wildcard against the filename
+        if fnmatch.fnmatch(name, pat):
+            return True
+        # 3) Extension shorthand: ".xyz" matches any name ending with ".xyz"
+        if pat.startswith(".") and name.endswith(pat):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # File scanning
 # ---------------------------------------------------------------------------
 
@@ -116,11 +150,9 @@ def decide_file(
     except FileNotFoundError:
         size = 0
 
-    # Match ignore patterns against individual path components
-    rel_wrapped = f"/{rel}/"
-    for pat in ignore_patterns:
-        if f"/{pat}/" in rel_wrapped or rel == pat:
-            return FileInfo(path, rel, size, RenderDecision(False, "ignored"))
+    # ---- use the new unified matcher ----                            ← CHANGED
+    if _matches_ignore(path.name, rel, ignore_patterns):
+        return FileInfo(path, rel, size, RenderDecision(False, "ignored"))
 
     if size > max_bytes:
         return FileInfo(path, rel, size, RenderDecision(False, "too_large"))
@@ -131,10 +163,10 @@ def decide_file(
 
 def collect_files(
     root: pathlib.Path, max_bytes: int, ignore_patterns: List[str],
-    no_recurse: bool = False,                                          # ← NEW
+    no_recurse: bool = False,
 ) -> List[FileInfo]:
     infos: List[FileInfo] = []
-    entries = sorted(root.iterdir()) if no_recurse else sorted(root.rglob("*"))  # ← CHANGED
+    entries = sorted(root.iterdir()) if no_recurse else sorted(root.rglob("*"))
     for p in entries:
         if p.is_symlink():
             continue
@@ -150,11 +182,15 @@ def collect_files(
 def _generate_tree_fallback(root: pathlib.Path, ignore_patterns: List[str]) -> str:
     lines: List[str] = []
 
-    def should_skip(name: str) -> bool:
-        return name in ignore_patterns
+    def should_skip(entry: pathlib.Path) -> bool:                      # ← CHANGED
+        try:
+            rel = str(entry.relative_to(root)).replace(os.sep, "/")
+        except ValueError:
+            rel = entry.name
+        return _matches_ignore(entry.name, rel, ignore_patterns)
 
     def walk(dir_path: pathlib.Path, prefix: str = "") -> None:
-        entries = [e for e in dir_path.iterdir() if not should_skip(e.name)]
+        entries = [e for e in dir_path.iterdir() if not should_skip(e)]  # ← CHANGED
         entries.sort(key=lambda e: (not e.is_dir(), e.name.lower()))
         for i, e in enumerate(entries):
             last = i == len(entries) - 1
@@ -413,7 +449,7 @@ def main() -> int:
         help="Skip summary HTML generation",
     )
     ap.add_argument(
-        "--no-recurse", action="store_true",                           # ← NEW
+        "--no-recurse", action="store_true",
         help="Only include files directly in the target directory "
              "(skip all subdirectories)",
     )
@@ -425,7 +461,7 @@ def main() -> int:
     ap.add_argument(
         "--ignore", nargs="*", default=[],
         help="Additional directory/file name patterns to ignore "
-             "(e.g. node_modules __pycache__ .venv)",
+             "(e.g. node_modules __pycache__ .venv .cpp '*.tmp')",
     )
     ap.add_argument(
         "--no-open", action="store_true",
@@ -443,13 +479,13 @@ def main() -> int:
     ignore_patterns = DEFAULT_IGNORE + (args.ignore or [])
 
     # --- Derive default output paths ---
-    xml_out  = args.xml_out  or f"flattened/{dir_name}.xml"
-    html_out = args.html_out or f"flattened/{dir_name}_summary.html"
+    xml_out  = args.xml_out  or f"flattened_func_sig/{dir_name}.xml"
+    html_out = args.html_out or f"flattened_func_sig/{dir_name}_summary.html"
 
     # --- Scan ---
     print(f"📂 Scanning {root} ...", file=sys.stderr)
     infos = collect_files(root, args.max_bytes, ignore_patterns,
-                          no_recurse=args.no_recurse)                  # ← CHANGED
+                          no_recurse=args.no_recurse)
     rendered_count = sum(1 for i in infos if i.decision.include)
     skipped_count  = len(infos) - rendered_count
     print(
@@ -462,6 +498,7 @@ def main() -> int:
     print("📝 Generating XML ...", file=sys.stderr)
     xml_text = generate_xml(infos)
     xml_path = pathlib.Path(xml_out)
+    xml_path.parent.mkdir(parents=True, exist_ok=True)
     xml_path.write_text(xml_text, encoding="utf-8")
     print(
         f"💾 Wrote XML: {xml_path.resolve()} ({bytes_human(xml_path.stat().st_size)})",
@@ -475,6 +512,7 @@ def main() -> int:
             root, infos, str(xml_path.resolve()), ignore_patterns, args.max_bytes,
         )
         html_path = pathlib.Path(html_out)
+        html_path.parent.mkdir(parents=True, exist_ok=True)
         html_path.write_text(html_text, encoding="utf-8")
         print(
             f"💾 Wrote HTML: {html_path.resolve()} "

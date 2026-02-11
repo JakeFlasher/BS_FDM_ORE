@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Structure Discovery – ql</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif;
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 1020px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.15rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.25rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.92rem; margin-bottom: 1rem; }
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.7rem 1rem; min-width: 130px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.78rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .stat-card .value { font-size: 1.35rem; font-weight: 600; }
+  .stat-card.hdr  .value { color: #0969da; }
+  .stat-card.src  .value { color: #1a7f37; }
+  .stat-card.top  .value { color: #8250df; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.r { text-align: right; }
+  tr:hover { background: #f6f8fa; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+    font-size: 0.88em;
+  }
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+  .muted { color: #b0b8c0; }
+  .tree { margin: 1rem 0; }
+  .tree pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔍 C++ Structure Discovery</h1>
+  <div class="subtitle">
+    Source: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql</strong><br/>
+    Output: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/ql_structure</strong>
+  </div>
+
+  <div class="note">
+    Header XMLs in <code>hpp/</code> &nbsp;·&nbsp;
+    Source XMLs in <code>cpp/</code> &nbsp;·&nbsp;
+    Top-level snapshot: <code>ql_current.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card hdr">
+      <div class="label">Header XMLs</div>
+      <div class="value">16</div>
+    </div>
+    <div class="stat-card hdr">
+      <div class="label">Header Files</div>
+      <div class="value">1329</div>
+    </div>
+    <div class="stat-card src">
+      <div class="label">Source XMLs</div>
+      <div class="value">16</div>
+    </div>
+    <div class="stat-card src">
+      <div class="label">Source Files</div>
+      <div class="value">888</div>
+    </div>
+    <div class="stat-card top">
+      <div class="label">Top-level</div>
+      <div class="value">62</div>
+    </div>
+  </div>
+
+  <h2>📂 Per-Subdirectory Breakdown</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Subdirectory</th>
+        <th>Headers (.hpp/.h)</th>
+        <th>Sources (.cpp/.cc)</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><code>cashflows/</code></td><td>33 files (193.6 KiB)</td><td>31 files (311.6 KiB)</td><td>64</td></tr>
+<tr><td><code>currencies/</code></td><td>8 files (32.6 KiB)</td><td>6 files (35.4 KiB)</td><td>14</td></tr>
+<tr><td><code>experimental/</code></td><td>296 files (1.4 MiB)</td><td>204 files (1.2 MiB)</td><td>500</td></tr>
+<tr><td><code>indexes/</code></td><td>56 files (152.9 KiB)</td><td>23 files (89.1 KiB)</td><td>79</td></tr>
+<tr><td><code>instruments/</code></td><td>67 files (294.8 KiB)</td><td>62 files (390.8 KiB)</td><td>129</td></tr>
+<tr><td><code>legacy/</code></td><td>17 files (38.0 KiB)</td><td>13 files (50.8 KiB)</td><td>30</td></tr>
+<tr><td><code>math/</code></td><td>170 files (768.0 KiB)</td><td>87 files (420.4 KiB)</td><td>257</td></tr>
+<tr><td><code>methods/</code></td><td>147 files (399.4 KiB)</td><td>86 files (354.0 KiB)</td><td>233</td></tr>
+<tr><td><code>models/</code></td><td>158 files (505.4 KiB)</td><td>119 files (772.2 KiB)</td><td>277</td></tr>
+<tr><td><code>patterns/</code></td><td>7 files (36.8 KiB)</td><td>1 files (6.6 KiB)</td><td>8</td></tr>
+<tr><td><code>pricingengines/</code></td><td>140 files (658.8 KiB)</td><td>98 files (723.4 KiB)</td><td>238</td></tr>
+<tr><td><code>processes/</code></td><td>21 files (68.2 KiB)</td><td>20 files (123.8 KiB)</td><td>41</td></tr>
+<tr><td><code>quotes/</code></td><td>10 files (22.6 KiB)</td><td>6 files (16.2 KiB)</td><td>16</td></tr>
+<tr><td><code>termstructures/</code></td><td>119 files (761.3 KiB)</td><td>69 files (502.0 KiB)</td><td>188</td></tr>
+<tr><td><code>time/</code></td><td>69 files (217.3 KiB)</td><td>60 files (396.9 KiB)</td><td>129</td></tr>
+<tr><td><code>utilities/</code></td><td>11 files (35.3 KiB)</td><td>3 files (8.0 KiB)</td><td>14</td></tr>
+    </tbody>
+  </table>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>58.6 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+    <tr><td><strong>Header extensions</strong></td>
+        <td><code>.h, .h++, .hh, .hpp, .hxx</code></td></tr>
+    <tr><td><strong>Source extensions</strong></td>
+        <td><code>.c, .c++, .cc, .cpp, .cxx</code></td></tr>
+  </table>
+</div>
+</body>
+</html>

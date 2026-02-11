@@ -1,0 +1,2273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>bmaindex.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/bmaindex.hpp>
+#include <ql/currencies/america.hpp>
+#include <ql/time/calendars/unitedstates.hpp>
+#include <ql/time/daycounters/actualactual.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        Date previousWednesday(const Date& date) {
+            Weekday w = date.weekday();
+            if (w >= 4) // roll back w-4 days
+                return date - (w - 4) * Days;
+            else // roll forward 4-w days and back one week
+                return date + (4 - w - 7) * Days;
+        }
+
+        Date nextWednesday(const Date& date) {
+            return previousWednesday(date+7);
+        }
+
+    }
+
+    BMAIndex::BMAIndex(const Handle<YieldTermStructure>& h)
+    : InterestRateIndex("BMA",
+                        1 * Weeks,
+                        1,
+                        USDCurrency(),
+                        UnitedStates(UnitedStates::GovernmentBond),
+                        ActualActual(ActualActual::ISDA)),
+      termStructure_(h) {
+        registerWith (h);
+    }
+
+    BMAIndex::BMAIndex(const Handle<YieldTermStructure>& h,
+                       const Calendar& fixingCalendar)
+    : InterestRateIndex("BMA",
+                        1 * Weeks,
+                        1,
+                        USDCurrency(),
+                        fixingCalendar,
+                        ActualActual(ActualActual::ISDA)),
+      termStructure_(h) {
+        registerWith (h);
+    }
+
+    bool BMAIndex::isValidFixingDate(const Date& date) const {
+        Calendar cal = fixingCalendar();
+        // either the fixing date is last Wednesday, or all days
+        // between last Wednesday included and the fixing date are
+        // holidays
+        for (Date d = previousWednesday(date); d<date; ++d) {
+            if (cal.isBusinessDay(d))
+                return false;
+        }
+        // also, the fixing date itself must be a business day
+        return cal.isBusinessDay(date);
+    }
+
+    Handle<YieldTermStructure> BMAIndex::forwardingTermStructure() const {
+        return termStructure_;
+    }
+
+    Date BMAIndex::maturityDate(const Date& valueDate) const {
+        Calendar cal = fixingCalendar();
+        Date fixingDate = cal.advance(valueDate, -1, Days);
+        Date nextWednesday = previousWednesday(fixingDate+7);
+        return cal.advance(nextWednesday, 1, Days);
+    }
+
+    Schedule BMAIndex::fixingSchedule(const Date& start, const Date& end) {
+        return MakeSchedule().from(previousWednesday(start))
+                             .to(nextWednesday(end))
+                             .withFrequency(Weekly)
+                             .withCalendar(fixingCalendar())
+                             .withConvention(Following)
+                             .forwards();
+    }
+
+    Rate BMAIndex::forecastFixing(const Date& fixingDate) const {
+        QL_REQUIRE(!termStructure_.empty(),
+                   "null term structure set to this instance of " << name());
+        Date start = fixingCalendar().advance(fixingDate, 1, Days);
+        Date end = maturityDate(start);
+        return termStructure_->forwardRate(start, end,
+                                           dayCounter_,
+                                           Simple);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>ibor/bibor.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2018 Matthias Groncki
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/bibor.hpp>
+#include <ql/time/calendars/thailand.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <ql/currencies/asia.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        BusinessDayConvention BiborConvention(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return Following;
+              case Months:
+              case Years:
+                return ModifiedFollowing;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+        bool BiborEOM(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return false;
+              case Months:
+              case Years:
+                return true;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+    }
+
+    Bibor::Bibor(const Period& tenor,
+                     const Handle<YieldTermStructure>& h)
+    : IborIndex("Bibor", tenor,
+                2, // settlement days
+                THBCurrency(), Thailand(),
+                BiborConvention(tenor), BiborEOM(tenor),
+                Actual365Fixed(), h) {
+        QL_REQUIRE(this->tenor().units()!=Days,
+                   "for daily tenors (" << this->tenor() <<
+                   ") dedicated DailyTenor constructor must be used");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>ibor/eonia.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/eonia.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    Eonia::Eonia(const Handle<YieldTermStructure>& h)
+    : OvernightIndex("Eonia", 0, EURCurrency(), TARGET(), Actual360(), h) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>ibor/estr.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2021 Magnus Mencke
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/estr.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    Estr::Estr(const Handle<YieldTermStructure>& h)
+    : OvernightIndex("ESTR", 0, EURCurrency(), TARGET(), Actual360(), h) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>ibor/euribor.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Ferdinando Ametrano
+ Copyright (C) 2007 Chiara Fornarola
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/euribor.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        BusinessDayConvention euriborConvention(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return Following;
+              case Months:
+              case Years:
+                return ModifiedFollowing;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+        bool euriborEOM(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return false;
+              case Months:
+              case Years:
+                return true;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+    }
+
+    Euribor::Euribor(const Period& tenor,
+                     const Handle<YieldTermStructure>& h)
+    : IborIndex("Euribor", tenor,
+                2, // settlement days
+                EURCurrency(), TARGET(),
+                euriborConvention(tenor), euriborEOM(tenor),
+                Actual360(), h) {
+        QL_REQUIRE(this->tenor().units()!=Days,
+                   "for daily tenors (" << this->tenor() <<
+                   ") dedicated DailyTenor constructor must be used");
+    }
+
+    Euribor365::Euribor365(const Period& tenor,
+                           const Handle<YieldTermStructure>& h)
+    : IborIndex("Euribor365", tenor,
+                2, // settlement days
+                EURCurrency(), TARGET(),
+                euriborConvention(tenor), euriborEOM(tenor),
+                Actual365Fixed(), h) {
+        QL_REQUIRE(this->tenor().units()!=Days,
+                   "for daily tenors (" << this->tenor() <<
+                   ") dedicated DailyTenor constructor must be used");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>ibor/eurlibor.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Ferdinando Ametrano
+ Copyright (C) 2007 Chiara Fornarola
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/eurlibor.hpp>
+#include <ql/time/calendars/jointcalendar.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/calendars/unitedkingdom.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        BusinessDayConvention eurliborConvention(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return Following;
+              case Months:
+              case Years:
+                return ModifiedFollowing;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+        bool eurliborEOM(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return false;
+              case Months:
+              case Years:
+                return true;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+    }
+
+    EURLibor::EURLibor(const Period& tenor,
+                       const Handle<YieldTermStructure>& h)
+    : IborIndex("EURLibor", tenor,
+                2,
+                EURCurrency(),
+                // http://www.bba.org.uk/bba/jsp/polopoly.jsp?d=225&a=1412 :
+                // JoinBusinessDays is the fixing calendar for
+                // all indexes but o/n
+                JointCalendar(UnitedKingdom(UnitedKingdom::Exchange),
+                              TARGET(),
+                              JoinBusinessDays),
+                eurliborConvention(tenor), eurliborEOM(tenor),
+                Actual360(), h),
+      target_(TARGET()) {
+        QL_REQUIRE(this->tenor().units()!=Days,
+                   "for daily tenors (" << this->tenor() <<
+                   ") dedicated DailyTenor constructor must be used");
+    }
+
+    Date EURLibor::valueDate(const Date& fixingDate) const {
+
+        QL_REQUIRE(isValidFixingDate(fixingDate),
+                   "Fixing date " << fixingDate << " is not valid");
+
+        // http://www.bba.org.uk/bba/jsp/polopoly.jsp?d=225&a=1412 :
+        // In the case of EUR the Value Date shall be two TARGET
+        // business days after the Fixing Date.
+        return target_.advance(fixingDate, fixingDays_, Days);
+    }
+
+    Date EURLibor::maturityDate(const Date& valueDate) const {
+        // http://www.bba.org.uk/bba/jsp/polopoly.jsp?d=225&a=1412 :
+        // In the case of EUR only, maturity dates will be based on days in
+        // which the Target system is open.
+        return target_.advance(valueDate, tenor_, convention_, endOfMonth());
+    }
+
+    DailyTenorEURLibor::DailyTenorEURLibor(Natural settlementDays,
+                                           const Handle<YieldTermStructure>& h)
+    : IborIndex("EURLibor", 1*Days,
+                settlementDays,
+                EURCurrency(),
+                // http://www.bba.org.uk/bba/jsp/polopoly.jsp?d=225&a=1412 :
+                // no o/n or s/n fixings (as the case may be) will take place
+                // when the principal centre of the currency concerned is
+                // closed but London is open on the fixing day.
+                TARGET(),
+                eurliborConvention(1*Days), eurliborEOM(1*Days),
+                Actual360(), h) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>ibor/fedfunds.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/fedfunds.hpp>
+#include <ql/time/calendars/unitedstates.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/currencies/america.hpp>
+
+namespace QuantLib {
+
+    FedFunds::FedFunds(const Handle<YieldTermStructure>& h)
+    : OvernightIndex("FedFunds", 0,
+                     USDCurrency(),
+                     UnitedStates(UnitedStates::FederalReserve),
+                     Actual360(), h) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>ibor/libor.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Ferdinando Ametrano
+ Copyright (C) 2007 Chiara Fornarola
+ Copyright (C) 2005, 2006, 2008 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/libor.hpp>
+#include <ql/time/calendars/jointcalendar.hpp>
+#include <ql/time/calendars/unitedkingdom.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        BusinessDayConvention liborConvention(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return Following;
+              case Months:
+              case Years:
+                return ModifiedFollowing;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+        bool liborEOM(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return false;
+              case Months:
+              case Years:
+                return true;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+    }
+
+
+    Libor::Libor(const std::string& familyName,
+                 const Period& tenor,
+                 Natural settlementDays,
+                 const Currency& currency,
+                 const Calendar& financialCenterCalendar,
+                 const DayCounter& dayCounter,
+                 const Handle<YieldTermStructure>& h)
+    : IborIndex(familyName, tenor, settlementDays, currency,
+                // http://www.bba.org.uk/bba/jsp/polopoly.jsp?d=225&a=1412 :
+                // UnitedKingdom::Exchange is the fixing calendar for
+                // a) all currencies but EUR
+                // b) all indexes but o/n and s/n
+                UnitedKingdom(UnitedKingdom::Exchange),
+                liborConvention(tenor), liborEOM(tenor),
+                dayCounter, h),
+      financialCenterCalendar_(financialCenterCalendar),
+      jointCalendar_(JointCalendar(UnitedKingdom(UnitedKingdom::Exchange),
+                                   financialCenterCalendar,
+                                   JoinHolidays)) {
+        QL_REQUIRE(this->tenor().units()!=Days,
+                   "for daily tenors (" << this->tenor() <<
+                   ") dedicated DailyTenor constructor must be used");
+        QL_REQUIRE(currency!=EURCurrency(),
+                   "for EUR Libor dedicated EurLibor constructor must be used");
+    }
+
+    Date Libor::valueDate(const Date& fixingDate) const {
+
+        QL_REQUIRE(isValidFixingDate(fixingDate),
+                   "Fixing date " << fixingDate << " is not valid");
+
+        // http://www.bba.org.uk/bba/jsp/polopoly.jsp?d=225&a=1412 :
+        // For all currencies other than EUR and GBP the period between
+        // Fixing Date and Value Date will be two London business days
+        // after the Fixing Date, or if that day is not both a London
+        // business day and a business day in the principal financial centre
+        // of the currency concerned, the next following day which is a
+        // business day in both centres shall be the Value Date.
+        Date d = fixingCalendar().advance(fixingDate, fixingDays_, Days);
+        return jointCalendar_.adjust(d);
+    }
+
+    Date Libor::maturityDate(const Date& valueDate) const {
+        // Where a deposit is made on the final business day of a
+        // particular calendar month, the maturity of the deposit shall
+        // be on the final business day of the month in which it matures
+        // (not the corresponding date in the month of maturity). Or in
+        // other words, in line with market convention, BBA LIBOR rates
+        // are dealt on an end-end basis. For instance a one month
+        // deposit for value 28th February would mature on 31st March,
+        // not the 28th of March.
+        return jointCalendar_.advance(valueDate, tenor_, convention_,
+                                                         endOfMonth());
+    }
+
+    Calendar Libor::jointCalendar() const {
+        return jointCalendar_;
+    }
+
+    ext::shared_ptr<IborIndex> Libor::clone(
+                                  const Handle<YieldTermStructure>& h) const {
+        return ext::shared_ptr<IborIndex>(new Libor(familyName(),
+                                                      tenor(),
+                                                      fixingDays(),
+                                                      currency(),
+                                                      financialCenterCalendar_,
+                                                      dayCounter(),
+                                                      h));
+    }
+
+
+    DailyTenorLibor::DailyTenorLibor(
+                 const std::string& familyName,
+                 Natural settlementDays,
+                 const Currency& currency,
+                 const Calendar& financialCenterCalendar,
+                 const DayCounter& dayCounter,
+                 const Handle<YieldTermStructure>& h)
+    : IborIndex(familyName, 1*Days, settlementDays, currency,
+                // http://www.bba.org.uk/bba/jsp/polopoly.jsp?d=225&a=1412 :
+                // no o/n or s/n fixings (as the case may be) will take place
+                // when the principal centre of the currency concerned is
+                // closed but London is open on the fixing day.
+                JointCalendar(UnitedKingdom(UnitedKingdom::Exchange),
+                              financialCenterCalendar,
+                              JoinHolidays),
+                liborConvention(1*Days), liborEOM(1*Days),
+                dayCounter, h) {
+        QL_REQUIRE(currency!=EURCurrency(),
+                   "for EUR Libor dedicated EurLibor constructor must be used");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>ibor/shibor.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Cheng Li
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/shibor.hpp>
+#include <ql/currencies/asia.hpp>
+#include <ql/time/calendars/china.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        BusinessDayConvention shiborConvention(const Period& p) {
+            switch (p.units()) {
+              case Days:
+              case Weeks:
+                return Following;
+              case Months:
+              case Years:
+                return ModifiedFollowing;
+              default:
+                QL_FAIL("invalid time units");
+            }
+        }
+
+    }
+
+    Shibor::Shibor(const Period& tenor,
+                   const Handle<YieldTermStructure>& h)
+    : IborIndex("Shibor", tenor, (tenor == 1*Days? 0 : 1), CNYCurrency(),
+                China(China::IB), shiborConvention(tenor), false,
+                Actual360(), h) {}
+    
+    ext::shared_ptr<IborIndex> Shibor::clone(
+                                  const Handle<YieldTermStructure>& h) const {
+        return ext::shared_ptr<IborIndex>(new Shibor(tenor(), h));
+    }
+}
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>ibor/sofr.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2018 Roy Zywina
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/sofr.hpp>
+#include <ql/time/calendars/unitedstates.hpp>
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/currencies/america.hpp>
+
+namespace QuantLib {
+
+    Sofr::Sofr(const Handle<YieldTermStructure>& h)
+    : OvernightIndex("SOFR", 0, USDCurrency(),
+                     UnitedStates(UnitedStates::GovernmentBond),
+                     Actual360(), h) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="11">
+    <source>ibor/sonia.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/ibor/sonia.hpp>
+#include <ql/time/calendars/unitedkingdom.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    Sonia::Sonia(const Handle<YieldTermStructure>& h)
+    : OvernightIndex("Sonia", 0, GBPCurrency(),
+                     UnitedKingdom(UnitedKingdom::Exchange),
+                     Actual365Fixed(), h) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="12">
+    <source>iborindex.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+ Copyright (C) 2003, 2004, 2005, 2006, 2008, 2009 StatPro Italia srl
+ Copyright (C) 2009 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/iborindex.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    IborIndex::IborIndex(const std::string& familyName,
+                         const Period& tenor,
+                         Natural settlementDays,
+                         const Currency& currency,
+                         const Calendar& fixingCalendar,
+                         BusinessDayConvention convention,
+                         bool endOfMonth,
+                         const DayCounter& dayCounter,
+                         Handle<YieldTermStructure> h)
+    : InterestRateIndex(familyName, tenor, settlementDays, currency, fixingCalendar, dayCounter),
+      convention_(convention), termStructure_(std::move(h)), endOfMonth_(endOfMonth) {
+        registerWith(termStructure_);
+    }
+
+    Rate IborIndex::forecastFixing(const Date& fixingDate) const {
+        Date d1 = valueDate(fixingDate);
+        Date d2 = maturityDate(d1);
+        Time t = dayCounter_.yearFraction(d1, d2);
+        QL_REQUIRE(t>0.0,
+                   "\n cannot calculate forward rate between " <<
+                   d1 << " and " << d2 <<
+                   ":\n non positive time (" << t <<
+                   ") using " << dayCounter_.name() << " daycounter");
+        return forecastFixing(d1, d2, t);
+    }
+
+    Date IborIndex::maturityDate(const Date& valueDate) const {
+        return fixingCalendar().advance(valueDate,
+                                        tenor_,
+                                        convention_,
+                                        endOfMonth_);
+    }
+
+    ext::shared_ptr<IborIndex> IborIndex::clone(
+                               const Handle<YieldTermStructure>& h) const {
+        return ext::make_shared<IborIndex>(
+                                        familyName(),
+                                                      tenor(),
+                                                      fixingDays(),
+                                                      currency(),
+                                                      fixingCalendar(),
+                                                      businessDayConvention(),
+                                                      endOfMonth(),
+                                                      dayCounter(),
+                                                      h);
+    }
+
+
+    OvernightIndex::OvernightIndex(const std::string& familyName,
+                                   Natural settlementDays,
+                                   const Currency& curr,
+                                   const Calendar& fixCal,
+                                   const DayCounter& dc,
+                                   const Handle<YieldTermStructure>& h)
+   : IborIndex(familyName, 1*Days, settlementDays, curr,
+               fixCal, Following, false, dc, h) {}
+
+    ext::shared_ptr<IborIndex> OvernightIndex::clone(
+                               const Handle<YieldTermStructure>& h) const {
+        return ext::shared_ptr<IborIndex>(
+                                        new OvernightIndex(familyName(),
+                                                           fixingDays(),
+                                                           currency(),
+                                                           fixingCalendar(),
+                                                           dayCounter(),
+                                                           h));
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="13">
+    <source>indexmanager.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2004, 2005, 2006 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/indexmanager.hpp>
+#if defined(__GNUC__) && (((__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)) || (__GNUC__ > 4))
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wunused-local-typedefs"
+#endif
+#include <boost/algorithm/string/case_conv.hpp>
+#if defined(__GNUC__) && (((__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)) || (__GNUC__ > 4))
+#    pragma GCC diagnostic pop
+#endif
+
+using boost::algorithm::to_upper_copy;
+using std::string;
+
+namespace QuantLib {
+
+    bool IndexManager::hasHistory(const string& name) const {
+        return data_.find(to_upper_copy(name)) != data_.end();
+    }
+
+    const TimeSeries<Real>& IndexManager::getHistory(const string& name) const {
+        return data_[to_upper_copy(name)].value();
+    }
+
+    void IndexManager::setHistory(const string& name, const TimeSeries<Real>& history) {
+        data_[to_upper_copy(name)] = history;
+    }
+
+    ext::shared_ptr<Observable> IndexManager::notifier(const string& name) const {
+        return data_[to_upper_copy(name)];
+    }
+
+    std::vector<string> IndexManager::histories() const {
+        std::vector<string> temp;
+        temp.reserve(data_.size());
+        for (history_map::const_iterator i = data_.begin(); i != data_.end(); ++i)
+            temp.push_back(i->first);
+        return temp;
+    }
+
+    void IndexManager::clearHistory(const string& name) { data_.erase(to_upper_copy(name)); }
+
+    void IndexManager::clearHistories() { data_.clear(); }
+
+    bool IndexManager::hasHistoricalFixing(const std::string& name, const Date& fixingDate) const {
+        auto const& indexIter = data_.find(to_upper_copy(name));
+        return (indexIter != data_.end()) &&
+               ((*indexIter).second.value()[fixingDate] != Null<Real>());
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="14">
+    <source>inflationindex.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Chris Kenyon
+ Copyright (C) 2021 Ralf Konrad Eckel
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/inflationindex.hpp>
+#include <ql/termstructures/inflationtermstructure.hpp>
+#include <ql/time/calendars/nullcalendar.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    InflationIndex::InflationIndex(std::string familyName,
+                                   Region region,
+                                   bool revised,
+                                   bool interpolated,
+                                   Frequency frequency,
+                                   const Period& availabilityLag,
+                                   Currency currency)
+    : familyName_(std::move(familyName)), region_(std::move(region)), revised_(revised),
+      interpolated_(interpolated), frequency_(frequency), availabilityLag_(availabilityLag),
+      currency_(std::move(currency)) {
+        name_ = region_.name() + " " + familyName_;
+        registerWith(Settings::instance().evaluationDate());
+        registerWith(IndexManager::instance().notifier(name()));
+    }
+
+
+    Calendar InflationIndex::fixingCalendar() const {
+        static NullCalendar c;
+        return c;
+    }
+
+    void InflationIndex::addFixing(const Date& fixingDate,
+                                   Real fixing,
+                                   bool forceOverwrite) {
+
+        std::pair<Date,Date> lim = inflationPeriod(fixingDate, frequency_);
+        Size n = static_cast<QuantLib::Size>(lim.second - lim.first) + 1;
+        std::vector<Date> dates(n);
+        std::vector<Rate> rates(n);
+        for (Size i=0; i<n; ++i) {
+            dates[i] = lim.first + i;
+            rates[i] = fixing;
+        }
+
+        Index::addFixings(dates.begin(), dates.end(),
+                          rates.begin(), forceOverwrite);
+    }
+
+    ZeroInflationIndex::ZeroInflationIndex(const std::string& familyName,
+                                           const Region& region,
+                                           bool revised,
+                                           bool interpolated,
+                                           Frequency frequency,
+                                           const Period& availabilityLag,
+                                           const Currency& currency,
+                                           Handle<ZeroInflationTermStructure> zeroInflation)
+    : InflationIndex(
+          familyName, region, revised, interpolated, frequency, availabilityLag, currency),
+      zeroInflation_(std::move(zeroInflation)) {
+        registerWith(zeroInflation_);
+    }
+
+    Rate ZeroInflationIndex::fixing(const Date& aFixingDate,
+                                    bool /*forecastTodaysFixing*/) const {
+        if (!needsForecast(aFixingDate)) {
+            std::pair<Date,Date> lim = inflationPeriod(aFixingDate, frequency_);
+            const TimeSeries<Real>& ts = timeSeries();
+            Real pastFixing = ts[lim.first];
+            QL_REQUIRE(pastFixing != Null<Real>(),
+                       "Missing " << name() << " fixing for " << lim.first);
+            Real theFixing = pastFixing;
+            if (interpolated_) {
+                // fixings stored on first day of every period
+                if (aFixingDate == lim.first) {
+                    // we don't actually need the next fixing
+                    theFixing = pastFixing;
+                } else {
+                    Real pastFixing2 = ts[lim.second+1];
+                    QL_REQUIRE(pastFixing2 != Null<Real>(),
+                               "Missing " << name() << " fixing for " << lim.second+1);
+
+                    // Use lagged period for interpolation
+                    std::pair<Date, Date> reference_period_lim = inflationPeriod(aFixingDate + zeroInflationTermStructure()->observationLag(), frequency_);
+                    // now linearly interpolate
+                    Real daysInPeriod = reference_period_lim.second + 1 - reference_period_lim.first;
+                    theFixing = pastFixing
+                        + (pastFixing2 - pastFixing)*(aFixingDate - lim.first) / daysInPeriod;
+                }
+            }
+            return theFixing;
+        } else {
+            return forecastFixing(aFixingDate);
+        }
+    }
+
+
+    bool ZeroInflationIndex::needsForecast(const Date& fixingDate) const {
+
+        // Stored fixings are always non-interpolated.
+        // If an interpolated fixing is required then
+        // the availability lag + one inflation period
+        // must have passed to use historical fixings
+        // (because you need the next one to interpolate).
+        // The interpolation is calculated (linearly) on demand.
+
+        Date today = Settings::instance().evaluationDate();
+        Date todayMinusLag = today - availabilityLag_;
+
+        Date historicalFixingKnown =
+            inflationPeriod(todayMinusLag, frequency_).first-1;
+        Date latestNeededDate = fixingDate;
+
+        if (interpolated_) { // might need the next one too
+            std::pair<Date,Date> p = inflationPeriod(fixingDate, frequency_);
+            if (fixingDate > p.first)
+                latestNeededDate += Period(frequency_);
+        }
+
+        if (latestNeededDate <= historicalFixingKnown) {
+            // the fixing date is well before the availability lag, so
+            // we know that fixings were provided.
+            return false;
+        } else if (latestNeededDate > today) {
+            // the fixing can't be available, no matter what's in the
+            // time series
+            return true;
+        } else {
+            // we're not sure, but the fixing might be there so we
+            // check.  Todo: check which fixings are not possible, to
+            // avoid using fixings in the future
+            Real f = timeSeries()[latestNeededDate];
+            return (f == Null<Real>());
+        }
+    }
+
+
+    Rate ZeroInflationIndex::forecastFixing(const Date& fixingDate) const {
+        // the term structure is relative to the fixing value at the base date.
+        Date baseDate = zeroInflation_->baseDate();
+        QL_REQUIRE(!needsForecast(baseDate),
+                   name() << " index fixing at base date " << baseDate << " is not available");
+        Real baseFixing = fixing(baseDate);
+        Date effectiveFixingDate;
+        if (interpolated()) {
+            effectiveFixingDate = fixingDate;
+        } else {
+            // start of period is the convention
+            // so it's easier to do linear interpolation on fixings
+            effectiveFixingDate = inflationPeriod(fixingDate, frequency()).first;
+        }
+
+        // no observation lag because it is the fixing for the date
+        // but if index is not interpolated then that fixing is constant
+        // for each period, hence the t uses the effectiveFixingDate
+        // However, it's slightly safe to get the zeroRate with the
+        // fixingDate to avoid potential problems at the edges of periods
+        Time t = zeroInflation_->dayCounter().yearFraction(baseDate, effectiveFixingDate);
+        bool forceLinearInterpolation = false;
+        Rate zero = zeroInflation_->zeroRate(fixingDate, Period(0,Days), forceLinearInterpolation);
+        // Annual compounding is the convention for zero inflation rates (or quotes)
+        return baseFixing * std::pow(1.0 + zero, t);
+    }
+
+
+    ext::shared_ptr<ZeroInflationIndex> ZeroInflationIndex::clone(
+                          const Handle<ZeroInflationTermStructure>& h) const {
+        return ext::make_shared<ZeroInflationIndex>(
+                      familyName_, region_, revised_,
+                                             interpolated_, frequency_,
+                                             availabilityLag_, currency_, h);
+    }
+
+    // these still need to be fixed to latest versions
+
+    YoYInflationIndex::YoYInflationIndex(const std::string& familyName,
+                                         const Region& region,
+                                         bool revised,
+                                         bool interpolated,
+                                         bool ratio,
+                                         Frequency frequency,
+                                         const Period& availabilityLag,
+                                         const Currency& currency,
+                                         Handle<YoYInflationTermStructure> yoyInflation)
+    : InflationIndex(
+          familyName, region, revised, interpolated, frequency, availabilityLag, currency),
+      ratio_(ratio), yoyInflation_(std::move(yoyInflation)) {
+        registerWith(yoyInflation_);
+    }
+
+
+    Rate YoYInflationIndex::fixing(const Date& fixingDate,
+                                   bool /*forecastTodaysFixing*/) const {
+
+        Date today = Settings::instance().evaluationDate();
+        Date todayMinusLag = today - availabilityLag_;
+        std::pair<Date,Date> lim = inflationPeriod(todayMinusLag, frequency_);
+        Date lastFix = lim.first-1;
+
+        Date flatMustForecastOn = lastFix+1;
+        Date interpMustForecastOn = lastFix+1 - Period(frequency_);
+
+
+        if (interpolated() && fixingDate >= interpMustForecastOn) {
+            return forecastFixing(fixingDate);
+        }
+
+        if (!interpolated() && fixingDate >= flatMustForecastOn) {
+            return forecastFixing(fixingDate);
+        }
+
+        // four cases with ratio() and interpolated()
+
+        const TimeSeries<Real>& ts = timeSeries();
+        if (ratio()) {
+
+            if(interpolated()){ // IS ratio, IS interpolated
+
+                std::pair<Date,Date> lim = inflationPeriod(fixingDate, frequency_);
+                Date fixMinus1Y=NullCalendar().advance(fixingDate, -1*Years, ModifiedFollowing);
+                std::pair<Date,Date> limBef = inflationPeriod(fixMinus1Y, frequency_);
+                Real dp= lim.second + 1 - lim.first;
+                Real dpBef=limBef.second + 1 - limBef.first;
+                Real dl = fixingDate-lim.first;
+                // potentially does not work on 29th Feb
+                Real dlBef = fixMinus1Y - limBef.first;
+                // get the four relevant fixings
+                // recall that they are stored flat for every day
+                Rate limFirstFix = ts[lim.first];
+                QL_REQUIRE(limFirstFix != Null<Rate>(),
+                            "Missing " << name() << " fixing for "
+                            << lim.first );
+                Rate limSecondFix = ts[lim.second+1];
+                QL_REQUIRE(limSecondFix != Null<Rate>(),
+                            "Missing " << name() << " fixing for "
+                            << lim.second+1 );
+                Rate limBefFirstFix = ts[limBef.first];
+                QL_REQUIRE(limBefFirstFix != Null<Rate>(),
+                            "Missing " << name() << " fixing for "
+                            << limBef.first );
+                Rate limBefSecondFix =
+                IndexManager::instance().getHistory(name())[limBef.second+1];
+                QL_REQUIRE(limBefSecondFix != Null<Rate>(),
+                            "Missing " << name() << " fixing for "
+                            << limBef.second+1 );
+
+                Real linearNow = limFirstFix + (limSecondFix-limFirstFix)*dl/dp;
+                Real linearBef = limBefFirstFix + (limBefSecondFix-limBefFirstFix)*dlBef/dpBef;
+                Rate wasYES = linearNow / linearBef - 1.0;
+
+                return wasYES;
+
+            } else {    // IS ratio, NOT interpolated
+                Rate pastFixing = ts[fixingDate];
+                QL_REQUIRE(pastFixing != Null<Rate>(),
+                            "Missing " << name() << " fixing for "
+                            << fixingDate);
+                Date previousDate = fixingDate - 1*Years;
+                Rate previousFixing = ts[previousDate];
+                QL_REQUIRE(previousFixing != Null<Rate>(),
+                           "Missing " << name() << " fixing for "
+                           << previousDate );
+
+                return pastFixing/previousFixing - 1.0;
+            }
+
+        } else {  // NOT ratio
+
+            if (interpolated()) { // NOT ratio, IS interpolated
+
+                std::pair<Date,Date> lim = inflationPeriod(fixingDate, frequency_);
+                Real dp= lim.second + 1 - lim.first;
+                Real dl = fixingDate-lim.first;
+                Rate limFirstFix = ts[lim.first];
+                QL_REQUIRE(limFirstFix != Null<Rate>(),
+                            "Missing " << name() << " fixing for "
+                            << lim.first );
+                Rate limSecondFix = ts[lim.second+1];
+                QL_REQUIRE(limSecondFix != Null<Rate>(),
+                            "Missing " << name() << " fixing for "
+                            << lim.second+1 );
+                Real linearNow = limFirstFix + (limSecondFix-limFirstFix)*dl/dp;
+
+                return linearNow;
+
+            } else { // NOT ratio, NOT interpolated
+                    // so just flat
+
+                Rate pastFixing = ts[fixingDate];
+                QL_REQUIRE(pastFixing != Null<Rate>(),
+                           "Missing " << name() << " fixing for "
+                           << fixingDate);
+                return pastFixing;
+
+            }
+        }
+
+        // QL_FAIL("YoYInflationIndex::fixing, should never get here");
+
+    }
+
+
+    Real YoYInflationIndex::forecastFixing(const Date& fixingDate) const {
+
+        Date d;
+        if (interpolated()) {
+            d = fixingDate;
+        } else {
+            // if the value is not interpolated use the starting value
+            // by internal convention this will be consistent
+            std::pair<Date,Date> lim = inflationPeriod(fixingDate, frequency_);
+            d = lim.first;
+        }
+        return yoyInflation_->yoyRate(d,0*Days);
+    }
+
+    ext::shared_ptr<YoYInflationIndex> YoYInflationIndex::clone(
+                           const Handle<YoYInflationTermStructure>& h) const {
+        return ext::make_shared<YoYInflationIndex>(
+                      familyName_, region_, revised_,
+                                            interpolated_, ratio_, frequency_,
+                                            availabilityLag_, currency_, h);
+    }
+
+
+    CPI::InterpolationType
+    detail::CPI::effectiveInterpolationType(const ext::shared_ptr<ZeroInflationIndex>& index,
+                                            const QuantLib::CPI::InterpolationType& type) {
+        if (type == QuantLib::CPI::AsIndex) {
+            return index->interpolated() ? QuantLib::CPI::Linear : QuantLib::CPI::Flat;
+        } else {
+            return type;
+        }
+    }
+}
+]]></document_content>
+  </document>
+  <document index="15">
+    <source>interestrateindex.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006, 2011 Ferdinando Ametrano
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+ Copyright (C) 2003, 2004, 2005, 2006, 2007 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/interestrateindex.hpp>
+#include <ql/settings.hpp>
+#include <sstream>
+#include <utility>
+
+namespace QuantLib {
+
+    InterestRateIndex::InterestRateIndex(std::string familyName,
+                                         const Period& tenor,
+                                         Natural fixingDays,
+                                         Currency currency,
+                                         Calendar fixingCalendar,
+                                         DayCounter dayCounter)
+    : familyName_(std::move(familyName)), tenor_(tenor), fixingDays_(fixingDays),
+      currency_(std::move(currency)), dayCounter_(std::move(dayCounter)),
+      fixingCalendar_(std::move(fixingCalendar)) {
+        tenor_.normalize();
+
+        std::ostringstream out;
+        out << familyName_;
+        if (tenor_ == 1*Days) {
+            if (fixingDays_==0)
+                out << "ON";
+            else if (fixingDays_==1)
+                out << "TN";
+            else if (fixingDays_==2)
+                out << "SN";
+            else
+                out << io::short_period(tenor_);
+        } else {
+            out << io::short_period(tenor_);
+        }
+        out << " " << dayCounter_.name();
+        name_ = out.str();
+
+        registerWith(Settings::instance().evaluationDate());
+        registerWith(IndexManager::instance().notifier(InterestRateIndex::name()));
+    }
+
+    Rate InterestRateIndex::fixing(const Date& fixingDate,
+                                   bool forecastTodaysFixing) const {
+
+        QL_REQUIRE(isValidFixingDate(fixingDate),
+                   "Fixing date " << fixingDate << " is not valid");
+
+        Date today = Settings::instance().evaluationDate();
+
+        if (fixingDate>today ||
+            (fixingDate==today && forecastTodaysFixing))
+            return forecastFixing(fixingDate);
+
+        if (fixingDate<today ||
+            Settings::instance().enforcesTodaysHistoricFixings()) {
+            // must have been fixed
+            // do not catch exceptions
+            Rate result = pastFixing(fixingDate);
+            QL_REQUIRE(result != Null<Real>(),
+                       "Missing " << name() << " fixing for " << fixingDate);
+            return result;
+        }
+
+        try {
+            // might have been fixed
+            Rate result = pastFixing(fixingDate);
+            if (result!=Null<Real>())
+                return result;
+            else
+                ;   // fall through and forecast
+        } catch (Error&) {
+                ;   // fall through and forecast
+        }
+        return forecastFixing(fixingDate);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="16">
+    <source>region.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Chris Kenyon
+ Copyright (C) 2014 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/region.hpp>
+
+namespace QuantLib {
+
+    CustomRegion::CustomRegion(const std::string& name,
+                               const std::string& code) {
+        data_ = ext::make_shared<Data>(name,code);
+    }
+
+
+    AustraliaRegion::AustraliaRegion() {
+        static ext::shared_ptr<Data> AUdata(new Data("Australia","AU"));
+        data_ = AUdata;
+    }
+
+    EURegion::EURegion() {
+        static ext::shared_ptr<Data> EUdata(new Data("EU","EU"));
+        data_ = EUdata;
+    }
+
+    FranceRegion::FranceRegion() {
+        static ext::shared_ptr<Data> FRdata(new Data("France","FR"));
+        data_ = FRdata;
+    }
+
+    UKRegion::UKRegion() {
+        static ext::shared_ptr<Data> UKdata(new Data("UK","UK"));
+        data_ = UKdata;
+    }
+
+    USRegion::USRegion() {
+        static ext::shared_ptr<Data> USdata(new Data("USA","US"));
+        data_ = USdata;
+    }
+
+    ZARegion::ZARegion() {
+        static ext::shared_ptr<Data> ZAdata(new Data("South Africa","ZA"));
+        data_ = ZAdata;
+    }
+
+
+}
+
+]]></document_content>
+  </document>
+  <document index="17">
+    <source>swap/chfliborswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006, 2007, 2008, 2011 Ferdinando Ametrano
+ Copyright (C) 2006 Chiara Fornarola
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/swap/chfliborswap.hpp>
+#include <ql/indexes/ibor/chflibor.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/thirty360.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    ChfLiborSwapIsdaFix::ChfLiborSwapIsdaFix(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& h)
+    : SwapIndex("ChfLiborSwapIsdaFix", // familyName
+                tenor,
+                2, // settlementDays
+                CHFCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new CHFLibor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new CHFLibor(3*Months, h))) {}
+
+    ChfLiborSwapIsdaFix::ChfLiborSwapIsdaFix(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("ChfLiborSwapIsdaFix", // familyName
+                tenor,
+                2, // settlementDays
+                CHFCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new CHFLibor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new CHFLibor(3*Months, forwarding)),
+                discounting) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="18">
+    <source>swap/euriborswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006, 2007, 2008, 2009 Ferdinando Ametrano
+ Copyright (C) 2006 Katiuscia Manzoni
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/swap/euriborswap.hpp>
+#include <ql/indexes/ibor/euribor.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/thirty360.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    EuriborSwapIsdaFixA::EuriborSwapIsdaFixA(
+                                        const Period& tenor,
+                                        const Handle<YieldTermStructure>& h)
+    : SwapIndex("EuriborSwapIsdaFixA", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new Euribor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new Euribor(3*Months, h))) {}
+
+    EuriborSwapIsdaFixA::EuriborSwapIsdaFixA(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("EuriborSwapIsdaFixA", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new Euribor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new Euribor(3*Months, forwarding)),
+                discounting) {}
+
+    EuriborSwapIsdaFixB::EuriborSwapIsdaFixB(
+                                        const Period& tenor,
+                                        const Handle<YieldTermStructure>& h)
+    : SwapIndex("EuriborSwapIsdaFixB", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new Euribor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new Euribor(3*Months, h))) {}
+
+    EuriborSwapIsdaFixB::EuriborSwapIsdaFixB(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("EuriborSwapIsdaFixB", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new Euribor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new Euribor(3*Months, forwarding)),
+                discounting) {}
+
+
+    EuriborSwapIfrFix::EuriborSwapIfrFix(const Period& tenor,
+                                         const Handle<YieldTermStructure>& h)
+    : SwapIndex("EuriborSwapIfrFix", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new Euribor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new Euribor(3*Months, h))) {}
+
+    EuriborSwapIfrFix::EuriborSwapIfrFix(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("EuriborSwapIfrFix", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new Euribor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new Euribor(3*Months, forwarding)),
+                discounting) {}
+
+
+}
+]]></document_content>
+  </document>
+  <document index="19">
+    <source>swap/eurliborswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006, 2007, 2008 Ferdinando Ametrano
+ Copyright (C) 2006 Chiara Fornarola
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/swap/eurliborswap.hpp>
+#include <ql/indexes/ibor/eurlibor.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/thirty360.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    EurLiborSwapIsdaFixA::EurLiborSwapIsdaFixA(
+                                        const Period& tenor,
+                                        const Handle<YieldTermStructure>& h)
+    : SwapIndex("EurLiborSwapIsdaFixA", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new EURLibor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new EURLibor(3*Months, h))) {}
+
+    EurLiborSwapIsdaFixA::EurLiborSwapIsdaFixA(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("EurLiborSwapIsdaFixA", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new EURLibor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new EURLibor(3*Months, forwarding)),
+                discounting) {}
+
+    EurLiborSwapIsdaFixB::EurLiborSwapIsdaFixB(
+                                        const Period& tenor,
+                                        const Handle<YieldTermStructure>& h)
+    : SwapIndex("EurLiborSwapIsdaFixB", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new EURLibor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new EURLibor(3*Months, h))) {}
+
+    EurLiborSwapIsdaFixB::EurLiborSwapIsdaFixB(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("EurLiborSwapIsdaFixB", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new EURLibor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new EURLibor(3*Months, forwarding)),
+                discounting) {}
+
+    EurLiborSwapIfrFix::EurLiborSwapIfrFix(
+                                        const Period& tenor,
+                                        const Handle<YieldTermStructure>& h)
+    : SwapIndex("EurLiborSwapIfrFix", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new EURLibor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new EURLibor(3*Months, h))) {}
+
+    EurLiborSwapIfrFix::EurLiborSwapIfrFix(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("EurLiborSwapIfrFix", // familyName
+                tenor,
+                2, // settlementDays
+                EURCurrency(),
+                TARGET(),
+                1*Years, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new EURLibor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new EURLibor(3*Months, forwarding)),
+                discounting) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="20">
+    <source>swap/gbpliborswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006, 2007, 2008, 2011 Ferdinando Ametrano
+ Copyright (C) 2006 Chiara Fornarola
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/swap/gbpliborswap.hpp>
+#include <ql/indexes/ibor/gbplibor.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <ql/currencies/europe.hpp>
+
+namespace QuantLib {
+
+    GbpLiborSwapIsdaFix::GbpLiborSwapIsdaFix(
+                            const Period& tenor,
+                            const Handle<YieldTermStructure>& h)
+    : SwapIndex("GbpLiborSwapIsdaFix", // familyName
+                tenor,
+                0, // settlementDays
+                GBPCurrency(),
+                UnitedKingdom(UnitedKingdom::Exchange),
+                tenor > 1*Years ? // fixedLegTenor
+                    6*Months : 1*Years,
+                ModifiedFollowing, // fixedLegConvention
+                Actual365Fixed(), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new GBPLibor(6*Months, h)) :
+                    ext::shared_ptr<IborIndex>(new GBPLibor(3*Months, h))) {}
+
+    GbpLiborSwapIsdaFix::GbpLiborSwapIsdaFix(
+                            const Period& tenor,
+                            const Handle<YieldTermStructure>& forwarding,
+                            const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("GbpLiborSwapIsdaFix", // familyName
+                tenor,
+                0, // settlementDays
+                GBPCurrency(),
+                UnitedKingdom(UnitedKingdom::Exchange),
+                tenor > 1*Years ? // fixedLegTenor
+                    6*Months : 1*Years,
+                ModifiedFollowing, // fixedLegConvention
+                Actual365Fixed(), // fixedLegDaycounter
+                tenor > 1*Years ?
+                    ext::shared_ptr<IborIndex>(new GBPLibor(6*Months, forwarding)) :
+                    ext::shared_ptr<IborIndex>(new GBPLibor(3*Months, forwarding)),
+                discounting) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="21">
+    <source>swap/jpyliborswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008, 2011 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/swap/jpyliborswap.hpp>
+#include <ql/indexes/ibor/jpylibor.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/actualactual.hpp>
+#include <ql/currencies/asia.hpp>
+
+namespace QuantLib {
+
+    JpyLiborSwapIsdaFixAm::JpyLiborSwapIsdaFixAm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& h)
+    : SwapIndex("JpyLiborSwapIsdaFixAm", // familyName
+                tenor,
+                2, // settlementDays
+                JPYCurrency(),
+                TARGET(),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                ActualActual(ActualActual::ISDA), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new JPYLibor(6*Months, h))) {}
+
+    JpyLiborSwapIsdaFixAm::JpyLiborSwapIsdaFixAm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("JpyLiborSwapIsdaFixAm", // familyName
+                tenor,
+                2, // settlementDays
+                JPYCurrency(),
+                TARGET(),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                ActualActual(ActualActual::ISDA), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new JPYLibor(6*Months, forwarding)),
+                discounting) {}
+
+    JpyLiborSwapIsdaFixPm::JpyLiborSwapIsdaFixPm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& h)
+    : SwapIndex("JpyLiborSwapIsdaFixPm", // familyName
+                tenor,
+                2, // settlementDays
+                JPYCurrency(),
+                TARGET(),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                ActualActual(ActualActual::ISDA), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new JPYLibor(6*Months, h))) {}
+
+    JpyLiborSwapIsdaFixPm::JpyLiborSwapIsdaFixPm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("JpyLiborSwapIsdaFixPm", // familyName
+                tenor,
+                2, // settlementDays
+                JPYCurrency(),
+                TARGET(),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                ActualActual(ActualActual::ISDA), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new JPYLibor(6*Months, forwarding)),
+                discounting) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="22">
+    <source>swap/usdliborswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008, 2011 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/indexes/swap/usdliborswap.hpp>
+#include <ql/indexes/ibor/usdlibor.hpp>
+#include <ql/time/calendars/target.hpp>
+#include <ql/time/daycounters/thirty360.hpp>
+#include <ql/currencies/america.hpp>
+
+namespace QuantLib {
+
+    UsdLiborSwapIsdaFixAm::UsdLiborSwapIsdaFixAm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& h)
+    : SwapIndex("UsdLiborSwapIsdaFixAm", // familyName
+                tenor,
+                2, // settlementDays
+                USDCurrency(),
+                UnitedStates(UnitedStates::GovernmentBond),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new USDLibor(3*Months, h))) {}
+
+    UsdLiborSwapIsdaFixAm::UsdLiborSwapIsdaFixAm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("UsdLiborSwapIsdaFixAm", // familyName
+                tenor,
+                2, // settlementDays
+                USDCurrency(),
+                UnitedStates(UnitedStates::GovernmentBond),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new USDLibor(3*Months, forwarding)),
+                discounting) {}
+
+    UsdLiborSwapIsdaFixPm::UsdLiborSwapIsdaFixPm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& h)
+    : SwapIndex("UsdLiborSwapIsdaFixPm", // familyName
+                tenor,
+                2, // settlementDays
+                USDCurrency(),
+                UnitedStates(UnitedStates::GovernmentBond),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new USDLibor(3*Months, h))) {}
+
+    UsdLiborSwapIsdaFixPm::UsdLiborSwapIsdaFixPm(
+                                const Period& tenor,
+                                const Handle<YieldTermStructure>& forwarding,
+                                const Handle<YieldTermStructure>& discounting)
+    : SwapIndex("UsdLiborSwapIsdaFixPm", // familyName
+                tenor,
+                2, // settlementDays
+                USDCurrency(),
+                UnitedStates(UnitedStates::GovernmentBond),
+                6*Months, // fixedLegTenor
+                ModifiedFollowing, // fixedLegConvention
+                Thirty360(Thirty360::BondBasis), // fixedLegDaycounter
+                ext::shared_ptr<IborIndex>(new USDLibor(3*Months, forwarding)),
+                discounting) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="23">
+    <source>swapindex.cpp</source>
+    <document_content><![CDATA[/*
+ Copyright (C) 2006, 2009 Ferdinando Ametrano
+ Copyright (C) 2006, 2007, 2009 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+
+ This program is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ or FITNESS FOR A PARTICULAR PURPOSE. See the license for more details. */
+
+#include <ql/indexes/iborindex.hpp>
+#include <ql/indexes/swapindex.hpp>
+#include <ql/instruments/makeois.hpp>
+#include <ql/instruments/makevanillaswap.hpp>
+#include <ql/time/schedule.hpp>
+#include <sstream>
+#include <utility>
+
+namespace QuantLib {
+
+    SwapIndex::SwapIndex(const std::string& familyName,
+                         const Period& tenor,
+                         Natural settlementDays,
+                         const Currency& currency,
+                         const Calendar& fixingCalendar,
+                         const Period& fixedLegTenor,
+                         BusinessDayConvention fixedLegConvention,
+                         const DayCounter& fixedLegDayCounter,
+                         ext::shared_ptr<IborIndex> iborIndex)
+    : InterestRateIndex(
+          familyName, tenor, settlementDays, currency, fixingCalendar, fixedLegDayCounter),
+      tenor_(tenor), iborIndex_(std::move(iborIndex)), fixedLegTenor_(fixedLegTenor),
+      fixedLegConvention_(fixedLegConvention), exogenousDiscount_(false),
+      discount_(Handle<YieldTermStructure>()) {
+        registerWith(iborIndex_);
+    }
+
+    SwapIndex::SwapIndex(const std::string& familyName,
+                         const Period& tenor,
+                         Natural settlementDays,
+                         const Currency& currency,
+                         const Calendar& fixingCalendar,
+                         const Period& fixedLegTenor,
+                         BusinessDayConvention fixedLegConvention,
+                         const DayCounter& fixedLegDayCounter,
+                         ext::shared_ptr<IborIndex> iborIndex,
+                         Handle<YieldTermStructure> discount)
+    : InterestRateIndex(
+          familyName, tenor, settlementDays, currency, fixingCalendar, fixedLegDayCounter),
+      tenor_(tenor), iborIndex_(std::move(iborIndex)), fixedLegTenor_(fixedLegTenor),
+      fixedLegConvention_(fixedLegConvention), exogenousDiscount_(true),
+      discount_(std::move(discount)) {
+        registerWith(iborIndex_);
+        registerWith(discount_);
+    }
+
+    Handle<YieldTermStructure> SwapIndex::forwardingTermStructure() const {
+        return iborIndex_->forwardingTermStructure();
+    }
+
+    Handle<YieldTermStructure> SwapIndex::discountingTermStructure() const {
+        return discount_;  // empty if not exogenous
+    }
+
+    Rate SwapIndex::forecastFixing(const Date& fixingDate) const {
+        return underlyingSwap(fixingDate)->fairRate();
+    }
+
+    ext::shared_ptr<VanillaSwap>
+    SwapIndex::underlyingSwap(const Date& fixingDate) const {
+
+        QL_REQUIRE(fixingDate!=Date(), "null fixing date");
+
+        // caching mechanism
+        if (lastFixingDate_!=fixingDate) {
+            Rate fixedRate = 0.0;
+            if (exogenousDiscount_)
+                lastSwap_ = MakeVanillaSwap(tenor_, iborIndex_, fixedRate)
+                    .withEffectiveDate(valueDate(fixingDate))
+                    .withFixedLegCalendar(fixingCalendar())
+                    .withFixedLegDayCount(dayCounter_)
+                    .withFixedLegTenor(fixedLegTenor_)
+                    .withFixedLegConvention(fixedLegConvention_)
+                    .withFixedLegTerminationDateConvention(fixedLegConvention_)
+                    .withDiscountingTermStructure(discount_);
+            else
+                lastSwap_ = MakeVanillaSwap(tenor_, iborIndex_, fixedRate)
+                    .withEffectiveDate(valueDate(fixingDate))
+                    .withFixedLegCalendar(fixingCalendar())
+                    .withFixedLegDayCount(dayCounter_)
+                    .withFixedLegTenor(fixedLegTenor_)
+                    .withFixedLegConvention(fixedLegConvention_)
+                    .withFixedLegTerminationDateConvention(fixedLegConvention_);
+            lastFixingDate_ = fixingDate;
+        }
+        return lastSwap_;
+    }
+
+    Date SwapIndex::maturityDate(const Date& valueDate) const {
+        Date fixDate = fixingDate(valueDate);
+        return underlyingSwap(fixDate)->maturityDate();
+    }
+
+    ext::shared_ptr<SwapIndex>
+    SwapIndex::clone(const Handle<YieldTermStructure>& forwarding) const {
+
+        if (exogenousDiscount_)
+            return ext::shared_ptr<SwapIndex>(new
+                SwapIndex(familyName(),
+                          tenor(),
+                          fixingDays(),
+                          currency(),
+                          fixingCalendar(),
+                          fixedLegTenor(),
+                          fixedLegConvention(),
+                          dayCounter(),
+                          iborIndex_->clone(forwarding),
+                          discount_));
+        else
+            return ext::shared_ptr<SwapIndex>(new
+                SwapIndex(familyName(),
+                          tenor(),
+                          fixingDays(),
+                          currency(),
+                          fixingCalendar(),
+                          fixedLegTenor(),
+                          fixedLegConvention(),
+                          dayCounter(),
+                          iborIndex_->clone(forwarding)));
+    }
+
+    ext::shared_ptr<SwapIndex>
+    SwapIndex::clone(const Handle<YieldTermStructure>& forwarding,
+                     const Handle<YieldTermStructure>& discounting) const {
+        return ext::shared_ptr<SwapIndex>(new
+             SwapIndex(familyName(),
+                       tenor(),
+                       fixingDays(),
+                       currency(),
+                       fixingCalendar(),
+                       fixedLegTenor(),
+                       fixedLegConvention(),
+                       dayCounter(),
+                       iborIndex_->clone(forwarding),
+                       discounting));
+    }
+
+    ext::shared_ptr<SwapIndex>
+    SwapIndex::clone(const Period& tenor) const {
+
+        if (exogenousDiscount_)
+            return ext::shared_ptr<SwapIndex>(new
+                SwapIndex(familyName(),
+                          tenor,
+                          fixingDays(),
+                          currency(),
+                          fixingCalendar(),
+                          fixedLegTenor(),
+                          fixedLegConvention(),
+                          dayCounter(),
+                          iborIndex(),
+                          discountingTermStructure()));
+        else
+            return ext::shared_ptr<SwapIndex>(new
+                SwapIndex(familyName(),
+                          tenor,
+                          fixingDays(),
+                          currency(),
+                          fixingCalendar(),
+                          fixedLegTenor(),
+                          fixedLegConvention(),
+                          dayCounter(),
+                          iborIndex()));
+
+    }
+
+    OvernightIndexedSwapIndex::OvernightIndexedSwapIndex(
+        const std::string& familyName,
+        const Period& tenor,
+        Natural settlementDays,
+        const Currency& currency,
+        const ext::shared_ptr<OvernightIndex>& overnightIndex,
+        bool telescopicValueDates,
+        RateAveraging::Type averagingMethod)
+    : SwapIndex(familyName,
+                tenor,
+                settlementDays,
+                currency,
+                overnightIndex->fixingCalendar(),
+                1 * Years,
+                ModifiedFollowing,
+                overnightIndex->dayCounter(),
+                overnightIndex),
+      overnightIndex_(overnightIndex), 
+      telescopicValueDates_(telescopicValueDates), 
+      averagingMethod_(averagingMethod) {}
+
+
+    ext::shared_ptr<OvernightIndexedSwap>
+    OvernightIndexedSwapIndex::underlyingSwap(const Date& fixingDate) const {
+
+        QL_REQUIRE(fixingDate!=Date(), "null fixing date");
+
+        // caching mechanism
+        if (lastFixingDate_!=fixingDate) {
+            Rate fixedRate = 0.0;
+            lastSwap_ = MakeOIS(tenor_, overnightIndex_, fixedRate)
+                .withEffectiveDate(valueDate(fixingDate))
+                .withFixedLegDayCount(dayCounter_)
+                .withTelescopicValueDates(telescopicValueDates_)
+                .withAveragingMethod(averagingMethod_);
+            lastFixingDate_ = fixingDate;
+        }
+        return lastSwap_;
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – cashflows</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/cashflows</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened_func_sig/cashflows.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">65</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">33</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">32</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">189.3 KiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">499.4 KiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>cashflows
+├── all.hpp
+├── averagebmacoupon.hpp
+├── capflooredcoupon.hpp
+├── capflooredinflationcoupon.hpp
+├── cashflows.hpp
+├── cashflowvectors.hpp
+├── cmscoupon.hpp
+├── conundrumpricer.hpp
+├── coupon.hpp
+├── couponpricer.hpp
+├── cpicoupon.hpp
+├── cpicouponpricer.hpp
+├── digitalcmscoupon.hpp
+├── digitalcoupon.hpp
+├── digitaliborcoupon.hpp
+├── dividend.hpp
+├── duration.hpp
+├── fixedratecoupon.hpp
+├── floatingratecoupon.hpp
+├── iborcoupon.hpp
+├── indexedcashflow.hpp
+├── inflationcoupon.hpp
+├── inflationcouponpricer.hpp
+├── lineartsrpricer.hpp
+├── overnightindexedcoupon.hpp
+├── rangeaccrual.hpp
+├── rateaveraging.hpp
+├── replication.hpp
+├── simplecashflow.hpp
+├── subperiodcoupon.hpp
+├── timebasket.hpp
+├── yoyinflationcoupon.hpp
+└── zeroinflationcashflow.hpp</pre>
+
+  <h2>✅ Rendered Files (33)</h2>
+  <details open><summary>33 files · 189.3 KiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>all.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>averagebmacoupon.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>capflooredcoupon.hpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>capflooredinflationcoupon.hpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>cashflows.hpp</code></td><td class="size">19.1 KiB</td></tr>
+<tr><td><code>cashflowvectors.hpp</code></td><td class="size">12.4 KiB</td></tr>
+<tr><td><code>cmscoupon.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>conundrumpricer.hpp</code></td><td class="size">11.7 KiB</td></tr>
+<tr><td><code>coupon.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>couponpricer.hpp</code></td><td class="size">8.5 KiB</td></tr>
+<tr><td><code>cpicoupon.hpp</code></td><td class="size">9.5 KiB</td></tr>
+<tr><td><code>cpicouponpricer.hpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>digitalcmscoupon.hpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>digitalcoupon.hpp</code></td><td class="size">7.4 KiB</td></tr>
+<tr><td><code>digitaliborcoupon.hpp</code></td><td class="size">4.6 KiB</td></tr>
+<tr><td><code>dividend.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>duration.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>fixedratecoupon.hpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>floatingratecoupon.hpp</code></td><td class="size">5.2 KiB</td></tr>
+<tr><td><code>iborcoupon.hpp</code></td><td class="size">5.6 KiB</td></tr>
+<tr><td><code>indexedcashflow.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>inflationcoupon.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>inflationcouponpricer.hpp</code></td><td class="size">8.4 KiB</td></tr>
+<tr><td><code>lineartsrpricer.hpp</code></td><td class="size">9.2 KiB</td></tr>
+<tr><td><code>overnightindexedcoupon.hpp</code></td><td class="size">5.0 KiB</td></tr>
+<tr><td><code>rangeaccrual.hpp</code></td><td class="size">8.9 KiB</td></tr>
+<tr><td><code>rateaveraging.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>replication.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>simplecashflow.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>subperiodcoupon.hpp</code></td><td class="size">6.5 KiB</td></tr>
+<tr><td><code>timebasket.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>yoyinflationcoupon.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>zeroinflationcashflow.hpp</code></td><td class="size">3.6 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (32)</h2>
+  <details open><summary>32 files skipped</summary><table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">2.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>averagebmacoupon.cpp</code></td><td class="size">9.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>capflooredcoupon.cpp</code></td><td class="size">4.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>capflooredinflationcoupon.cpp</code></td><td class="size">5.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>cashflows.cpp</code></td><td class="size">45.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>cashflowvectors.cpp</code></td><td class="size">2.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>cmscoupon.cpp</code></td><td class="size">5.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>conundrumpricer.cpp</code></td><td class="size">39.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>coupon.cpp</code></td><td class="size">3.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>couponpricer.cpp</code></td><td class="size">17.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>cpicoupon.cpp</code></td><td class="size">12.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>cpicouponpricer.cpp</code></td><td class="size">5.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>digitalcmscoupon.cpp</code></td><td class="size">6.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>digitalcoupon.cpp</code></td><td class="size">12.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>digitaliborcoupon.cpp</code></td><td class="size">6.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>dividend.cpp</code></td><td class="size">1.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>duration.cpp</code></td><td class="size">1.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>fixedratecoupon.cpp</code></td><td class="size">11.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>floatingratecoupon.cpp</code></td><td class="size">4.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>iborcoupon.cpp</code></td><td class="size">9.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>indexedcashflow.cpp</code></td><td class="size">1.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>inflationcoupon.cpp</code></td><td class="size">4.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>inflationcouponpricer.cpp</code></td><td class="size">8.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>lineartsrpricer.cpp</code></td><td class="size">16.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>overnightindexedcoupon.cpp</code></td><td class="size">13.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>rangeaccrual.cpp</code></td><td class="size">29.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>replication.cpp</code></td><td class="size">1.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>simplecashflow.cpp</code></td><td class="size">1.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>subperiodcoupon.cpp</code></td><td class="size">12.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>timebasket.cpp</code></td><td class="size">2.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>yoyinflationcoupon.cpp</code></td><td class="size">8.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>zeroinflationcashflow.cpp</code></td><td class="size">5.0 KiB</td><td>Ignored pattern</td></tr></tbody></table></details>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>53.7 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am, .cpp</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>
