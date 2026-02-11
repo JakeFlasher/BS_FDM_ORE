@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Render Summary – finitedifferences</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.2rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.95rem; margin-bottom: 1rem; }
+
+  /* stat cards */
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.75rem 1rem; min-width: 140px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.8rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .stat-card .value { font-size: 1.4rem; font-weight: 600; }
+  .stat-card.good  .value { color: #1a7f37; }
+  .stat-card.bad   .value { color: #cf222e; }
+
+  pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.size { white-space: nowrap; color: #656d76; }
+  tr:hover { background: #f6f8fa; }
+
+  details { margin: 0.5rem 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 0.3rem 0; }
+  summary:hover { color: #0969da; }
+
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>📄 Render Summary</h1>
+  <div class="subtitle">
+    Directory: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/ql/methods/finitedifferences</strong>
+  </div>
+
+  <div class="note">
+    XML output written to: <code>/home/jakeshea/Desktop/HTHK/QuantLib_1.23/tools/flattened_func_sig/finitedifferences.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Total Files</div>
+      <div class="value">208</div>
+    </div>
+    <div class="stat-card good">
+      <div class="label">Rendered</div>
+      <div class="value">121</div>
+    </div>
+    <div class="stat-card bad">
+      <div class="label">Skipped</div>
+      <div class="value">87</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Rendered Size</div>
+      <div class="value">295.0 KiB</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Total Size</div>
+      <div class="value">619.8 KiB</div>
+    </div>
+  </div>
+
+  <h2>📂 Directory Tree</h2>
+  <pre>finitedifferences
+├── meshers
+│   ├── all.hpp
+│   ├── concentrating1dmesher.hpp
+│   ├── exponentialjump1dmesher.hpp
+│   ├── fdm1dmesher.hpp
+│   ├── fdmblackscholesmesher.hpp
+│   ├── fdmblackscholesmultistrikemesher.hpp
+│   ├── fdmcev1dmesher.hpp
+│   ├── fdmhestonvariancemesher.hpp
+│   ├── fdmmesher.hpp
+│   ├── fdmmeshercomposite.hpp
+│   ├── fdmsimpleprocess1dmesher.hpp
+│   ├── predefined1dmesher.hpp
+│   ├── uniform1dmesher.hpp
+│   └── uniformgridmesher.hpp
+├── operators
+│   ├── all.hpp
+│   ├── fdm2dblackscholesop.hpp
+│   ├── fdmbatesop.hpp
+│   ├── fdmblackscholesop.hpp
+│   ├── fdmcevop.hpp
+│   ├── fdmcirop.hpp
+│   ├── fdmg2op.hpp
+│   ├── fdmhestonhullwhiteop.hpp
+│   ├── fdmhestonop.hpp
+│   ├── fdmhullwhiteop.hpp
+│   ├── fdmlinearop.hpp
+│   ├── fdmlinearopcomposite.hpp
+│   ├── fdmlinearopiterator.hpp
+│   ├── fdmlinearoplayout.hpp
+│   ├── fdmlocalvolfwdop.hpp
+│   ├── fdmornsteinuhlenbeckop.hpp
+│   ├── fdmsabrop.hpp
+│   ├── firstderivativeop.hpp
+│   ├── ninepointlinearop.hpp
+│   ├── nthorderderivativeop.hpp
+│   ├── numericaldifferentiation.hpp
+│   ├── secondderivativeop.hpp
+│   ├── secondordermixedderivativeop.hpp
+│   └── triplebandlinearop.hpp
+├── schemes
+│   ├── all.hpp
+│   ├── boundaryconditionschemehelper.hpp
+│   ├── craigsneydscheme.hpp
+│   ├── cranknicolsonscheme.hpp
+│   ├── douglasscheme.hpp
+│   ├── expliciteulerscheme.hpp
+│   ├── hundsdorferscheme.hpp
+│   ├── impliciteulerscheme.hpp
+│   ├── methodoflinesscheme.hpp
+│   ├── modifiedcraigsneydscheme.hpp
+│   └── trbdf2scheme.hpp
+├── solvers
+│   ├── all.hpp
+│   ├── fdm1dimsolver.hpp
+│   ├── fdm2dblackscholessolver.hpp
+│   ├── fdm2dimsolver.hpp
+│   ├── fdm3dimsolver.hpp
+│   ├── fdmbackwardsolver.hpp
+│   ├── fdmbatessolver.hpp
+│   ├── fdmblackscholessolver.hpp
+│   ├── fdmcirsolver.hpp
+│   ├── fdmg2solver.hpp
+│   ├── fdmhestonhullwhitesolver.hpp
+│   ├── fdmhestonsolver.hpp
+│   ├── fdmhullwhitesolver.hpp
+│   ├── fdmndimsolver.hpp
+│   ├── fdmsimple2dbssolver.hpp
+│   └── fdmsolverdesc.hpp
+├── stepconditions
+│   ├── all.hpp
+│   ├── fdmamericanstepcondition.hpp
+│   ├── fdmarithmeticaveragecondition.hpp
+│   ├── fdmbermudanstepcondition.hpp
+│   ├── fdmsimplestoragecondition.hpp
+│   ├── fdmsimpleswingcondition.hpp
+│   ├── fdmsnapshotcondition.hpp
+│   └── fdmstepconditioncomposite.hpp
+├── utilities
+│   ├── all.hpp
+│   ├── bsmrndcalculator.hpp
+│   ├── cevrndcalculator.hpp
+│   ├── escroweddividendadjustment.hpp
+│   ├── fdmaffinemodelswapinnervalue.hpp
+│   ├── fdmaffinemodeltermstructure.hpp
+│   ├── fdmboundaryconditionset.hpp
+│   ├── fdmdirichletboundary.hpp
+│   ├── fdmdiscountdirichletboundary.hpp
+│   ├── fdmdividendhandler.hpp
+│   ├── fdmescrowedloginnervaluecalculator.hpp
+│   ├── fdmindicesonboundary.hpp
+│   ├── fdminnervaluecalculator.hpp
+│   ├── fdmmesherintegral.hpp
+│   ├── fdmquantohelper.hpp
+│   ├── fdmshoutloginnervaluecalculator.hpp
+│   ├── fdmtimedepdirichletboundary.hpp
+│   ├── gbsmrndcalculator.hpp
+│   ├── hestonrndcalculator.hpp
+│   ├── localvolrndcalculator.hpp
+│   ├── riskneutraldensitycalculator.hpp
+│   └── squarerootprocessrndcalculator.hpp
+├── all.hpp
+├── americancondition.hpp
+├── boundarycondition.hpp
+├── bsmoperator.hpp
+├── bsmtermoperator.hpp
+├── cranknicolson.hpp
+├── dminus.hpp
+├── dplus.hpp
+├── dplusdminus.hpp
+├── dzero.hpp
+├── expliciteuler.hpp
+├── fdtypedefs.hpp
+├── finitedifferencemodel.hpp
+├── impliciteuler.hpp
+├── mixedscheme.hpp
+├── onefactoroperator.hpp
+├── operatortraits.hpp
+├── parallelevolver.hpp
+├── pde.hpp
+├── pdebsm.hpp
+├── pdeshortrate.hpp
+├── shoutcondition.hpp
+├── stepcondition.hpp
+├── trbdf2.hpp
+├── tridiagonaloperator.hpp
+└── zerocondition.hpp</pre>
+
+  <h2>✅ Rendered Files (121)</h2>
+  <details open><summary>121 files · 295.0 KiB</summary><table><thead><tr><th>File</th><th>Size</th></tr></thead><tbody><tr><td><code>all.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>americancondition.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>boundarycondition.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>bsmoperator.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>bsmtermoperator.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>cranknicolson.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>dminus.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>dplus.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>dplusdminus.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>dzero.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>expliciteuler.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>fdtypedefs.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>finitedifferencemodel.hpp</code></td><td class="size">6.2 KiB</td></tr>
+<tr><td><code>impliciteuler.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>meshers/all.hpp</code></td><td class="size">1.0 KiB</td></tr>
+<tr><td><code>meshers/concentrating1dmesher.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>meshers/exponentialjump1dmesher.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>meshers/fdm1dmesher.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>meshers/fdmblackscholesmesher.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>meshers/fdmblackscholesmultistrikemesher.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>meshers/fdmcev1dmesher.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>meshers/fdmhestonvariancemesher.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>meshers/fdmmesher.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>meshers/fdmmeshercomposite.hpp</code></td><td class="size">2.8 KiB</td></tr>
+<tr><td><code>meshers/fdmsimpleprocess1dmesher.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>meshers/predefined1dmesher.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>meshers/uniform1dmesher.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>meshers/uniformgridmesher.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>mixedscheme.hpp</code></td><td class="size">4.5 KiB</td></tr>
+<tr><td><code>onefactoroperator.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>operators/all.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>operators/fdm2dblackscholesop.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>operators/fdmbatesop.hpp</code></td><td class="size">4.2 KiB</td></tr>
+<tr><td><code>operators/fdmblackscholesop.hpp</code></td><td class="size">3.0 KiB</td></tr>
+<tr><td><code>operators/fdmcevop.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>operators/fdmcirop.hpp</code></td><td class="size">4.3 KiB</td></tr>
+<tr><td><code>operators/fdmg2op.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>operators/fdmhestonhullwhiteop.hpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>operators/fdmhestonop.hpp</code></td><td class="size">4.4 KiB</td></tr>
+<tr><td><code>operators/fdmhullwhiteop.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>operators/fdmlinearop.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>operators/fdmlinearopcomposite.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>operators/fdmlinearopiterator.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>operators/fdmlinearoplayout.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>operators/fdmlocalvolfwdop.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>operators/fdmornsteinuhlenbeckop.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>operators/fdmsabrop.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>operators/firstderivativeop.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>operators/ninepointlinearop.hpp</code></td><td class="size">3.3 KiB</td></tr>
+<tr><td><code>operators/nthorderderivativeop.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>operators/numericaldifferentiation.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>operators/secondderivativeop.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>operators/secondordermixedderivativeop.hpp</code></td><td class="size">1.3 KiB</td></tr>
+<tr><td><code>operators/triplebandlinearop.hpp</code></td><td class="size">3.8 KiB</td></tr>
+<tr><td><code>operatortraits.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>parallelevolver.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>pde.hpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>pdebsm.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>pdeshortrate.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>schemes/all.hpp</code></td><td class="size">841 B</td></tr>
+<tr><td><code>schemes/boundaryconditionschemehelper.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>schemes/craigsneydscheme.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>schemes/cranknicolsonscheme.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>schemes/douglasscheme.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>schemes/expliciteulerscheme.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>schemes/hundsdorferscheme.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>schemes/impliciteulerscheme.hpp</code></td><td class="size">2.4 KiB</td></tr>
+<tr><td><code>schemes/methodoflinesscheme.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>schemes/modifiedcraigsneydscheme.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>schemes/trbdf2scheme.hpp</code></td><td class="size">5.3 KiB</td></tr>
+<tr><td><code>shoutcondition.hpp</code></td><td class="size">3.5 KiB</td></tr>
+<tr><td><code>solvers/all.hpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>solvers/fdm1dimsolver.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>solvers/fdm2dblackscholessolver.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>solvers/fdm2dimsolver.hpp</code></td><td class="size">2.3 KiB</td></tr>
+<tr><td><code>solvers/fdm3dimsolver.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>solvers/fdmbackwardsolver.hpp</code></td><td class="size">2.9 KiB</td></tr>
+<tr><td><code>solvers/fdmbatessolver.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>solvers/fdmblackscholessolver.hpp</code></td><td class="size">2.6 KiB</td></tr>
+<tr><td><code>solvers/fdmcirsolver.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>solvers/fdmg2solver.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>solvers/fdmhestonhullwhitesolver.hpp</code></td><td class="size">2.7 KiB</td></tr>
+<tr><td><code>solvers/fdmhestonsolver.hpp</code></td><td class="size">3.1 KiB</td></tr>
+<tr><td><code>solvers/fdmhullwhitesolver.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>solvers/fdmndimsolver.hpp</code></td><td class="size">6.9 KiB</td></tr>
+<tr><td><code>solvers/fdmsimple2dbssolver.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>solvers/fdmsolverdesc.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>stepcondition.hpp</code></td><td class="size">3.9 KiB</td></tr>
+<tr><td><code>stepconditions/all.hpp</code></td><td class="size">714 B</td></tr>
+<tr><td><code>stepconditions/fdmamericanstepcondition.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>stepconditions/fdmarithmeticaveragecondition.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>stepconditions/fdmbermudanstepcondition.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>stepconditions/fdmsimplestoragecondition.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>stepconditions/fdmsimpleswingcondition.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>stepconditions/fdmsnapshotcondition.hpp</code></td><td class="size">1.4 KiB</td></tr>
+<tr><td><code>stepconditions/fdmstepconditioncomposite.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>trbdf2.hpp</code></td><td class="size">5.5 KiB</td></tr>
+<tr><td><code>tridiagonaloperator.hpp</code></td><td class="size">10.0 KiB</td></tr>
+<tr><td><code>utilities/all.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>utilities/bsmrndcalculator.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>utilities/cevrndcalculator.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>utilities/escroweddividendadjustment.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>utilities/fdmaffinemodelswapinnervalue.hpp</code></td><td class="size">6.1 KiB</td></tr>
+<tr><td><code>utilities/fdmaffinemodeltermstructure.hpp</code></td><td class="size">1.8 KiB</td></tr>
+<tr><td><code>utilities/fdmboundaryconditionset.hpp</code></td><td class="size">1.1 KiB</td></tr>
+<tr><td><code>utilities/fdmdirichletboundary.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>utilities/fdmdiscountdirichletboundary.hpp</code></td><td class="size">2.0 KiB</td></tr>
+<tr><td><code>utilities/fdmdividendhandler.hpp</code></td><td class="size">2.1 KiB</td></tr>
+<tr><td><code>utilities/fdmescrowedloginnervaluecalculator.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>utilities/fdmindicesonboundary.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>utilities/fdminnervaluecalculator.hpp</code></td><td class="size">3.4 KiB</td></tr>
+<tr><td><code>utilities/fdmmesherintegral.hpp</code></td><td class="size">1.5 KiB</td></tr>
+<tr><td><code>utilities/fdmquantohelper.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>utilities/fdmshoutloginnervaluecalculator.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>utilities/fdmtimedepdirichletboundary.hpp</code></td><td class="size">2.5 KiB</td></tr>
+<tr><td><code>utilities/gbsmrndcalculator.hpp</code></td><td class="size">1.6 KiB</td></tr>
+<tr><td><code>utilities/hestonrndcalculator.hpp</code></td><td class="size">2.2 KiB</td></tr>
+<tr><td><code>utilities/localvolrndcalculator.hpp</code></td><td class="size">4.0 KiB</td></tr>
+<tr><td><code>utilities/riskneutraldensitycalculator.hpp</code></td><td class="size">1.9 KiB</td></tr>
+<tr><td><code>utilities/squarerootprocessrndcalculator.hpp</code></td><td class="size">1.7 KiB</td></tr>
+<tr><td><code>zerocondition.hpp</code></td><td class="size">1.4 KiB</td></tr></tbody></table></details>
+
+  <h2>⏭️ Skipped Files (87)</h2>
+  <details open><summary>87 files skipped</summary><table><thead><tr><th>File</th><th>Size</th><th>Reason</th></tr></thead><tbody><tr><td><code>Makefile.am</code></td><td class="size">1.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>boundarycondition.cpp</code></td><td class="size">3.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>bsmoperator.cpp</code></td><td class="size">1.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/Makefile.am</code></td><td class="size">1.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/concentrating1dmesher.cpp</code></td><td class="size">8.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/exponentialjump1dmesher.cpp</code></td><td class="size">3.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/fdmblackscholesmesher.cpp</code></td><td class="size">6.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/fdmblackscholesmultistrikemesher.cpp</code></td><td class="size">4.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/fdmcev1dmesher.cpp</code></td><td class="size">2.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/fdmhestonvariancemesher.cpp</code></td><td class="size">8.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/fdmmeshercomposite.cpp</code></td><td class="size">4.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/fdmsimpleprocess1dmesher.cpp</code></td><td class="size">2.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>meshers/uniformgridmesher.cpp</code></td><td class="size">2.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/Makefile.am</code></td><td class="size">2.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdm2dblackscholesop.cpp</code></td><td class="size">6.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmbatesop.cpp</code></td><td class="size">5.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmblackscholesop.cpp</code></td><td class="size">5.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmcevop.cpp</code></td><td class="size">3.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmcirop.cpp</code></td><td class="size">6.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmg2op.cpp</code></td><td class="size">4.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmhestonhullwhiteop.cpp</code></td><td class="size">6.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmhestonop.cpp</code></td><td class="size">8.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmhullwhiteop.cpp</code></td><td class="size">3.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmlinearoplayout.cpp</code></td><td class="size">3.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmlocalvolfwdop.cpp</code></td><td class="size">3.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmornsteinuhlenbeckop.cpp</code></td><td class="size">3.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/fdmsabrop.cpp</code></td><td class="size">3.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/firstderivativeop.cpp</code></td><td class="size">2.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/ninepointlinearop.cpp</code></td><td class="size">8.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/nthorderderivativeop.cpp</code></td><td class="size">3.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/numericaldifferentiation.cpp</code></td><td class="size">4.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/secondderivativeop.cpp</code></td><td class="size">2.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/secondordermixedderivativeop.cpp</code></td><td class="size">5.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>operators/triplebandlinearop.cpp</code></td><td class="size">11.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/Makefile.am</code></td><td class="size">1.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/craigsneydscheme.cpp</code></td><td class="size">2.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/cranknicolsonscheme.cpp</code></td><td class="size">1.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/douglasscheme.cpp</code></td><td class="size">1.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/expliciteulerscheme.cpp</code></td><td class="size">1.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/hundsdorferscheme.cpp</code></td><td class="size">2.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/impliciteulerscheme.cpp</code></td><td class="size">3.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/methodoflinesscheme.cpp</code></td><td class="size">2.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>schemes/modifiedcraigsneydscheme.cpp</code></td><td class="size">2.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/Makefile.am</code></td><td class="size">1.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdm1dimsolver.cpp</code></td><td class="size">4.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdm2dblackscholessolver.cpp</code></td><td class="size">4.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdm2dimsolver.cpp</code></td><td class="size">5.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdm3dimsolver.cpp</code></td><td class="size">5.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmbackwardsolver.cpp</code></td><td class="size">8.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmbatessolver.cpp</code></td><td class="size">2.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmblackscholessolver.cpp</code></td><td class="size">3.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmcirsolver.cpp</code></td><td class="size">2.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmg2solver.cpp</code></td><td class="size">1.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmhestonhullwhitesolver.cpp</code></td><td class="size">3.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmhestonsolver.cpp</code></td><td class="size">3.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmhullwhitesolver.cpp</code></td><td class="size">1.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>solvers/fdmsimple2dbssolver.cpp</code></td><td class="size">2.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/Makefile.am</code></td><td class="size">1.5 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/fdmamericanstepcondition.cpp</code></td><td class="size">1.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/fdmarithmeticaveragecondition.cpp</code></td><td class="size">3.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/fdmbermudanstepcondition.cpp</code></td><td class="size">2.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/fdmsimplestoragecondition.cpp</code></td><td class="size">4.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/fdmsimpleswingcondition.cpp</code></td><td class="size">3.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/fdmsnapshotcondition.cpp</code></td><td class="size">1.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>stepconditions/fdmstepconditioncomposite.cpp</code></td><td class="size">5.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>tridiagonaloperator.cpp</code></td><td class="size">6.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/Makefile.am</code></td><td class="size">2.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/bsmrndcalculator.cpp</code></td><td class="size">2.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/cevrndcalculator.cpp</code></td><td class="size">4.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/escroweddividendadjustment.cpp</code></td><td class="size">2.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmaffinemodelswapinnervalue.cpp</code></td><td class="size">1.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmaffinemodeltermstructure.cpp</code></td><td class="size">2.0 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmdirichletboundary.cpp</code></td><td class="size">2.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmdiscountdirichletboundary.cpp</code></td><td class="size">2.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmdividendhandler.cpp</code></td><td class="size">4.1 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmescrowedloginnervaluecalculator.cpp</code></td><td class="size">1.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmindicesonboundary.cpp</code></td><td class="size">2.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdminnervaluecalculator.cpp</code></td><td class="size">5.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmmesherintegral.cpp</code></td><td class="size">2.2 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmquantohelper.cpp</code></td><td class="size">2.7 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmshoutloginnervaluecalculator.cpp</code></td><td class="size">2.9 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/fdmtimedepdirichletboundary.cpp</code></td><td class="size">2.8 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/gbsmrndcalculator.cpp</code></td><td class="size">3.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/hestonrndcalculator.cpp</code></td><td class="size">6.4 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/localvolrndcalculator.cpp</code></td><td class="size">13.3 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/riskneutraldensitycalculator.cpp</code></td><td class="size">1.6 KiB</td><td>Ignored pattern</td></tr>
+<tr><td><code>utilities/squarerootprocessrndcalculator.cpp</code></td><td class="size">2.9 KiB</td><td>Ignored pattern</td></tr></tbody></table></details>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>58.6 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am, .cpp</code></td></tr>
+  </table>
+
+</div>
+</body>
+</html>
