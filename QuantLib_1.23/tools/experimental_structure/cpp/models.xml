@@ -1,0 +1,1081 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>hestonslvfdmmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Johannes Göttker-Schnetmann
+ Copyright (C) 2015 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+
+#include <ql/experimental/finitedifferences/fdmhestonfwdop.hpp>
+#include <ql/experimental/models/hestonslvfdmmodel.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/integrals/discreteintegrals.hpp>
+#include <ql/math/interpolations/bilinearinterpolation.hpp>
+#include <ql/methods/finitedifferences/meshers/concentrating1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/predefined1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/schemes/craigsneydscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/douglasscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/hundsdorferscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/modifiedcraigsneydscheme.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmmesherintegral.hpp>
+#include <ql/methods/finitedifferences/utilities/localvolrndcalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/squarerootprocessrndcalculator.hpp>
+#include <ql/models/equity/hestonmodel.hpp>
+#include <ql/quotes/simplequote.hpp>
+#include <ql/termstructures/volatility/equityfx/fixedlocalvolsurface.hpp>
+#include <ql/termstructures/volatility/equityfx/localvoltermstructure.hpp>
+#include <ql/timegrid.hpp>
+#include <functional>
+#include <memory>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+        ext::shared_ptr<Fdm1dMesher> varianceMesher(
+            const SquareRootProcessRNDCalculator& rnd,
+            Time t0, Time t1, Size vGrid,
+            Real v0, const HestonSLVFokkerPlanckFdmParams& params) {
+
+            std::vector<ext::tuple<Real, Real, bool> > cPoints;
+
+            const Real v0Density = params.v0Density;
+            const Real upperBoundDensity = params.vUpperBoundDensity;
+            const Real lowerBoundDensity = params.vLowerBoundDensity;
+
+            Real lowerBound = Null<Real>(), upperBound = -Null<Real>();
+
+            for (Size i=0; i <= 10; ++i) {
+                const Time t = t0 + i/10.0*(t1-t0);
+                lowerBound = std::min(
+                    lowerBound, rnd.invcdf(params.vLowerEps, t));
+                upperBound = std::max(
+                    upperBound, rnd.invcdf(1.0-params.vUpperEps, t));
+            }
+
+            lowerBound = std::max(lowerBound, params.vMin);
+            switch (params.trafoType) {
+                case FdmSquareRootFwdOp::Log:
+                  {
+                    lowerBound = std::log(lowerBound);
+                    upperBound = std::log(upperBound);
+
+                    const Real v0Center = std::log(v0);
+
+                    cPoints = {
+                        {lowerBound, lowerBoundDensity, false},
+                        {v0Center, v0Density, true},
+                        {upperBound, upperBoundDensity, false}
+                    };
+
+                    return ext::make_shared<Concentrating1dMesher>(
+                        lowerBound, upperBound, vGrid, cPoints, 1e-8);
+                  }
+                break;
+                case FdmSquareRootFwdOp::Plain:
+                  {
+                      const Real v0Center = v0;
+
+                      cPoints = {
+                          {lowerBound, lowerBoundDensity, false},
+                          {v0Center, v0Density, true},
+                          {upperBound, upperBoundDensity, false}
+                      };
+
+                      return ext::make_shared<Concentrating1dMesher>(
+                          lowerBound, upperBound, vGrid, cPoints, 1e-8);
+                  }
+                break;
+                case FdmSquareRootFwdOp::Power:
+                {
+                    const Real v0Center = v0;
+
+                    cPoints = {
+                        {lowerBound, lowerBoundDensity, false},
+                        {v0Center, v0Density, true},
+                        {upperBound, upperBoundDensity, false}
+                    };
+
+                    return ext::make_shared<Concentrating1dMesher>(
+                        lowerBound, upperBound, vGrid, cPoints, 1e-8);
+                }
+                break;
+                default:
+                    QL_FAIL("transformation type is not implemented");
+            }
+        }
+
+        Real integratePDF(const Array& p,
+                          const ext::shared_ptr<FdmMesherComposite>& mesher,
+                          FdmSquareRootFwdOp::TransformationType trafoType,
+                          Real alpha) {
+
+            if (trafoType != FdmSquareRootFwdOp::Power) {
+                return FdmMesherIntegral(
+                        mesher, DiscreteSimpsonIntegral()).integrate(p);
+            }
+            else {
+                Array tp(p.size());
+                const FdmLinearOpIterator end = mesher->layout()->end();
+                for (FdmLinearOpIterator iter = mesher->layout()->begin();
+                    iter != end; ++iter) {
+                    const Size idx = iter.index();
+                    const Real nu = mesher->location(iter, 1);
+
+                    tp[idx] = p[idx]*std::pow(nu, alpha-1);
+                }
+
+                return FdmMesherIntegral(
+                        mesher, DiscreteSimpsonIntegral()).integrate(tp);
+            }
+        }
+
+
+        Disposable<Array> rescalePDF(
+            const Array& p,
+            const ext::shared_ptr<FdmMesherComposite>& mesher,
+            FdmSquareRootFwdOp::TransformationType trafoType, Real alpha) {
+
+            Array retVal = p/integratePDF(p, mesher, trafoType, alpha);
+
+            return retVal;
+        }
+
+
+        template <class Interpolator>
+        Disposable<Array> reshapePDF(
+            const Array& p,
+            const ext::shared_ptr<FdmMesherComposite>& oldMesher,
+            const ext::shared_ptr<FdmMesherComposite>& newMesher,
+            const Interpolator& interp = Interpolator()) {
+
+            const ext::shared_ptr<FdmLinearOpLayout> oldLayout
+                = oldMesher->layout();
+            const ext::shared_ptr<FdmLinearOpLayout> newLayout
+                = newMesher->layout();
+
+            QL_REQUIRE(   oldLayout->size() == newLayout->size()
+                       && oldLayout->size() == p.size(),
+                       "inconsistent mesher or vector size given");
+
+            Matrix m(oldLayout->dim()[1], oldLayout->dim()[0]);
+            for (Size i=0; i < m.rows(); ++i) {
+                std::copy(p.begin() + i*m.columns(),
+                          p.begin() + (i+1)*m.columns(), m.row_begin(i));
+            }
+            const Interpolation2D interpol = interp.interpolate(
+                oldMesher->getFdm1dMeshers()[0]->locations().begin(),
+                oldMesher->getFdm1dMeshers()[0]->locations().end(),
+                oldMesher->getFdm1dMeshers()[1]->locations().begin(),
+                oldMesher->getFdm1dMeshers()[1]->locations().end(), m);
+
+            Array pNew(p.size());
+            const FdmLinearOpIterator endIter = newLayout->end();
+            for (FdmLinearOpIterator iter = newLayout->begin();
+                iter != endIter; ++iter) {
+                const Real x = newMesher->location(iter, 0);
+                const Real v = newMesher->location(iter, 1);
+
+                if (   x > interpol.xMax() || x < interpol.xMin()
+                    || v > interpol.yMax() || v < interpol.yMin() ) {
+                    pNew[iter.index()] = 0;
+                }
+                else {
+                    pNew[iter.index()] = interpol(x, v);
+                }
+            }
+
+            return pNew;
+        }
+
+        class FdmScheme {
+          public:
+            virtual ~FdmScheme() = default;
+            virtual void step(Array& a, Time t) = 0;
+            virtual void setStep(Time dt) = 0;
+        };
+
+        template <class T>
+        class FdmSchemeWrapper : public FdmScheme {
+          public:
+            explicit FdmSchemeWrapper(T* scheme)
+            : scheme_(scheme) { }
+
+            void step(Array& a, Time t) override { scheme_->step(a, t); }
+            void setStep(Time dt) override { scheme_->setStep(dt); }
+
+          private:
+            const std::unique_ptr<T> scheme_;
+        };
+
+        ext::shared_ptr<FdmScheme> fdmSchemeFactory(
+            const FdmSchemeDesc desc,
+            const ext::shared_ptr<FdmLinearOpComposite>& op) {
+
+            switch (desc.type) {
+              case FdmSchemeDesc::HundsdorferType:
+                  return ext::shared_ptr<FdmScheme>(
+                      new FdmSchemeWrapper<HundsdorferScheme>(
+                          new HundsdorferScheme(desc.theta, desc.mu, op)));
+              case FdmSchemeDesc::DouglasType:
+                  return ext::shared_ptr<FdmScheme>(
+                      new FdmSchemeWrapper<DouglasScheme>(
+                          new DouglasScheme(desc.theta, op)));
+              case FdmSchemeDesc::CraigSneydType:
+                  return ext::shared_ptr<FdmScheme>(
+                      new FdmSchemeWrapper<CraigSneydScheme>(
+                          new CraigSneydScheme(desc.theta, desc.mu, op)));
+              case FdmSchemeDesc::ModifiedCraigSneydType:
+                  return ext::shared_ptr<FdmScheme>(
+                     new FdmSchemeWrapper<ModifiedCraigSneydScheme>(
+                          new ModifiedCraigSneydScheme(
+                              desc.theta, desc.mu, op)));
+              case FdmSchemeDesc::ImplicitEulerType:
+                  return ext::shared_ptr<FdmScheme>(
+                      new FdmSchemeWrapper<ImplicitEulerScheme>(
+                          new ImplicitEulerScheme(op)));
+              case FdmSchemeDesc::ExplicitEulerType:
+                  return ext::shared_ptr<FdmScheme>(
+                      new FdmSchemeWrapper<ExplicitEulerScheme>(
+                          new ExplicitEulerScheme(op)));
+              default:
+                  QL_FAIL("Unknown scheme type");
+            }
+        }
+    }
+
+    HestonSLVFDMModel::HestonSLVFDMModel(Handle<LocalVolTermStructure> localVol,
+                                         Handle<HestonModel> hestonModel,
+                                         const Date& endDate,
+                                         HestonSLVFokkerPlanckFdmParams params,
+                                         const bool logging,
+                                         std::vector<Date> mandatoryDates,
+                                         const Real mixingFactor)
+    : localVol_(std::move(localVol)), hestonModel_(std::move(hestonModel)), endDate_(endDate),
+      params_(std::move(params)), mandatoryDates_(std::move(mandatoryDates)),
+      mixingFactor_(mixingFactor), logging_(logging) {
+
+        registerWith(localVol_);
+        registerWith(hestonModel_);
+    }
+
+    ext::shared_ptr<HestonProcess> HestonSLVFDMModel::hestonProcess() const {
+        return hestonModel_->process();
+    }
+
+    ext::shared_ptr<LocalVolTermStructure> HestonSLVFDMModel::localVol() const {
+        return localVol_.currentLink();
+    }
+
+    ext::shared_ptr<LocalVolTermStructure>
+    HestonSLVFDMModel::leverageFunction() const {
+        calculate();
+
+        return leverageFunction_;
+    }
+
+    void HestonSLVFDMModel::performCalculations() const {
+        logEntries_.clear();
+
+        const ext::shared_ptr<HestonProcess> hestonProcess
+            = hestonModel_->process();
+        const ext::shared_ptr<Quote> spot
+            = hestonProcess->s0().currentLink();
+        const ext::shared_ptr<YieldTermStructure> rTS
+            = hestonProcess->riskFreeRate().currentLink();
+        const ext::shared_ptr<YieldTermStructure> qTS
+            = hestonProcess->dividendYield().currentLink();
+
+        const Real v0    = hestonProcess->v0();
+        const Real kappa = hestonProcess->kappa();
+        const Real theta = hestonProcess->theta();
+        const Real sigma = hestonProcess->sigma();
+        const Real mixedSigma = mixingFactor_ * sigma;
+        const Real alpha = 2*kappa*theta/(mixedSigma*mixedSigma);
+
+        const Size xGrid = params_.xGrid;
+        const Size vGrid = params_.vGrid;
+
+        const DayCounter dc = rTS->dayCounter();
+        const Date referenceDate = rTS->referenceDate();
+
+        const Time T = dc.yearFraction(referenceDate, endDate_);
+
+        QL_REQUIRE(referenceDate < endDate_,
+            "reference date must be smaller than final calibration date");
+
+        QL_REQUIRE(localVol_->maxTime() >= T,
+            "final calibration maturity exceeds local volatility surface");
+
+        // set-up exponential time step scheme
+        const Time maxDt = 1.0/params_.tMaxStepsPerYear;
+        const Time minDt = 1.0/params_.tMinStepsPerYear;
+
+        Time tIdx=0.0;
+        std::vector<Time> times(1, tIdx);
+        times.reserve(Size(T*params_.tMinStepsPerYear));
+        while (tIdx < T) {
+            const Real decayFactor = std::exp(-params_.tStepNumberDecay*tIdx);
+            const Time dt = maxDt*decayFactor + minDt*(1.0-decayFactor);
+
+            times.push_back(std::min(T, tIdx+=dt));
+        }
+
+        for (auto mandatoryDate : mandatoryDates_) {
+            times.push_back(dc.yearFraction(referenceDate, mandatoryDate));
+        }
+
+        const ext::shared_ptr<TimeGrid> timeGrid(
+            new TimeGrid(times.begin(), times.end()));
+
+        // build 1d meshers
+        const LocalVolRNDCalculator localVolRND(
+            spot, rTS, qTS, localVol_.currentLink(),
+            timeGrid, xGrid,
+            params_.x0Density,
+            params_.localVolEpsProb,
+            params_.maxIntegrationIterations);
+
+        const std::vector<Size> rescaleSteps
+            = localVolRND.rescaleTimeSteps();
+
+        const SquareRootProcessRNDCalculator squareRootRnd(
+            v0, kappa, theta, mixedSigma);
+
+        const FdmSquareRootFwdOp::TransformationType trafoType
+          = params_.trafoType;
+
+        std::vector<ext::shared_ptr<Fdm1dMesher> > xMesher, vMesher;
+        xMesher.reserve(timeGrid->size());
+        vMesher.reserve(timeGrid->size());
+
+        xMesher.push_back(localVolRND.mesher(0.0));
+        vMesher.push_back(ext::make_shared<Predefined1dMesher>(
+            std::vector<Real>(vGrid, v0)));
+
+        Size rescaleIdx = 0;
+        for (Size i=1; i < timeGrid->size(); ++i) {
+            xMesher.push_back(localVolRND.mesher(timeGrid->at(i)));
+
+            if ((rescaleIdx < rescaleSteps.size())
+                && (i == rescaleSteps[rescaleIdx])) {
+                ++rescaleIdx;
+                vMesher.push_back(varianceMesher(squareRootRnd,
+                    timeGrid->at(rescaleSteps[rescaleIdx-1]),
+                    (rescaleIdx < rescaleSteps.size())
+                        ? timeGrid->at(rescaleSteps[rescaleIdx])
+                        : timeGrid->back(),
+                    vGrid, v0, params_));
+            }
+            else
+                vMesher.push_back(vMesher.back());
+        }
+
+        // start probability distribution
+        ext::shared_ptr<FdmMesherComposite> mesher
+            = ext::make_shared<FdmMesherComposite>(
+                xMesher.at(1), vMesher.at(1));
+
+        const Volatility lv0
+            = localVol_->localVol(0.0, spot->value())/std::sqrt(v0);
+
+        ext::shared_ptr<Matrix> L(new Matrix(xGrid, timeGrid->size()));
+
+        const Real l0 = lv0;
+        std::fill(L->column_begin(0),L->column_end(0), l0);
+        std::fill(L->column_begin(1),L->column_end(1), l0);
+
+        // create strikes from meshers
+        std::vector<ext::shared_ptr<std::vector<Real> > > vStrikes(
+            timeGrid->size());
+
+        for (Size i=0; i < timeGrid->size(); ++i) {
+            vStrikes[i] = ext::make_shared<std::vector<Real> >(xGrid);
+            if (xMesher[i]->locations().front()
+                  == xMesher[i]->locations().back()) {
+                std::fill(vStrikes[i]->begin(), vStrikes[i]->end(),
+                    std::exp(xMesher[i]->locations().front()));
+            }
+            else {
+                std::transform(xMesher[i]->locations().begin(),
+                               xMesher[i]->locations().end(),
+                               vStrikes[i]->begin(),
+                               static_cast<Real(*)(Real)>(std::exp));
+            }
+        }
+
+        const ext::shared_ptr<FixedLocalVolSurface> leverageFct(
+            new FixedLocalVolSurface(referenceDate, times, vStrikes, L, dc));
+
+        ext::shared_ptr<FdmLinearOpComposite> hestonFwdOp(
+            new FdmHestonFwdOp(mesher, hestonProcess, trafoType, leverageFct, mixingFactor_));
+
+        Array p = FdmHestonGreensFct(mesher, hestonProcess, trafoType, lv0)
+            .get(timeGrid->at(1), params_.greensAlgorithm);
+
+        if (logging_) {
+            const LogEntry entry = { timeGrid->at(1),
+                ext::make_shared<Array>(p), mesher };
+            logEntries_.push_back(entry);
+        }
+
+        for (Size i=2; i < times.size(); ++i) {
+            const Time t = timeGrid->at(i);
+            const Time dt = t - timeGrid->at(i-1);
+
+            if (   mesher->getFdm1dMeshers()[0] != xMesher[i]
+                || mesher->getFdm1dMeshers()[1] != vMesher[i]) {
+                const ext::shared_ptr<FdmMesherComposite> newMesher(
+                    new FdmMesherComposite(xMesher[i], vMesher[i]));
+
+                p = reshapePDF<Bilinear>(p, mesher, newMesher);
+                mesher = newMesher;
+
+                p = rescalePDF(p, mesher, trafoType, alpha);
+
+                hestonFwdOp = ext::shared_ptr<FdmLinearOpComposite>(
+                                new FdmHestonFwdOp(mesher, hestonProcess,
+                                               trafoType, leverageFct));
+            }
+
+            Array pn = p;
+            const Array x(Exp(
+                Array(mesher->getFdm1dMeshers()[0]->locations().begin(),
+                      mesher->getFdm1dMeshers()[0]->locations().end())));
+            const Array v(
+                    mesher->getFdm1dMeshers()[1]->locations().begin(),
+                    mesher->getFdm1dMeshers()[1]->locations().end());
+
+            // predictor corrector steps
+            for (Size r=0; r < params_.predictionCorretionSteps; ++r) {
+                const FdmSchemeDesc fdmSchemeDesc
+                    = (i < params_.nRannacherTimeSteps + 2)
+                        ? FdmSchemeDesc::ImplicitEuler()
+                        : params_.schemeDesc;
+
+                const ext::shared_ptr<FdmScheme> fdmScheme(
+                    fdmSchemeFactory(fdmSchemeDesc, hestonFwdOp));
+
+                for (Size j=0; j < x.size(); ++j) {
+                    Array pSlice(vGrid);
+                    for (Size k=0; k < vGrid; ++k)
+                        pSlice[k] = pn[j + k*xGrid];
+
+                    const Real pInt = (trafoType == FdmSquareRootFwdOp::Power)
+                       ? DiscreteSimpsonIntegral()(v, Pow(v, alpha-1)*pSlice)
+                       : DiscreteSimpsonIntegral()(v, pSlice);
+
+                    const Real vpInt = (trafoType == FdmSquareRootFwdOp::Log)
+                      ? DiscreteSimpsonIntegral()(v, Exp(v)*pSlice)
+                      : (trafoType == FdmSquareRootFwdOp::Power)
+                      ? DiscreteSimpsonIntegral()(v, Pow(v, alpha)*pSlice)
+                      : DiscreteSimpsonIntegral()(v, v*pSlice);
+
+                    const Real scale = pInt/vpInt;
+                    const Volatility localVol = localVol_->localVol(t, x[j]);
+
+                    const Real l = (scale >= 0.0)
+                      ? localVol*std::sqrt(scale) : 1.0;
+
+                    (*L)[j][i] = std::min(50.0, std::max(0.001, l));
+
+                    leverageFct->setInterpolation(Linear());
+                }
+
+                const Real sLowerBound = std::max(x.front(),
+                    std::exp(localVolRND.invcdf(
+                        params_.leverageFctPropEps, t)));
+                const Real sUpperBound = std::min(x.back(),
+                    std::exp(localVolRND.invcdf(
+                        1.0-params_.leverageFctPropEps, t)));
+
+                const Real lowerL = leverageFct->localVol(t, sLowerBound);
+                const Real upperL = leverageFct->localVol(t, sUpperBound);
+
+                for (Size j=0; j < x.size(); ++j) {
+                    if (x[j] < sLowerBound)
+                        std::fill(L->row_begin(j)+i,
+                          std::min(L->row_begin(j)+i+1, L->row_end(j)),
+                          lowerL);
+                    else if (x[j] > sUpperBound)
+                        std::fill(L->row_begin(j)+i,
+                          std::min(L->row_begin(j)+i+1, L->row_end(j)),
+                          upperL);
+                    else if ((*L)[j][i] == Null<Real>())
+                        QL_FAIL("internal error");
+                }
+                leverageFct->setInterpolation(Linear());
+
+                pn = p;
+
+                fdmScheme->setStep(dt);
+                fdmScheme->step(pn, t);
+            }
+            p = pn;
+            p = rescalePDF(p, mesher, trafoType, alpha);
+
+            if (logging_) {
+                const LogEntry entry
+                    = { t, ext::make_shared<Array>(p), mesher };
+                logEntries_.push_back(entry);
+            }
+        }
+
+        leverageFunction_ = leverageFct;
+    }
+
+    const std::list<HestonSLVFDMModel::LogEntry>& HestonSLVFDMModel::logEntries()
+    const {
+        performCalculations();
+        return logEntries_;
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>hestonslvmcmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Johannes Göttker-Schnetmann
+ Copyright (C) 2015 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file hestonslvmcmodel.cpp
+*/
+
+#include <ql/math/functional.hpp>
+#include <ql/termstructures/volatility/equityfx/fixedlocalvolsurface.hpp>
+#include <ql/experimental/models/hestonslvmcmodel.hpp>
+#include <ql/experimental/processes/hestonslvprocess.hpp>
+
+#if defined(__GNUC__) && (((__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)) || (__GNUC__ > 4))
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-local-typedefs"
+#endif
+#include <boost/multi_array.hpp>
+#include <utility>
+#if defined(__GNUC__) && (((__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)) || (__GNUC__ > 4))
+#    pragma GCC diagnostic pop
+#endif
+
+namespace QuantLib {
+    HestonSLVMCModel::HestonSLVMCModel(
+        Handle<LocalVolTermStructure> localVol,
+        Handle<HestonModel> hestonModel,
+        ext::shared_ptr<BrownianGeneratorFactory> brownianGeneratorFactory,
+        const Date& endDate,
+        Size timeStepsPerYear,
+        Size nBins,
+        Size calibrationPaths,
+        const std::vector<Date>& mandatoryDates,
+        const Real mixingFactor)
+    : localVol_(std::move(localVol)), hestonModel_(std::move(hestonModel)),
+      brownianGeneratorFactory_(std::move(brownianGeneratorFactory)), endDate_(endDate),
+      nBins_(nBins), calibrationPaths_(calibrationPaths), mixingFactor_(mixingFactor) {
+
+        registerWith(localVol_);
+        registerWith(hestonModel_);
+
+        const DayCounter dc = hestonModel_->process()->riskFreeRate()->dayCounter();
+        const Date refDate = hestonModel_->process()->riskFreeRate()->referenceDate();
+
+        std::vector<Time> gridTimes;
+        gridTimes.reserve(mandatoryDates.size()+1);
+        for (auto mandatoryDate : mandatoryDates) {
+            gridTimes.push_back(dc.yearFraction(refDate, mandatoryDate));
+        }
+        gridTimes.push_back(dc.yearFraction(refDate, endDate));
+
+        timeGrid_ = ext::make_shared<TimeGrid>(gridTimes.begin(), gridTimes.end(),
+                std::max(Size(2), Size(gridTimes.back()*timeStepsPerYear)));
+    }
+
+    ext::shared_ptr<HestonProcess> HestonSLVMCModel::hestonProcess() const {
+        return hestonModel_->process();
+    }
+
+    ext::shared_ptr<LocalVolTermStructure> HestonSLVMCModel::localVol() const {
+        return localVol_.currentLink();
+    }
+
+    ext::shared_ptr<LocalVolTermStructure>
+    HestonSLVMCModel::leverageFunction() const {
+        calculate();
+
+        return leverageFunction_;
+    }
+
+    void HestonSLVMCModel::performCalculations() const {
+        const ext::shared_ptr<HestonProcess> hestonProcess
+            = hestonModel_->process();
+        const ext::shared_ptr<Quote> spot
+            = hestonProcess->s0().currentLink();
+
+        const Real v0            = hestonProcess->v0();
+        const DayCounter dc      = hestonProcess->riskFreeRate()->dayCounter();
+        const Date referenceDate = hestonProcess->riskFreeRate()->referenceDate();
+
+        const Volatility lv0
+            = localVol_->localVol(0.0, spot->value())/std::sqrt(v0);
+
+        const ext::shared_ptr<Matrix> L(new Matrix(nBins_, timeGrid_->size()));
+
+        std::vector<ext::shared_ptr<std::vector<Real> > >
+            vStrikes(timeGrid_->size());
+        for (Size i=0; i < timeGrid_->size(); ++i) {
+            const Integer u = nBins_/2;
+            const Real dx = spot->value()*std::sqrt(QL_EPSILON);
+
+            vStrikes[i] = ext::make_shared<std::vector<Real> >(nBins_);
+
+            for (Integer j=0; j < Integer(nBins_); ++j)
+                vStrikes[i]->at(j) = spot->value() + (j - u)*dx;
+        }
+
+        std::fill(L->column_begin(0),L->column_end(0), lv0);
+
+        leverageFunction_ = ext::make_shared<FixedLocalVolSurface>(
+            referenceDate,
+            std::vector<Time>(timeGrid_->begin(), timeGrid_->end()),
+            vStrikes, L, dc);
+
+        const ext::shared_ptr<HestonSLVProcess> slvProcess
+            = ext::make_shared<HestonSLVProcess>(hestonProcess, leverageFunction_, mixingFactor_);
+
+        std::vector<std::pair<Real, Real> > pairs(
+                calibrationPaths_, std::make_pair(spot->value(), v0));
+
+        const Size k = calibrationPaths_ / nBins_;
+        const Size m = calibrationPaths_ % nBins_;
+
+        const Size timeSteps = timeGrid_->size()-1;
+
+        typedef boost::multi_array<Real, 3> path_type;
+        path_type paths(boost::extents[calibrationPaths_][timeSteps][2]);
+
+        const ext::shared_ptr<BrownianGenerator> brownianGenerator =
+            brownianGeneratorFactory_->create(2, timeSteps);
+
+        for (Size i=0; i < calibrationPaths_; ++i) {
+            brownianGenerator->nextPath();
+            std::vector<Real> tmp(2);
+            for (Size j=0; j < timeSteps; ++j) {
+                brownianGenerator->nextStep(tmp);
+                paths[i][j][0] = tmp[0];
+                paths[i][j][1] = tmp[1];
+            }
+        }
+
+        for (Size n=1; n < timeGrid_->size(); ++n) {
+            const Time t = timeGrid_->at(n-1);
+            const Time dt = timeGrid_->dt(n-1);
+
+            Array x0(2), dw(2);
+
+            for (Size i=0; i < calibrationPaths_; ++i) {
+                x0[0] = pairs[i].first;
+                x0[1] = pairs[i].second;
+
+                dw[0] = paths[i][n-1][0];
+                dw[1] = paths[i][n-1][1];
+
+                x0 = slvProcess->evolve(t, x0, dt, dw);
+
+                pairs[i].first = x0[0];
+                pairs[i].second = x0[1];
+            }
+
+            std::sort(pairs.begin(), pairs.end());
+
+            Size s = 0U, e = 0U;
+            for (Size i=0; i < nBins_; ++i) {
+                const Size inc = k + static_cast<unsigned long>(i < m);
+                e = s + inc;
+
+                Real sum=0.0;
+                for (Size j=s; j < e; ++j) {
+                    sum+=pairs[j].second;
+                }
+                sum/=inc;
+
+                vStrikes[n]->at(i) = 0.5*(pairs[e-1].first + pairs[s].first);
+                (*L)[i][n] = std::sqrt(square<Real>()(
+                     localVol_->localVol(t, vStrikes[n]->at(i), true))/sum);
+
+                s = e;
+            }
+
+            leverageFunction_->setInterpolation<Linear>();
+        }
+    }
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>normalclvmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file normalclvmodel.cpp
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/models/normalclvmodel.hpp>
+#include <ql/instruments/vanillaoption.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/math/integrals/gaussianquadratures.hpp>
+#include <ql/math/interpolations/linearinterpolation.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <ql/methods/finitedifferences/utilities/gbsmrndcalculator.hpp>
+#include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+#include <ql/processes/ornsteinuhlenbeckprocess.hpp>
+#include <utility>
+
+
+namespace QuantLib {
+
+    NormalCLVModel::NormalCLVModel(const ext::shared_ptr<GeneralizedBlackScholesProcess>& bsProcess,
+                                   ext::shared_ptr<OrnsteinUhlenbeckProcess> ouProcess,
+                                   const std::vector<Date>& maturityDates,
+                                   Size lagrangeOrder,
+                                   Real pMax,
+                                   Real pMin)
+    : x_(M_SQRT2 * GaussHermiteIntegration(lagrangeOrder).x()),
+      sigma_((pMax != Null<Real>()) ?
+                 x_.back() / InverseCumulativeNormal()(pMax) :
+                 (pMin != Null<Real>()) ? x_.front() / InverseCumulativeNormal()(pMin) : 1.0),
+      bsProcess_(bsProcess), ouProcess_(std::move(ouProcess)), maturityDates_(maturityDates),
+      rndCalculator_(ext::make_shared<GBSMRNDCalculator>(bsProcess)),
+      maturityTimes_(maturityDates.size()) {
+
+        registerWith(bsProcess_);
+        registerWith(ouProcess_);
+
+        for (Size i=0; i < maturityTimes_.size(); ++i) {
+            maturityTimes_[i] = bsProcess_->time(maturityDates[i]);
+            QL_REQUIRE(i==0 || maturityTimes_[i-1] < maturityTimes_[i],
+                    "dates must be sorted");
+        }
+    }
+
+    Real NormalCLVModel::cdf(const Date& d, Real k) const {
+        return rndCalculator_->cdf(k, bsProcess_->time(d));
+    }
+
+
+    Real NormalCLVModel::invCDF(const Date& d, Real q) const {
+        return rndCalculator_->invcdf(q, bsProcess_->time(d));
+    }
+
+    Disposable<Array> NormalCLVModel::collocationPointsX(const Date& d) const {
+        const Time t = bsProcess_->time(d);
+
+        const Real expectation
+            = ouProcess_->expectation(0.0, ouProcess_->x0(), t);
+        const Real stdDeviation
+            = ouProcess_->stdDeviation(0.0, ouProcess_->x0(), t);
+
+        return expectation + stdDeviation*x_;
+    }
+
+    Disposable<Array> NormalCLVModel::collocationPointsY(const Date& d) const {
+        Array s(x_.size());
+
+        CumulativeNormalDistribution N;
+        for (Size i=0, n=s.size(); i < n; ++i) {
+            s[i] = invCDF(d, N(x_[i]/sigma_));
+        }
+
+        return s;
+    }
+
+
+    ext::function<Real(Time, Real)> NormalCLVModel::g() const {
+        calculate();
+        return g_;
+    }
+
+    NormalCLVModel::MappingFunction::MappingFunction(
+        const NormalCLVModel& model)
+    : y_(model.x_.size()),
+      sigma_(model.sigma_),
+      ouProcess_(model.ouProcess_),
+      data_(ext::make_shared<InterpolationData>(model)) {
+
+        for (Size i=0; i < data_->s_.columns(); ++i) {
+            const Array y = model.collocationPointsY(model.maturityDates_[i]);
+            std::copy(y.begin(), y.end(), data_->s_.column_begin(i));
+        }
+
+        for (Size i=0; i < data_->s_.rows(); ++i) {
+            data_->interpl_.emplace_back(data_->t_.begin(), data_->t_.end(),
+                                         data_->s_.row_begin(i));
+        }
+    }
+
+
+    Real NormalCLVModel::MappingFunction::operator()(Time t, Real x) const {
+        for (Size i=0; i < y_.size(); ++i) {
+            y_[i] = data_->interpl_[i](t, true);
+        }
+
+        const Real expectation
+            = ouProcess_->expectation(0.0, ouProcess_->x0(), t);
+        const Real stdDeviation
+            = ouProcess_->stdDeviation(0.0, ouProcess_->x0(), t);
+
+        const Real r = sigma_*(x-expectation)/stdDeviation;
+
+        return data_->lagrangeInterpl_.value(y_, r);
+    }
+
+    void NormalCLVModel::performCalculations() const {
+        g_ = ext::function<Real(Time, Real)>(MappingFunction(*this));
+    }
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>squarerootclvmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file squarerootclvmodel.cpp
+    \brief CLV model with a square root kernel process
+*/
+
+#include <ql/processes/blackscholesprocess.hpp>
+#include <ql/processes/squarerootprocess.hpp>
+#include <ql/math/integrals/gaussianquadratures.hpp>
+
+#include <ql/experimental/models/squarerootclvmodel.hpp>
+#include <ql/methods/finitedifferences/utilities/gbsmrndcalculator.hpp>
+
+#include <boost/math/distributions/non_central_chi_squared.hpp>
+
+#include <utility>
+
+namespace QuantLib {
+    SquareRootCLVModel::SquareRootCLVModel(
+        const ext::shared_ptr<GeneralizedBlackScholesProcess>& bsProcess,
+        ext::shared_ptr<SquareRootProcess> sqrtProcess,
+        std::vector<Date> maturityDates,
+        Size lagrangeOrder,
+        Real pMax,
+        Real pMin)
+    : pMax_(pMax), pMin_(pMin), bsProcess_(bsProcess), sqrtProcess_(std::move(sqrtProcess)),
+      maturityDates_(std::move(maturityDates)), lagrangeOrder_(lagrangeOrder),
+      rndCalculator_(ext::make_shared<GBSMRNDCalculator>(bsProcess)) {}
+
+    Real SquareRootCLVModel::cdf(const Date& d, Real k) const {
+        return rndCalculator_->cdf(k, bsProcess_->time(d));
+    }
+
+
+    Real SquareRootCLVModel::invCDF(const Date& d, Real q) const {
+        return rndCalculator_->invcdf(q, bsProcess_->time(d));
+    }
+
+    std::pair<Real, Real> SquareRootCLVModel::nonCentralChiSquaredParams(
+        const Date& d) const {
+
+        const Time t = bsProcess_->time(d);
+
+        const Real kappa = sqrtProcess_->a();
+        const Real theta = sqrtProcess_->b();
+        const Real sigma = sqrtProcess_->sigma();
+
+        const Real df  = 4*theta*kappa/(sigma*sigma);
+        const Real ncp = 4*kappa*std::exp(-kappa*t)
+            / (sigma*sigma*(1-std::exp(-kappa*t)))*sqrtProcess_->x0();
+
+        return std::make_pair(df, ncp);
+    }
+
+
+    Disposable<Array> SquareRootCLVModel::collocationPointsX(const Date& d)
+    const {
+        const std::pair<Real, Real> p = nonCentralChiSquaredParams(d);
+
+        Array x = GaussianQuadrature(lagrangeOrder_,
+            GaussNonCentralChiSquaredPolynomial(p.first, p.second))
+             .x();
+
+        std::sort(x.begin(), x.end());
+
+        const boost::math::non_central_chi_squared_distribution<Real>
+            dist(p.first, p.second);
+
+        const Real xMin = std::max(x.front(),
+            (pMin_ == Null<Real>())
+                ? 0.0 : boost::math::quantile(dist, pMin_));
+
+        const Real xMax = std::min(x.back(),
+            (pMax_ == Null<Real>())
+            ? QL_MAX_REAL : boost::math::quantile(dist, pMax_));
+
+        const Real b = xMin - x.front();
+        const Real a = (xMax - xMin)/(x.back() - x.front());
+
+        for (double& i : x) {
+            i = a * i + b;
+        }
+
+        return x;
+    }
+
+    Disposable<Array> SquareRootCLVModel::collocationPointsY(const Date& d)
+    const {
+
+        const Array x = collocationPointsX(d);
+        const std::pair<Real, Real> params = nonCentralChiSquaredParams(d);
+        const boost::math::non_central_chi_squared_distribution<Real>
+            dist(params.first, params.second);
+
+        Array s(x.size());
+        for (Size i=0, n=s.size(); i < n; ++i) {
+            const Real q = boost::math::cdf(dist, x[i]);
+
+            s[i] = invCDF(d, q);
+        }
+
+        return s;
+    }
+
+    ext::function<Real(Time, Real)> SquareRootCLVModel::g() const {
+        calculate();
+        return g_;
+    }
+
+    void SquareRootCLVModel::performCalculations() const {
+        g_ = ext::function<Real(Time, Real)>(MappingFunction(*this));
+    }
+
+    SquareRootCLVModel::MappingFunction::MappingFunction(
+        const SquareRootCLVModel& model)
+    : s_(ext::make_shared<Matrix>(
+         model.maturityDates_.size(), model.lagrangeOrder_)),
+      x_(ext::make_shared<Matrix>(
+         model.maturityDates_.size(), model.lagrangeOrder_)) {
+
+        std::vector<Date> maturityDates = model.maturityDates_;
+        std::sort(maturityDates.begin(), maturityDates.end());
+
+        const ext::shared_ptr<GeneralizedBlackScholesProcess>&
+            bsProcess = model.bsProcess_;
+
+        for (Size i=0, n = maturityDates.size(); i < n; ++i) {
+            const Date maturityDate = maturityDates[i];
+
+            const Array x = model.collocationPointsX(maturityDate);
+            const Array y = model.collocationPointsY(maturityDate);
+
+            std::copy(x.begin(), x.end(), x_->row_begin(i));
+            std::copy(y.begin(), y.end(), s_->row_begin(i));
+
+            const Time maturity = bsProcess->time(maturityDate);
+
+            interpl.insert(
+                std::make_pair(maturity,
+                    ext::make_shared<LagrangeInterpolation>(
+                        x_->row_begin(i), x_->row_end(i),
+                        s_->row_begin(i))));
+        }
+    }
+
+    Real SquareRootCLVModel::MappingFunction::operator()(Time t,Real x) const {
+        const interpl_type::const_iterator ge = interpl.lower_bound(t);
+
+        if (close_enough(ge->first, t)) {
+            return (*ge->second)(x, true);
+        }
+
+        QL_REQUIRE(ge != interpl.end() && ge != interpl.begin(),
+             "extrapolation to large or small t is not allowed");
+
+        const Time t1 = ge->first;
+        const Real y1 = (*ge->second)(x, true);
+
+        interpl_type::const_iterator lt = ge;
+        std::advance(lt, -1);
+
+        const Time t0 = lt->first;
+        const Real y0 = (*lt->second)(x, true);
+
+        return y0 + (y1 - y0)/(t1 - t0)*(t - t0);
+    }
+}
+]]></document_content>
+  </document>
+</documents>

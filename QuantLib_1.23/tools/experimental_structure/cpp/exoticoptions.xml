@@ -1,0 +1,3502 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>analyticamericanmargrabeengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analyticamericanmargrabeengine.hpp>
+#include <ql/pricingengines/vanilla/bjerksundstenslandengine.hpp>
+#include <ql/quotes/simplequote.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
+#include <ql/termstructures/yield/flatforward.hpp>
+#include <ql/time/calendars/nullcalendar.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    AnalyticAmericanMargrabeEngine::AnalyticAmericanMargrabeEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process1,
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process2,
+        Real correlation)
+    : process1_(std::move(process1)), process2_(std::move(process2)), rho_(correlation) {
+        registerWith(process1_);
+        registerWith(process2_);
+    }
+
+    void AnalyticAmericanMargrabeEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::American,
+                   "not an American option");
+
+        ext::shared_ptr<AmericanExercise> exercise =
+            ext::dynamic_pointer_cast<AmericanExercise>(arguments_.exercise);
+        QL_REQUIRE(exercise, "not an American option");
+
+        ext::shared_ptr<NullPayoff> payoff0 =
+            ext::dynamic_pointer_cast<NullPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff0, "not a null payoff");
+
+        // The option can be priced as an American single-asset option
+        // with an adjusted process and payoff.
+
+        Date today = Settings::instance().evaluationDate();
+
+        DayCounter rfdc  = process1_->riskFreeRate()->dayCounter();
+        Time t = rfdc.yearFraction(process1_->riskFreeRate()->referenceDate(),
+                                   arguments_.exercise->lastDate());
+
+        Real s1 = process1_->stateVariable()->value();
+        Real s2 = process2_->stateVariable()->value();
+
+        ext::shared_ptr<SimpleQuote> spot(new SimpleQuote(arguments_.Q1*s1));
+
+        ext::shared_ptr<StrikedTypePayoff> payoff(
+                      new PlainVanillaPayoff(Option::Call, arguments_.Q2*s2));
+
+        DiscountFactor dividendDiscount1 =
+            process1_->dividendYield()->discount(exercise->lastDate());
+        Rate q1 = -std::log(dividendDiscount1)/t;
+
+        DiscountFactor dividendDiscount2 =
+            process2_->dividendYield()->discount(exercise->lastDate());
+        Rate q2 = -std::log(dividendDiscount2)/t;
+
+        ext::shared_ptr<YieldTermStructure> qTS(
+                                            new FlatForward(today, q1, rfdc));
+
+        ext::shared_ptr<YieldTermStructure> rTS(
+                                            new FlatForward(today, q2, rfdc));
+
+        Real variance1 = process1_->blackVolatility()->blackVariance(
+                                                exercise->lastDate(), s1);
+        Real variance2 = process2_->blackVolatility()->blackVariance(
+                                                exercise->lastDate(), s2);
+        Real variance = variance1 + variance2
+                      - 2*rho_*std::sqrt(variance1)*std::sqrt(variance2);
+        Volatility volatility = std::sqrt(variance/t);
+
+        ext::shared_ptr<BlackVolTermStructure> volTS(
+               new BlackConstantVol(today, NullCalendar(), volatility, rfdc));
+
+        ext::shared_ptr<BlackScholesMertonProcess> stochProcess(new
+            BlackScholesMertonProcess(Handle<Quote>(spot),
+                                      Handle<YieldTermStructure>(qTS),
+                                      Handle<YieldTermStructure>(rTS),
+                                      Handle<BlackVolTermStructure>(volTS)));
+
+        ext::shared_ptr<PricingEngine> engine(
+                     new BjerksundStenslandApproximationEngine(stochProcess));
+
+        VanillaOption option(payoff, exercise);
+        option.setPricingEngine(engine);
+
+        results_.value = option.NPV();
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>analyticcomplexchooserengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analyticcomplexchooserengine.hpp>
+#include <ql/math/distributions/bivariatenormaldistribution.hpp>
+#include <utility>
+
+using std::pow;
+using std::log;
+using std::exp;
+using std::sqrt;
+
+namespace QuantLib {
+
+    AnalyticComplexChooserEngine::AnalyticComplexChooserEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)) {
+        registerWith(process_);
+    }
+
+    void AnalyticComplexChooserEngine::calculate() const {
+        results_.value = ComplexChooser();
+    }
+
+    Real AnalyticComplexChooserEngine::ComplexChooser() const{
+        Real S = process_->x0();
+        Real b;
+        Real v;
+        Real Xc = arguments_.strikeCall;
+        Real Xp = arguments_.strikePut;
+        Time T = choosingTime();
+        Time Tc = callMaturity()-choosingTime();
+        Time Tp = putMaturity()-choosingTime();
+
+        Real i = CriticalValueChooser();
+
+        b = riskFreeRate(choosingTime()) - dividendYield(choosingTime());
+        v = volatility(T);
+        Real d1 = (log(S / i) + (b + pow(v, 2) / 2)*T) / (v*sqrt(T));
+        Real d2 = d1 - v*sqrt(T);
+
+        b = riskFreeRate(callMaturity()) - dividendYield(callMaturity());
+        v = volatility(Tc);
+        Real y1 = (log(S / Xc) + (b + pow(v, 2) / 2)*Tc) / (v*sqrt(Tc));
+
+        b = riskFreeRate(putMaturity()) - dividendYield(putMaturity());
+        v = volatility(Tp);
+        Real y2 = (log(S / Xp) + (b + pow(v, 2) / 2)*Tp) / (v*sqrt(Tp));
+
+        Real rho1 = sqrt(T / Tc);
+        Real rho2 = sqrt(T / Tp);
+        b = riskFreeRate(callMaturity()) - dividendYield(callMaturity());
+        Real r = riskFreeRate(callMaturity());
+        Real ComplexChooser = S * exp((b - r)*Tc) *  BivariateCumulativeNormalDistributionDr78(rho1)(d1, y1)
+            - Xc * exp(-r*Tc)*BivariateCumulativeNormalDistributionDr78(rho1)(d2, y1 - v * sqrt(Tc)) ;
+        b = riskFreeRate(putMaturity()) - dividendYield(putMaturity());
+        r = riskFreeRate(putMaturity());
+        ComplexChooser-= S * exp((b - r)*Tp) * BivariateCumulativeNormalDistributionDr78(rho2)(-d1, -y2);
+        ComplexChooser+= Xp * exp(-r*Tp) * BivariateCumulativeNormalDistributionDr78(rho2)(-d2, -y2 + v * sqrt(Tp));
+        return ComplexChooser;
+    }
+
+    BlackScholesCalculator AnalyticComplexChooserEngine::bsCalculator(
+                                   Real spot, Option::Type optionType) const {
+        Real vol;
+        DiscountFactor growth;
+        DiscountFactor discount;
+
+        //payoff
+        ext::shared_ptr<PlainVanillaPayoff > vanillaPayoff;
+        if (optionType == Option::Call){
+            //TC-T
+            Time t=callMaturity()-choosingTime()-choosingTime();
+            vanillaPayoff = ext::make_shared<PlainVanillaPayoff>(
+                                          Option::Call, strike(Option::Call));
+            //QuantLib requires sigma * sqrt(T) rather than just sigma/volatility
+            vol = volatility(t) * std::sqrt(t);
+            growth = dividendDiscount(t);
+            discount = riskFreeDiscount(t);
+        } else{
+            Time t=putMaturity()-choosingTime()-choosingTime();
+            vanillaPayoff = ext::make_shared<PlainVanillaPayoff>(
+                                            Option::Put, strike(Option::Put));
+            vol = volatility(t) * std::sqrt(t);
+            growth = dividendDiscount(t);
+            discount = riskFreeDiscount(t);
+        }
+
+        BlackScholesCalculator bs(vanillaPayoff, spot, growth, vol, discount);
+        return bs;
+    }
+
+    Real AnalyticComplexChooserEngine::CriticalValueChooser() const{
+        Real Sv = process_->x0();
+
+        BlackScholesCalculator bs=bsCalculator(Sv,Option::Call);
+        Real ci = bs.value();
+        Real dc = bs.delta();
+
+        bs=bsCalculator(Sv,Option::Put);
+        Real Pi = bs.value();
+        Real dp = bs.delta();
+
+        Real yi = ci - Pi;
+        Real di = dc - dp;
+        Real epsilon = 0.001;
+
+        //Newton-Raphson process
+        while (std::fabs(yi) > epsilon){
+            Sv = Sv - yi / di;
+
+            bs=bsCalculator(Sv,Option::Call);
+            ci = bs.value();
+            dc = bs.delta();
+
+            bs=bsCalculator(Sv,Option::Put);
+            Pi = bs.value();
+            dp = bs.delta();
+
+            yi = ci - Pi;
+            di = dc - dp;
+        }
+        return Sv;
+    }
+
+
+    Real AnalyticComplexChooserEngine::strike(Option::Type optionType) const {
+        if (optionType == Option::Call)
+            return arguments_.strikeCall;
+        else
+            return arguments_.strikePut;
+    }
+
+    Time AnalyticComplexChooserEngine::choosingTime() const {
+        return process_->time(arguments_.choosingDate);
+    }
+
+    Time AnalyticComplexChooserEngine::putMaturity() const {
+        return process_->time(arguments_.exercisePut->lastDate());
+    }
+
+    Time AnalyticComplexChooserEngine::callMaturity() const {
+        return process_->time(arguments_.exerciseCall->lastDate());
+    }
+
+    Volatility AnalyticComplexChooserEngine::volatility(Time t) const {
+        return process_->blackVolatility()->blackVol(t, arguments_.strikeCall);
+    }
+
+    Rate AnalyticComplexChooserEngine::dividendYield(Time t) const {
+        return process_->dividendYield()->zeroRate(t, Continuous, NoFrequency);
+    }
+
+    DiscountFactor AnalyticComplexChooserEngine::dividendDiscount(Time t) const {
+        return process_->dividendYield()->discount(t);
+    }
+
+    Rate AnalyticComplexChooserEngine::riskFreeRate(Time t) const {
+        return process_->riskFreeRate()->zeroRate(t, Continuous, NoFrequency);
+    }
+
+    DiscountFactor AnalyticComplexChooserEngine::riskFreeDiscount(Time t) const {
+        return process_->riskFreeRate()->discount(t);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>analyticcompoundoptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Dimitri Reiswich
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/analyticcompoundoptionengine.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+
+        // Helper Class needed to solve an implicit problem of finding a
+        // spot to a corresponding option price.
+        class ImpliedSpotHelper {
+          public:
+            ImpliedSpotHelper(DiscountFactor dividendDiscount,
+                              DiscountFactor riskFreeDiscount,
+                              Real standardDeviation,
+                              ext::shared_ptr<PlainVanillaPayoff> payoff,
+                              Real strike)
+            : dividendDiscount_(dividendDiscount), riskFreeDiscount_(riskFreeDiscount),
+              standardDeviation_(standardDeviation), strike_(strike), payoff_(std::move(payoff)) {}
+            Real operator()(Real spot) const {
+                Real forwardPrice = spot*dividendDiscount_/riskFreeDiscount_;
+                Real value = blackFormula(payoff_, forwardPrice,
+                                          standardDeviation_,riskFreeDiscount_);
+                return value - strike_;
+            }
+          private:
+            DiscountFactor dividendDiscount_;
+            DiscountFactor riskFreeDiscount_;
+            Real standardDeviation_;
+            Real strike_;
+            ext::shared_ptr<PlainVanillaPayoff> payoff_;
+        };
+
+    }
+
+    AnalyticCompoundOptionEngine::AnalyticCompoundOptionEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)) {
+        registerWith(process_);
+    }
+
+    void AnalyticCompoundOptionEngine::calculate() const {
+
+        QL_REQUIRE(strikeDaughter()>0.0,
+                   "Daughter strike must be positive");
+
+        QL_REQUIRE(strikeMother()>0.0,
+                   "Mother strike must be positive");
+
+        QL_REQUIRE(spot() >= 0.0, "negative or null underlying given");
+
+        /* Solver Setup ***************************************************/
+        Date helpDate(process_->riskFreeRate()->referenceDate());
+        Date helpMaturity=helpDate+(maturityDaughter()-maturityMother())*Days;
+        Real vol =process_->blackVolatility()->blackVol(helpMaturity,
+                                                        strikeDaughter());
+
+        Time helpTimeToMat=process_->time(helpMaturity);
+        vol=vol*std::sqrt(helpTimeToMat);
+
+        DiscountFactor dividendDiscount =
+            process_->dividendYield()->discount(helpMaturity);
+
+        DiscountFactor riskFreeDiscount =
+            process_->riskFreeRate()->discount(helpMaturity);
+
+
+        ext::shared_ptr<ImpliedSpotHelper> f(
+                new ImpliedSpotHelper(dividendDiscount, riskFreeDiscount,
+                                      vol, payoffDaughter(), strikeMother()));
+
+        Brent solver;
+        solver.setMaxEvaluations(1000);
+        Real accuracy = 1.0e-6;
+
+        Real sSolved=solver.solve(*f, accuracy, strikeDaughter(), 1.0e-6, strikeDaughter()*1000.0);
+        Real X=transformX(sSolved); // transform stock to return as in Wystup's book
+        /* Solver Setup Finished*****************************************/
+
+        Real phi=typeDaughter(); // -1 or 1
+        Real w=typeMother(); // -1 or 1
+
+        Real rho=std::sqrt(residualTimeMother()/residualTimeDaughter());
+        BivariateCumulativeNormalDistributionDr78 N2(w*rho) ;
+
+        DiscountFactor ddD=dividendDiscountDaughter();
+        DiscountFactor rdD=riskFreeDiscountDaughter();
+        //DiscountFactor ddM=dividendDiscountMother();
+        DiscountFactor rdM=riskFreeDiscountMother();
+
+        Real XmSM=X-stdDeviationMother();
+        Real S=spot();
+        Real dP=dPlus();
+        Real dPT12=dPlusTau12(sSolved);
+        Real vD=volatilityDaughter();
+
+        Real dM=dMinus();
+        Real strD=strikeDaughter();
+        Real strM=strikeMother();
+        Real rTM=residualTimeMother();
+        Real rTD=residualTimeDaughter();
+
+        Real rD=riskFreeRateDaughter();
+        Real dD=dividendRateDaughter();
+
+        Real N2XmSM=N2(-phi*w*XmSM,phi*dP);
+        Real N2X=N2(-phi*w*X,phi*dM);
+        Real NeX=N_(-phi*w*e(X));
+        Real NX=N_(-phi*w*X);
+        Real NT12=N_(phi*dPT12);
+        Real ndP=n_(dP);
+        Real nXm=n_(XmSM);
+        Real invMTime=1/std::sqrt(rTM);
+        Real invDTime=1/std::sqrt(rTD);
+
+        Real tempRes=phi*w*S*ddD*N2XmSM-phi*w*strD*rdD*N2X-w*strM*rdM*NX;
+        Real tempDelta=phi*w*ddD*N2XmSM;
+        Real tempGamma=(ddD/(vD*S))*(invMTime*nXm*NT12+w*invDTime*ndP*NeX);
+        Real tempVega=ddD*S*((1/invMTime)*nXm*NT12+w*(1/invDTime)*ndP*NeX);
+        Real tempTheta=phi*w*dD*S*ddD*N2XmSM-phi*w*rD*strD*rdD*N2X-w*rD*strM*rdM*NX;
+        tempTheta-=0.5*vD*S*ddD*(invMTime*nXm*NT12+w*invDTime*ndP*NeX);
+
+        results_.value=tempRes;
+        results_.delta=tempDelta;
+        results_.gamma=tempGamma;
+        results_.vega=tempVega;
+        results_.theta=tempTheta;
+    }
+
+    Real AnalyticCompoundOptionEngine::typeDaughter() const {
+        // returns -1 or 1 according to put or call
+        return (Real) payoffDaughter()->optionType();
+    }
+
+    Real AnalyticCompoundOptionEngine::typeMother() const {
+        return (Real) payoffMother()->optionType();
+    }
+
+    Date AnalyticCompoundOptionEngine::maturityDaughter() const {
+        return arguments_.daughterExercise->lastDate();
+    }
+
+    Date AnalyticCompoundOptionEngine::maturityMother() const {
+        return arguments_.exercise->lastDate();
+    }
+
+    Time AnalyticCompoundOptionEngine::residualTimeDaughter() const {
+        return process_->time(maturityDaughter());
+    }
+
+    Time AnalyticCompoundOptionEngine::residualTimeMother() const {
+        return process_->time(maturityMother());
+    }
+
+    Time AnalyticCompoundOptionEngine::residualTimeMotherDaughter() const {
+        return residualTimeDaughter()-residualTimeMother();
+    }
+
+
+    Real AnalyticCompoundOptionEngine::volatilityDaughter() const {
+        return process_->blackVolatility()->blackVol(maturityDaughter(),
+                                                     strikeDaughter());
+    }
+
+
+    Real AnalyticCompoundOptionEngine::volatilityMother() const {
+        return process_->blackVolatility()->blackVol(maturityMother(),
+                                                     strikeMother());
+    }
+
+    Real AnalyticCompoundOptionEngine::stdDeviationDaughter() const {
+        return volatilityDaughter()*std::sqrt(residualTimeDaughter());
+    }
+
+    Real AnalyticCompoundOptionEngine::stdDeviationMother() const {
+        return volatilityMother()*std::sqrt(residualTimeMother());
+    }
+
+
+    ext::shared_ptr<PlainVanillaPayoff>
+    AnalyticCompoundOptionEngine::payoffDaughter() const {
+        ext::shared_ptr<PlainVanillaPayoff> dPayoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(
+                                                   arguments_.daughterPayoff);
+        QL_REQUIRE(dPayoff, "non-plain payoff given");
+        return dPayoff;
+    }
+
+    ext::shared_ptr<PlainVanillaPayoff>
+    AnalyticCompoundOptionEngine::payoffMother() const {
+        ext::shared_ptr<PlainVanillaPayoff> mPayoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(mPayoff, "non-plain payoff given");
+        return mPayoff;
+    }
+
+    Real AnalyticCompoundOptionEngine::strikeMother() const {
+        return payoffMother()->strike();
+    }
+
+    Real AnalyticCompoundOptionEngine::strikeDaughter() const {
+        return payoffDaughter()->strike();
+    }
+
+    DiscountFactor AnalyticCompoundOptionEngine::riskFreeDiscountDaughter() const {
+        return process_->riskFreeRate()->discount(residualTimeDaughter());
+    }
+
+    DiscountFactor AnalyticCompoundOptionEngine::riskFreeDiscountMother() const {
+        return process_->riskFreeRate()->discount(residualTimeMother());
+    }
+
+    DiscountFactor AnalyticCompoundOptionEngine::riskFreeDiscountMotherDaughter() const {
+        return process_->riskFreeRate()->discount(residualTimeMotherDaughter());
+    }
+
+    DiscountFactor AnalyticCompoundOptionEngine::dividendDiscountDaughter() const {
+        return process_->dividendYield()->discount(residualTimeDaughter());
+    }
+
+    DiscountFactor AnalyticCompoundOptionEngine::dividendDiscountMother() const {
+        return process_->dividendYield()->discount(residualTimeMother());
+    }
+
+    DiscountFactor AnalyticCompoundOptionEngine::dividendDiscountMotherDaughter() const {
+        return process_->dividendYield()->discount(residualTimeMotherDaughter());
+    }
+
+    Real AnalyticCompoundOptionEngine::dPlus() const {
+        Real forward = spot() * dividendDiscountDaughter() / riskFreeDiscountDaughter();
+        Real sd=stdDeviationDaughter();
+        return std::log(forward/strikeDaughter())/sd+0.5*sd;
+    }
+
+    Real AnalyticCompoundOptionEngine::dMinus() const {
+        return dPlus()-stdDeviationDaughter();
+    }
+
+    Real AnalyticCompoundOptionEngine::dPlusTau12(Real S) const {
+        Real forward = S * dividendDiscountMotherDaughter() / riskFreeDiscountMotherDaughter();
+        Real sd=volatilityDaughter()*std::sqrt(residualTimeMotherDaughter());
+        return std::log(forward/strikeDaughter())/sd+0.5*sd;
+    }
+
+    Real AnalyticCompoundOptionEngine::spot() const {
+        return process_->x0();
+    }
+
+    Real AnalyticCompoundOptionEngine::riskFreeRateDaughter() const {
+        return process_->riskFreeRate()->zeroRate(residualTimeDaughter(),
+                                                  Continuous,
+                                                  NoFrequency);
+    }
+
+    Real AnalyticCompoundOptionEngine::dividendRateDaughter() const {
+        return process_->dividendYield()->zeroRate(residualTimeDaughter(),
+                                                   Continuous,
+                                                   NoFrequency);
+    }
+
+    Real AnalyticCompoundOptionEngine::transformX(Real X) const {
+
+        Real sd=stdDeviationMother();
+        Real resX=riskFreeDiscountMother()*X/(spot()*dividendDiscountMother());
+        resX=resX*std::exp(0.5*sd*sd);
+        resX=std::log(resX);
+
+        return resX/sd;
+    }
+
+    Real AnalyticCompoundOptionEngine::e(Real X) const {
+        Real rtM=residualTimeMother();
+        Real rtD=residualTimeDaughter();
+
+        return (X*std::sqrt(rtD)+std::sqrt(rtM)*dMinus())/std::sqrt(rtD-rtM);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>analyticeuropeanmargrabeengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analyticeuropeanmargrabeengine.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    AnalyticEuropeanMargrabeEngine::AnalyticEuropeanMargrabeEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process1,
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process2,
+        Real correlation)
+    : process1_(std::move(process1)), process2_(std::move(process2)), rho_(correlation) {
+        registerWith(process1_);
+        registerWith(process2_);
+    }
+
+    void AnalyticEuropeanMargrabeEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "not an European Option");
+
+        ext::shared_ptr<EuropeanExercise> exercise =
+            ext::dynamic_pointer_cast<EuropeanExercise>(arguments_.exercise);
+        QL_REQUIRE(exercise, "not an European Option");
+
+        ext::shared_ptr<NullPayoff> payoff =
+            ext::dynamic_pointer_cast<NullPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non a Null Payoff type");
+
+        Integer quantity1 = arguments_.Q1;
+        Integer quantity2 = arguments_.Q2;
+
+        Real s1  = process1_->stateVariable()->value();
+        Real s2  = process2_->stateVariable()->value();
+
+        Real variance1 = process1_->blackVolatility()->blackVariance(
+                                                exercise->lastDate(), s1);
+        Real variance2 = process2_->blackVolatility()->blackVariance(
+                                                exercise->lastDate(), s2);
+
+        DiscountFactor riskFreeDiscount =
+            process1_->riskFreeRate()->discount(exercise->lastDate());
+
+        DiscountFactor dividendDiscount1 =
+            process1_->dividendYield()->discount(exercise->lastDate());
+        DiscountFactor dividendDiscount2 =
+            process2_->dividendYield()->discount(exercise->lastDate());
+
+        Real forward1 = process1_->stateVariable()->value() *
+            dividendDiscount1 / riskFreeDiscount;
+        Real forward2 = process2_->stateVariable()->value() *
+            dividendDiscount2 / riskFreeDiscount;
+
+        Real stdDev1 = std::sqrt(variance1);
+        Real stdDev2 = std::sqrt(variance2);
+        Real variance = variance1 + variance2 - 2*rho_*stdDev1*stdDev2;
+        Real stdDev = std::sqrt(variance);
+        Real d1 = (std::log((quantity1*forward1)/(quantity2*forward2))
+                   + 0.5*variance) / stdDev;
+        Real d2 = d1 - stdDev;
+        Real Nd1, Nd2, nd1, nd2;
+        CumulativeNormalDistribution cum;
+        NormalDistribution norm;
+        Nd1 = cum(d1);
+        Nd2 = cum(d2);
+        nd1 = norm(d1);
+        nd2 = norm(d2);
+        DayCounter rfdc  = process1_->riskFreeRate()->dayCounter();
+        Time t = rfdc.yearFraction(process1_->riskFreeRate()->referenceDate(),
+                                  arguments_.exercise->lastDate());
+        Real sqt = std::sqrt(t);
+        Real q1  = -std::log(dividendDiscount1)/(sqt*sqt);
+        Real q2  = -std::log(dividendDiscount2)/(sqt*sqt);
+
+        results_.value =
+            riskFreeDiscount * (quantity1*forward1*Nd1 - quantity2*forward2*Nd2);
+
+        // Greeks
+        results_.delta1 = riskFreeDiscount*(quantity1*forward1*Nd1)/s1;
+        results_.delta2 = -riskFreeDiscount*(quantity2*forward2*Nd2)/s2;
+        results_.gamma1 = (riskFreeDiscount*(quantity1*forward1*nd1)/s1)/(quantity1*s1*stdDev);
+        results_.gamma2 = (-riskFreeDiscount*(quantity2*forward2*nd2)/s2)/(-quantity2*s2*stdDev);
+        Real vega       = riskFreeDiscount*(quantity1*forward1*nd1)*sqt;
+        results_.theta  = -((stdDev*vega/sqt)/(2*t)-(q1*quantity1*s1*results_.delta1)-(q2*quantity2*s2*results_.delta2));
+        results_.rho    = 0.0;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>analyticholderextensibleoptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analyticholderextensibleoptionengine.hpp>
+#include <ql/math/distributions/bivariatenormaldistribution.hpp>
+#include <utility>
+
+using std::pow;
+using std::log;
+using std::exp;
+using std::sqrt;
+
+namespace QuantLib {
+
+    AnalyticHolderExtensibleOptionEngine::AnalyticHolderExtensibleOptionEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)) {
+        registerWith(process_);
+    }
+
+    void AnalyticHolderExtensibleOptionEngine::calculate() const {
+        //Spot
+        Real S = process_->x0();
+        Real r = riskFreeRate();
+        Real b = r - dividendYield();
+        Real X1 = strike();
+        Real X2 = arguments_.secondStrike;
+        Time T2 = secondExpiryTime();
+        Time t1 = firstExpiryTime();
+        Real A = arguments_.premium;
+
+
+        Real z1 = this->z1();
+
+        Real z2 = this->z2();
+
+        Real rho = sqrt(t1 / T2);
+
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+
+        //QuantLib requires sigma * sqrt(T) rather than just sigma/volatility
+        Real vol = volatility();
+
+        //calculate dividend discount factor assuming continuous compounding (e^-rt)
+        DiscountFactor growth = dividendDiscount(t1);
+        //calculate payoff discount factor assuming continuous compounding
+        DiscountFactor discount = riskFreeDiscount(t1);
+        Real result = 0;
+        Real minusInf=-std::numeric_limits<Real>::infinity();
+
+        Real y1 = this->y1(payoff->optionType()),
+             y2 = this->y2(payoff->optionType());
+        if (payoff->optionType() == Option::Call) {
+            //instantiate payoff function for a call
+            ext::shared_ptr<PlainVanillaPayoff> vanillaCallPayoff =
+                ext::make_shared<PlainVanillaPayoff>(Option::Call, X1);
+            Real BSM = BlackScholesCalculator(vanillaCallPayoff, S, growth, vol*sqrt(t1), discount).value();
+            result = BSM
+                + S*exp((b - r)*T2)*M2(y1, y2, minusInf, z1, rho)
+                - X2*exp(-r*T2)*M2(y1 - vol*sqrt(t1), y2 - vol*sqrt(t1), minusInf, z1 - vol*sqrt(T2), rho)
+                - S*exp((b - r)*t1)*N2(y1, z2) + X1*exp(-r*t1)*N2(y1 - vol*sqrt(t1), z2 - vol*sqrt(t1))
+                - A*exp(-r*t1)*N2(y1 - vol*sqrt(t1), y2 - vol*sqrt(t1));
+        } else {
+            //instantiate payoff function for a call
+            ext::shared_ptr<PlainVanillaPayoff> vanillaPutPayoff =
+                ext::make_shared<PlainVanillaPayoff>(Option::Put, X1);
+            result = BlackScholesCalculator(vanillaPutPayoff, S, growth, vol*sqrt(t1), discount).value()
+                - S*exp((b - r)*T2)*M2(y1, y2, minusInf, -z1, rho)
+                + X2*exp(-r*T2)*M2(y1 - vol*sqrt(t1), y2 - vol*sqrt(t1), minusInf, -z1 + vol*sqrt(T2), rho)
+                + S*exp((b - r)*t1)*N2(z2, y2) - X1*exp(-r*t1)*N2(z2 - vol*sqrt(t1), y2 - vol*sqrt(t1))
+                - A*exp(-r*t1)*N2(y1 - vol*sqrt(t1), y2 - vol*sqrt(t1));
+        }
+        this->results_.value = result;
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::I1Call() const {
+        Real Sv = process_->x0();
+        Real A = arguments_.premium;
+
+        if(A==0)
+        {
+            return 0;
+        }
+        else
+        {
+            BlackScholesCalculator bs = bsCalculator(Sv, Option::Call);
+            Real ci = bs.value();
+            Real dc = bs.delta();
+
+            Real yi = ci - A;
+            //da/ds = 0
+            Real di = dc - 0;
+            Real epsilon = 0.001;
+
+            //Newton-Raphson process
+            while (std::fabs(yi) > epsilon){
+                Sv = Sv - yi / di;
+
+                bs = bsCalculator(Sv, Option::Call);
+                ci = bs.value();
+                dc = bs.delta();
+
+                yi = ci - A;
+                di = dc - 0;
+            }
+            return Sv;
+        }
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::I2Call() const {
+        Real Sv = process_->x0();
+        Real X1 = strike();
+        Real X2 = arguments_.secondStrike;
+        Real A = arguments_.premium;
+        Time T2 = secondExpiryTime();
+        Time t1 = firstExpiryTime();
+        Real r=riskFreeRate();
+
+        Real val=X1-X2*std::exp(-r*(T2-t1));
+        if(A< val){
+            return std::numeric_limits<Real>::infinity();
+        } else {
+            BlackScholesCalculator bs = bsCalculator(Sv, Option::Call);
+            Real ci = bs.value();
+            Real dc = bs.delta();
+
+            Real yi = ci - A - Sv + X1;
+            //da/ds = 1
+            Real di = dc - 1;
+            Real epsilon = 0.001;
+
+            //Newton-Raphson process
+            while (std::fabs(yi) > epsilon){
+                Sv = Sv - yi / di;
+
+                bs = bsCalculator(Sv, Option::Call);
+                ci = bs.value();
+                dc = bs.delta();
+
+                yi = ci - A - Sv + X1;
+                di = dc - 1;
+            }
+            return Sv;
+        }
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::I1Put() const {
+        Real Sv = process_->x0();
+        //Srtike
+        Real X1 = strike();
+        //Premium
+        Real A = arguments_.premium;
+
+        BlackScholesCalculator bs = bsCalculator(Sv, Option::Put);
+        Real pi = bs.value();
+        Real dc = bs.delta();
+
+        Real yi = pi - A + Sv - X1;
+        //da/ds = 1
+        Real di = dc - 1;
+        Real epsilon = 0.001;
+
+        //Newton-Raphson prosess
+        while (std::fabs(yi) > epsilon){
+            Sv = Sv - yi / di;
+
+            bs = bsCalculator(Sv, Option::Put);
+            pi = bs.value();
+            dc = bs.delta();
+
+            yi = pi - A + Sv - X1;
+            di = dc - 1;
+        }
+        return Sv;
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::I2Put() const {
+        Real Sv = process_->x0();
+        Real A = arguments_.premium;
+        if(A==0){
+            return std::numeric_limits<Real>::infinity();
+        }
+        else{
+            BlackScholesCalculator bs = bsCalculator(Sv, Option::Put);
+            Real pi = bs.value();
+            Real dc = bs.delta();
+
+            Real yi = pi - A;
+            //da/ds = 0
+            Real di = dc - 0;
+            Real epsilon = 0.001;
+
+            //Newton-Raphson prosess
+            while (std::fabs(yi) > epsilon){
+                Sv = Sv - yi / di;
+
+                bs = bsCalculator(Sv, Option::Put);
+                pi = bs.value();
+                dc = bs.delta();
+
+                yi = pi - A;
+                di = dc - 0;
+            }
+            return Sv;
+        }
+    }
+
+
+    BlackScholesCalculator AnalyticHolderExtensibleOptionEngine::bsCalculator(
+                                    Real spot, Option::Type optionType) const {
+        //Real spot = process_->x0();
+        Real vol;
+        DiscountFactor growth;
+        DiscountFactor discount;
+        Real X2 = arguments_.secondStrike;
+        Time T2 = secondExpiryTime();
+        Time t1 = firstExpiryTime();
+        Time t = T2 - t1;
+
+        //payoff
+        ext::shared_ptr<PlainVanillaPayoff > vanillaPayoff =
+            ext::make_shared<PlainVanillaPayoff>(optionType, X2);
+
+        //QuantLib requires sigma * sqrt(T) rather than just sigma/volatility
+        vol = volatility() * std::sqrt(t);
+        //calculate dividend discount factor assuming continuous compounding (e^-rt)
+        growth = dividendDiscount(t);
+        //calculate payoff discount factor assuming continuous compounding
+        discount = riskFreeDiscount(t);
+
+        BlackScholesCalculator bs(vanillaPayoff, spot, growth, vol, discount);
+        return bs;
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::M2(Real a, Real b, Real c, Real d, Real rho) const {
+        BivariateCumulativeNormalDistributionDr78 CmlNormDist(rho);
+        return CmlNormDist(b, d) - CmlNormDist(a, d) - CmlNormDist(b, c) + CmlNormDist(a,c);
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::N2(Real a, Real b) const {
+        CumulativeNormalDistribution  NormDist;
+        return NormDist(b) - NormDist(a);
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::strike() const {
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        return payoff->strike();
+    }
+
+    Time AnalyticHolderExtensibleOptionEngine::firstExpiryTime() const {
+        return process_->time(arguments_.exercise->lastDate());
+    }
+
+    Time AnalyticHolderExtensibleOptionEngine::secondExpiryTime() const {
+        return process_->time(arguments_.secondExpiryDate);
+    }
+
+    Volatility AnalyticHolderExtensibleOptionEngine::volatility() const {
+        return process_->blackVolatility()->blackVol(firstExpiryTime(), strike());
+    }
+    Rate AnalyticHolderExtensibleOptionEngine::riskFreeRate() const {
+        return process_->riskFreeRate()->zeroRate(firstExpiryTime(), Continuous,
+            NoFrequency);
+    }
+    Rate AnalyticHolderExtensibleOptionEngine::dividendYield() const {
+        return process_->dividendYield()->zeroRate(firstExpiryTime(),
+            Continuous, NoFrequency);
+    }
+
+    DiscountFactor AnalyticHolderExtensibleOptionEngine::dividendDiscount(Time t) const {
+        return process_->dividendYield()->discount(t);
+    }
+
+    DiscountFactor AnalyticHolderExtensibleOptionEngine::riskFreeDiscount(Time t) const {
+        return process_->riskFreeRate()->discount(t);
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::y1(Option::Type type) const {
+        Real S = process_->x0();
+        Real I2 = (type == Option::Call) ? I2Call() : I2Put();
+
+        Real b = riskFreeRate() - dividendYield();
+        Real vol = volatility();
+        Time t1 = firstExpiryTime();
+
+        return (log(S / I2) + (b + pow(vol, 2) / 2)*t1) / (vol*sqrt(t1));
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::y2(Option::Type type) const {
+        Real S = process_->x0();
+        Real I1 = (type == Option::Call) ? I1Call() : I1Put();
+
+        Real b = riskFreeRate() - dividendYield();
+        Real vol = volatility();
+        Time t1 = firstExpiryTime();
+
+        return (log(S / I1) + (b + pow(vol, 2) / 2)*t1) / (vol*sqrt(t1));
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::z1() const {
+        Real S = process_->x0();
+        Real X2 = arguments_.secondStrike;
+        Real b = riskFreeRate() - dividendYield();
+        Real vol = volatility();
+        Time T2 = secondExpiryTime();
+
+        return (log(S / X2) + (b + pow(vol, 2) / 2)*T2) / (vol*sqrt(T2));
+    }
+
+    Real AnalyticHolderExtensibleOptionEngine::z2() const {
+        Real S = process_->x0();
+        Real X1 = strike();
+
+        Real b = riskFreeRate() - dividendYield();
+        Real vol = volatility();
+        Time t1 = firstExpiryTime();
+
+        return (log(S / X1) + (b + pow(vol, 2) / 2)*t1) / (vol*sqrt(t1));
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>analyticpartialtimebarrieroptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analyticpartialtimebarrieroptionengine.hpp>
+#include <ql/math/distributions/bivariatenormaldistribution.hpp>
+#include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    AnalyticPartialTimeBarrierOptionEngine::AnalyticPartialTimeBarrierOptionEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)) {
+        registerWith(process_);
+    }
+
+    void AnalyticPartialTimeBarrierOptionEngine::calculate() const {
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        QL_REQUIRE(payoff->strike()>0.0,
+                   "strike must be positive");
+
+        Real spot = process_->x0();
+        QL_REQUIRE(spot >= 0.0, "negative or null underlying given");
+
+        PartialBarrier::Type barrierType = arguments_.barrierType;
+        PartialBarrier::Range barrierRange = arguments_.barrierRange;
+
+        switch (payoff->optionType()) {
+          //Call Option
+          case Option::Call:
+            switch (barrierType) {
+              case PartialBarrier::DownOut:
+                switch (barrierRange) {
+                  case PartialBarrier::Start:
+                    results_.value = CA(1);
+                    break;
+                  case PartialBarrier::EndB1:
+                    results_.value = CoB1();
+                    break;
+                  case PartialBarrier::EndB2:
+                    results_.value = CoB2(PartialBarrier::DownOut);
+                    break;
+                  default:
+                    QL_FAIL("invalid barrier range");
+                }
+                break;
+
+              case PartialBarrier::DownIn:
+                switch (barrierRange) {
+                  case PartialBarrier::Start:
+                    results_.value = CIA(1);
+                    break;
+                  case PartialBarrier::End:
+                    QL_FAIL("Down-and-in partial-time end barrier is not implemented");
+                  default:
+                    QL_FAIL("invalid barrier range");
+                }
+                break;
+
+              case PartialBarrier::UpOut:
+                switch (barrierRange) {
+                  case PartialBarrier::Start:
+                    results_.value = CA(-1);
+                    break;
+                  case PartialBarrier::EndB1:
+                    results_.value = CoB1();
+                    break;
+                  case PartialBarrier::EndB2:
+                    results_.value = CoB2(PartialBarrier::UpOut);
+                    break;
+                  default:
+                    QL_FAIL("invalid barrier range");
+                }
+                break;
+
+              case PartialBarrier::UpIn:
+                switch (barrierRange) {
+                  case PartialBarrier::Start:
+                    results_.value = CIA(-1);
+                    break;
+                  case PartialBarrier::End:
+                    QL_FAIL("Up-and-in partial-time end barrier is not implemented");
+                  default:
+                    QL_FAIL("invalid barrier range");
+                }
+                break;
+              default:
+                QL_FAIL("unknown barrier type");
+            }
+            break;
+
+          case Option::Put:
+            QL_FAIL("Partial-time barrier Put option is not implemented");
+
+          default:
+            QL_FAIL("unknown option type");
+        }
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::CoB2(
+                                      PartialBarrier::Type barrierType) const {
+        Real result = 0.0;
+        Real b = riskFreeRate()-dividendYield();
+        if (strike()<barrier()){
+            switch (barrierType) {
+              case PartialBarrier::DownOut:
+                result = underlying()*std::exp((b-riskFreeRate())*residualTime());
+                result *= (M(g1(),e1(),rho())-HS(underlying(),barrier(),2*(mu()+1))*M(g3(),-e3(),-rho()));
+                result -= strike()*std::exp(-riskFreeRate()*residualTime())*(M(g2(),e2(),rho())-HS(underlying(),barrier(),2*mu())*M(g4(),-e4(),-rho()));
+                return result;
+
+              case PartialBarrier::UpOut:
+                result = underlying()*std::exp((b-riskFreeRate())*residualTime());
+                result *= (M(-g1(),-e1(),rho())-HS(underlying(),barrier(),2*(mu()+1))*M(-g3(),e3(),-rho()));
+                result -= strike()*std::exp(-riskFreeRate()*residualTime())*(M(-g2(),-e2(),rho())-HS(underlying(),barrier(),2*mu())*M(-g4(),e4(),-rho()));
+                result -= underlying()*std::exp((b-riskFreeRate())*residualTime())*(M(-d1(),-e1(),rho())-HS(underlying(),barrier(),2*(mu()+1))*M(e3(),-f1(),-rho()));
+                result += strike()*std::exp(-riskFreeRate()*residualTime())*(M(-d2(),-e2(),rho())-HS(underlying(),barrier(),2*mu())*M(e4(),-f2(),-rho()));
+                return result;
+
+              default:
+                QL_FAIL("invalid barrier type");
+            }
+        } else {
+            QL_FAIL("case of strike>barrier is not implemented for OutEnd B2 type");
+        }
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::CoB1() const {
+        Real result = 0.0;
+        Real b = riskFreeRate()-dividendYield();
+        if (strike()>barrier()) {
+            result = underlying()*std::exp((b-riskFreeRate())*residualTime());
+            result *= (M(d1(),e1(),rho())-HS(underlying(),barrier(),2*(mu()+1))*M(f1(),-e3(),-rho()));
+            result -= (strike()*std::exp(-riskFreeRate()*residualTime()))*(M(d2(),e2(),rho())-HS(underlying(),barrier(),2*mu())*M(f2(),-e4(),-rho()));
+            return result;
+        } else {
+            Real S1 = underlying()*std::exp((b-riskFreeRate())*residualTime());
+            Real X1 = (strike()*std::exp(-riskFreeRate()*residualTime()));
+            Real HS1 = HS(underlying(),barrier(),2*(mu()+1));
+            Real HS2 = HS(underlying(), barrier(), 2 * mu());
+            result = S1;
+            result *= (M(-g1(),-e1(),rho())-HS1*M(-g3(),e3(),-rho()));
+            result -= X1*(M(-g2(), -e2(), rho()) - HS2*M(-g4(), e4(), -rho()));
+            result -= S1*(M(-d1(), -e1(), rho()) - HS1*M(-f1(), e3(), -rho()));
+            result += X1*(M(-d2(), -e2(), rho()) - HS2*M(-f2(), e4(), -rho()));
+            result += S1*(M(g1(), e1(), rho()) - HS1*M(g3(), -e3(), -rho()));
+            result -= X1*(M(g2(), e2(), rho()) - HS2*M(g4(), -e4(), -rho()));
+            return result;
+        }
+    }
+
+    // eta = -1: Up-and-In Call
+    // eta =  1: Down-and-In Call
+    Real AnalyticPartialTimeBarrierOptionEngine::CIA(Integer eta) const {
+        ext::shared_ptr<EuropeanExercise> exercise =
+            ext::dynamic_pointer_cast<EuropeanExercise>(arguments_.exercise);
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+
+        VanillaOption europeanOption(payoff, exercise);
+
+        europeanOption.setPricingEngine(
+                        ext::make_shared<AnalyticEuropeanEngine>(process_));
+
+        return europeanOption.NPV() - CA(eta);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::CA(Integer eta) const {
+        //Partial-Time-Start- OUT  Call Option calculation
+        Real b = riskFreeRate()-dividendYield();
+        Real result;
+        result = underlying()*std::exp((b-riskFreeRate())*residualTime());
+        result *= (M(d1(),eta*e1(),eta*rho())-HS(underlying(),barrier(),2*(mu()+1))*M(f1(),eta*e3(),eta*rho()));
+        result -= (strike()*std::exp(-riskFreeRate()*residualTime())*(M(d2(),eta*e2(),eta*rho())-HS(underlying(),barrier(),2*mu())*M(f2(),eta*e4(),eta*rho())));
+        return result;
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::underlying() const {
+        return process_->x0();
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::strike() const {
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        return payoff->strike();
+    }
+
+    Time AnalyticPartialTimeBarrierOptionEngine::residualTime() const {
+        return process_->time(arguments_.exercise->lastDate());
+    }
+
+    Time AnalyticPartialTimeBarrierOptionEngine::coverEventTime() const {
+        return process_->time(arguments_.coverEventDate);
+    }
+
+    Volatility AnalyticPartialTimeBarrierOptionEngine::volatility(Time t) const {
+        return process_->blackVolatility()->blackVol(t, strike());
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::stdDeviation() const {
+        Time T = residualTime();
+        return volatility(T) * std::sqrt(T);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::barrier() const {
+        return arguments_.barrier;
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::rebate() const {
+        return arguments_.rebate;
+    }
+
+    Rate AnalyticPartialTimeBarrierOptionEngine::riskFreeRate() const {
+        return process_->riskFreeRate()->zeroRate(residualTime(), Continuous,
+                                                  NoFrequency);
+    }
+
+    DiscountFactor AnalyticPartialTimeBarrierOptionEngine::riskFreeDiscount() const {
+        return process_->riskFreeRate()->discount(residualTime());
+    }
+
+    Rate AnalyticPartialTimeBarrierOptionEngine::dividendYield() const {
+        return process_->dividendYield()->zeroRate(residualTime(), Continuous,
+                                                   NoFrequency);
+    }
+
+    DiscountFactor AnalyticPartialTimeBarrierOptionEngine::dividendDiscount() const {
+        return process_->dividendYield()->discount(residualTime());
+    }
+
+
+    Real AnalyticPartialTimeBarrierOptionEngine::f1() const {
+        Real S = underlying();
+        Real T = residualTime();
+        Real sigma = volatility(T);
+        return (std::log(S / strike()) + 2 * std::log(barrier() / S) + ((riskFreeRate()-dividendYield()) + (std::pow(sigma, 2) / 2))*T) / (sigma*std::sqrt(T));
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::f2() const {
+        Time T = residualTime();
+        return f1() - volatility(T)*std::sqrt(T);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::M(Real a,Real b,Real rho) const {
+        BivariateCumulativeNormalDistributionDr78 CmlNormDist(rho);
+        return CmlNormDist(a,b);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::rho() const {
+        return std::sqrt(coverEventTime()/residualTime());
+    }
+
+    Rate AnalyticPartialTimeBarrierOptionEngine::mu() const {
+        Volatility vol = volatility(coverEventTime());
+        return ((riskFreeRate() - dividendYield()) - (vol * vol) / 2) / (vol * vol);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::d1() const {
+        Real b = riskFreeRate()-dividendYield();
+        Time T2 = residualTime();
+        Volatility vol = volatility(T2);
+        return (std::log(underlying()/strike())+(b+vol*vol/2)*T2)/(std::sqrt(T2)*vol);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::d2() const {
+        Time T2 = residualTime();
+        Volatility vol = volatility(T2);
+        return d1() - vol*std::sqrt(T2);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::e1() const {
+        Real b = riskFreeRate()-dividendYield();
+        Time T1 = coverEventTime();
+        Volatility vol = volatility(T1);
+        return (std::log(underlying()/barrier())+(b+vol*vol/2)*T1)/(std::sqrt(T1)*vol);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::e2() const {
+        Time T1 = coverEventTime();
+        Volatility vol = volatility(T1);
+        return e1() - vol*std::sqrt(T1);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::e3() const {
+        Time T1 = coverEventTime();
+        Real vol = volatility(T1);
+        return e1()+(2*std::log(barrier()/underlying()) /(vol*std::sqrt(T1)));
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::e4() const {
+        Time t = coverEventTime();
+        return e3()-volatility(t)*std::sqrt(t);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::g1() const {
+        Real b = riskFreeRate()-dividendYield();
+        Time T2 = residualTime();
+        Volatility vol = volatility(T2);
+        return (std::log(underlying()/barrier())+(b+vol*vol/2)*T2)/(std::sqrt(T2)*vol);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::g2() const {
+        Time T2 = residualTime();
+        Volatility vol = volatility(T2);
+        return g1() - vol*std::sqrt(T2);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::g3() const {
+        Time T2 = residualTime();
+        Real vol = volatility(T2);
+        return g1()+(2*std::log(barrier()/underlying()) /(vol*std::sqrt(T2)));
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::g4() const {
+        Time T2 = residualTime();
+        Real vol = volatility(T2);
+        return g3()-vol*std::sqrt(T2);
+    }
+
+    Real AnalyticPartialTimeBarrierOptionEngine::HS(Real S, Real H, Real power) const {
+        return std::pow((H/S),power);
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>analyticpdfhestonengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014, 2015 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file analyticpdfhestonengine.cpp
+    \brief Analytic engine for arbitrary European payoffs under the Heston model
+*/
+
+#include <ql/experimental/exoticoptions/analyticpdfhestonengine.hpp>
+#include <ql/math/integrals/gausslobattointegral.hpp>
+#include <ql/methods/finitedifferences/utilities/hestonrndcalculator.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    AnalyticPDFHestonEngine::AnalyticPDFHestonEngine(ext::shared_ptr<HestonModel> model,
+                                                     Real integrationEps_,
+                                                     Size maxIntegrationIterations)
+    : maxIntegrationIterations_(maxIntegrationIterations), integrationEps_(integrationEps_),
+      model_(std::move(model)) {}
+
+    void AnalyticPDFHestonEngine::calculate() const {
+        // this is an European option pricer
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "not an European option");
+
+        const ext::shared_ptr<HestonProcess>& process = model_->process();
+
+        const Time t = process->time(arguments_.exercise->lastDate());
+
+        const Real xMax = 8.0 * std::sqrt(process->theta()*t
+            + (process->v0() - process->theta())
+                *(1-std::exp(-process->kappa()*t))/process->kappa());
+
+        const Real x0 = std::log(process->s0()->value());
+        const Real rD = process->riskFreeRate()->discount(t);
+        const Real qD = process->dividendYield()->discount(t);
+
+        const Real drift = x0 + std::log(rD/qD);
+
+        results_.value = GaussLobattoIntegral(maxIntegrationIterations_, integrationEps_)(
+            [&](Real _x){ return weightedPayoff(_x, t); },
+            -xMax+drift, xMax+drift);
+    }
+
+    Real AnalyticPDFHestonEngine::Pv(Real x_t, Time t) const {
+        return HestonRNDCalculator(
+            model_->process(), integrationEps_, maxIntegrationIterations_)
+                .pdf(x_t, t);
+    }
+
+    Real AnalyticPDFHestonEngine::cdf(Real s, Time t) const {
+        const Real x_t = std::log(s);
+        return HestonRNDCalculator(
+            model_->process(), integrationEps_, maxIntegrationIterations_)
+                .cdf(x_t, t);
+    }
+
+    Real AnalyticPDFHestonEngine::weightedPayoff(Real x_t, Time t) const {
+        const DiscountFactor rD
+            = model_->process()->riskFreeRate()->discount(t);
+
+        const Real s_t = std::exp(x_t);
+        const Real payoff = (*arguments_.payoff)(s_t);
+
+        return (payoff != 0.0) ? payoff*Pv(x_t, t)*rD : 0.0;
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>analyticsimplechooserengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analyticsimplechooserengine.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    AnalyticSimpleChooserEngine::AnalyticSimpleChooserEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)) {
+        registerWith(process_);
+    }
+
+    void AnalyticSimpleChooserEngine::calculate() const {
+        Date today = Settings::instance().evaluationDate();
+        DayCounter rfdc  = process_->riskFreeRate()->dayCounter();
+        DayCounter divdc = process_->dividendYield()->dayCounter();
+        DayCounter voldc = process_->blackVolatility()->dayCounter();
+        QL_REQUIRE(rfdc==divdc,
+                   "Risk-free rate and dividend yield must"
+                   "have the same day counter");
+        QL_REQUIRE(rfdc==voldc,
+                   "Risk-free rate and volatility must"
+                   "have the same day counter");
+        Real spot = process_->stateVariable()->value();
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        Real strike = payoff->strike();
+        Volatility volatility = process_->blackVolatility()->blackVol(
+                                                arguments_.exercise->lastDate(),
+                                                strike);
+        Date maturity = arguments_.exercise->lastDate();
+        Real timeToMaturity = rfdc.yearFraction(today,maturity);
+        Real timeToChoosing = rfdc.yearFraction(today,arguments_.choosingDate);
+        Rate dividendRate =
+            process_->dividendYield()->zeroRate(maturity, divdc,
+                                                Continuous, NoFrequency);
+        Rate riskFreeRate =
+            process_->riskFreeRate()->zeroRate(maturity, rfdc,
+                                               Continuous, NoFrequency);
+
+        QL_REQUIRE(spot > 0.0, "negative or null spot value");
+        QL_REQUIRE(strike > 0.0, "negative or null strike value");
+        QL_REQUIRE(volatility > 0.0,
+                   "negative or null volatility");
+        QL_REQUIRE(timeToChoosing > 0.0,
+                   "choosing date earlier than or equal to evaluation date");
+
+        Real d = (std::log(spot/strike)
+            + ((riskFreeRate-dividendRate) + volatility*volatility*0.5)*timeToMaturity)
+            /(volatility*std::sqrt(timeToMaturity));
+
+        Real y = (std::log(spot/strike) + (riskFreeRate-dividendRate)*timeToMaturity
+            + (volatility*volatility*timeToChoosing/2))
+            /(volatility*std::sqrt(timeToChoosing));
+
+        CumulativeNormalDistribution f;
+
+        results_.value = spot*std::exp(-dividendRate*timeToMaturity)*f(d)
+            - strike*std::exp(-riskFreeRate*timeToMaturity)
+            *f(d-volatility*std::sqrt(timeToMaturity))
+            -spot*std::exp(-dividendRate*timeToMaturity)*f(-y)
+            +strike*std::exp(-riskFreeRate*timeToMaturity)
+            *f(-y+volatility*std::sqrt(timeToChoosing));
+     }
+
+}
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>analytictwoassetbarrierengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analytictwoassetbarrierengine.hpp>
+#include <ql/math/distributions/bivariatenormaldistribution.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    AnalyticTwoAssetBarrierEngine::AnalyticTwoAssetBarrierEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process1,
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process2,
+        Handle<Quote> rho)
+    : process1_(std::move(process1)), process2_(std::move(process2)), rho_(std::move(rho)) {
+        registerWith(process1_);
+        registerWith(process2_);
+        registerWith(rho_);
+    }
+
+    void AnalyticTwoAssetBarrierEngine::calculate() const {
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        QL_REQUIRE(payoff->strike()>0.0,"strike must be positive");
+
+        Real spot2 = process2_->x0();
+        // option is triggered by S2
+        QL_REQUIRE(spot2 >= 0.0, "negative or null underlying given");
+        QL_REQUIRE(!triggered(spot2), "barrier touched");
+
+        Barrier::Type barrierType = arguments_.barrierType;
+
+        switch (payoff->optionType()) {
+          case Option::Call:
+            switch (barrierType) {
+              case Barrier::DownOut:
+                results_.value = A(1,-1) +B(1,-1) ;
+                break;
+              case Barrier::UpOut:
+                results_.value = A(1,1) + B(1,1) ;
+                break;
+              case Barrier::DownIn:
+                results_.value = call()-(A(1,-1) +B(1,-1) );
+                break;
+              case Barrier::UpIn:
+                results_.value = call()-(A(1,1) +B(1,1));
+                break;
+            }
+            break;
+          case Option::Put:
+            switch (barrierType) {
+              case Barrier::DownOut:
+                results_.value = A(-1,-1)+B(-1,-1) ;
+                break;
+              case Barrier::UpOut:
+                results_.value = A(-1,1)+B(-1,1) ;
+                break;
+              case Barrier::DownIn:
+                results_.value = put()-(A(-1,-1) +B(-1,-1) );
+                break;
+              case Barrier::UpIn:
+                results_.value = put()-(A(-1,1) +B(-1,1) );
+                break;
+            }
+            break;
+          default:
+            QL_FAIL("unknown type");
+        }
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::underlying1() const {
+        return process1_->x0();
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::underlying2() const {
+        return process2_->x0();
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::strike() const {
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        return payoff->strike();
+    }
+
+    Time AnalyticTwoAssetBarrierEngine::residualTime() const {
+        return process1_->time(arguments_.exercise->lastDate());
+    }
+
+    Volatility AnalyticTwoAssetBarrierEngine::volatility1() const {
+        return process1_->blackVolatility()->blackVol(residualTime(), strike());
+    }
+
+    Volatility AnalyticTwoAssetBarrierEngine::volatility2() const {
+        return process2_->blackVolatility()->blackVol(residualTime(), strike());
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::barrier() const {
+        return arguments_.barrier;
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::rho() const {
+        return rho_->value();
+    }
+
+    Rate AnalyticTwoAssetBarrierEngine::riskFreeRate() const {
+        return process1_->riskFreeRate()->zeroRate(residualTime(),
+                                                   Continuous, NoFrequency);
+    }
+
+
+    Rate AnalyticTwoAssetBarrierEngine::dividendYield1() const {
+        return process1_->dividendYield()->zeroRate(residualTime(),
+                                                    Continuous, NoFrequency);
+    }
+
+    Rate AnalyticTwoAssetBarrierEngine::dividendYield2() const {
+        return process2_->dividendYield()->zeroRate(residualTime(),
+                                                    Continuous, NoFrequency);
+    }
+
+    Rate AnalyticTwoAssetBarrierEngine::costOfCarry1() const {
+        return riskFreeRate() - dividendYield1();
+    }
+
+    Rate AnalyticTwoAssetBarrierEngine::costOfCarry2() const {
+        return riskFreeRate() - dividendYield2();
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::d1() const {
+        return (std::log(underlying1()/strike())+(mu(costOfCarry1(),volatility1())+volatility1()*volatility1())*residualTime())/
+            (volatility1()*std::sqrt(residualTime()));
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::d2() const {
+        return d1() - volatility1()*std::sqrt(residualTime());
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::d3() const {
+        return d1()+ (2*rho()*std::log(barrier()/underlying2()))/(volatility2()*std::sqrt(residualTime()));
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::d4() const {
+        return d2()+ (2*rho()*std::log(barrier()/underlying2()))/(volatility2()*std::sqrt(residualTime()));
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::e1() const {
+        return (std::log(barrier()/underlying2())-(mu(costOfCarry2(),volatility2())+rho()*volatility1()*volatility2())*residualTime())/
+        (volatility2()*std::sqrt(residualTime()));
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::e2() const {
+         return e1()+rho()*volatility1()*std::sqrt(residualTime());
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::e3() const {
+            return e1()-(2*std::log(barrier()/underlying2()))/(volatility2()*std::sqrt(residualTime()));
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::e4() const {
+        return e2()-(2*std::log(barrier()/underlying2()))/(volatility2()*std::sqrt(residualTime()));
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::mu(Real b, Real vol) const {
+        return b-(vol*vol)/2;
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::call() const {
+        CumulativeNormalDistribution nd;
+        return underlying1()*nd(d1())-strike()*std::exp(-riskFreeRate()*residualTime())*nd(d2());
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::put() const {
+        CumulativeNormalDistribution nd;
+        return strike()*std::exp(-riskFreeRate()*residualTime())*nd(-d2())-underlying1()*nd(-d1());
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::A(Real eta, Real phi) const {
+        Real S1 = underlying1(), S2 = underlying2();
+        Rate b1 = costOfCarry1(), b2 = costOfCarry2();
+        Rate r = riskFreeRate();
+        Time T = residualTime();
+        Real H = barrier(), X = strike();
+        Volatility sigma1 = volatility1(), sigma2 = volatility2();
+        Real rho = rho_->value();
+
+        Rate mu1 = b1 - sigma1*sigma1/2.0;
+        Rate mu2 = b2 - sigma2*sigma2/2.0;
+
+        Real d1 = (std::log(S1/X)+(mu1+sigma1*sigma1)*T)/
+            (sigma1*std::sqrt(T));
+        Real d2 = d1 - sigma1*std::sqrt(T);
+        Real d3 = d1 + (2*rho*std::log(H/S2))/(sigma2*std::sqrt(T));
+        Real d4 = d2 + (2*rho*std::log(H/S2))/(sigma2*std::sqrt(T));
+
+        Real e1 = (std::log(H/S2)-(mu2+rho*sigma1*sigma2)*T)/
+            (sigma2*std::sqrt(T));
+        Real e2 = e1 + rho*sigma1*std::sqrt(T);
+        Real e3 = e1 - (2*std::log(H/S2))/(sigma2*std::sqrt(T));
+        Real e4 = e2 - (2*std::log(H/S2))/(sigma2*std::sqrt(T));
+
+        Real w =
+            eta*S1*std::exp((b1-r)*T) *
+            (M(eta*d1, phi*e1,-eta*phi*rho)
+             -std::exp((2*(mu2+rho*sigma1*sigma2)*std::log(H/S2))/(sigma2*sigma2))
+             *M(eta*d3, phi*e3, -eta*phi*rho))
+
+            - eta*X*std::exp(-r*T) *
+            (M(eta*d2, phi*e2, -eta*phi*rho)
+             -std::exp((2*mu2*std::log(H/S2))/(sigma2*sigma2))*
+             M(eta*d4, phi*e4, -eta*phi*rho) ) ;
+
+        return w;
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::B(Real, Real) const {
+        return 0.0;
+    }
+
+    Real AnalyticTwoAssetBarrierEngine::M(Real m_a, Real m_b, Real rho) const {
+        BivariateCumulativeNormalDistributionDr78 f(rho);
+        return f(m_a, m_b);
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>analytictwoassetcorrelationengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/analytictwoassetcorrelationengine.hpp>
+#include <ql/math/distributions/bivariatenormaldistribution.hpp>
+#include <utility>
+
+using std::log;
+
+namespace QuantLib {
+
+    AnalyticTwoAssetCorrelationEngine::AnalyticTwoAssetCorrelationEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> p1,
+        ext::shared_ptr<GeneralizedBlackScholesProcess> p2,
+        Handle<Quote> correlation)
+    : p1_(std::move(p1)), p2_(std::move(p2)), correlation_(std::move(correlation)) {
+        registerWith(p1_);
+        registerWith(p2_);
+        registerWith(correlation_);
+    }
+
+    void AnalyticTwoAssetCorrelationEngine::calculate() const {
+        BivariateCumulativeNormalDistributionDr78 M(correlation_->value());
+
+        const ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        QL_REQUIRE(payoff->strike()>0.0, "strike must be positive");
+        ext::shared_ptr<Exercise> exercise = arguments_.exercise;
+        Real strike = payoff->strike();//X1
+        Real spot = p1_->x0();
+        QL_REQUIRE(spot >= 0.0, "negative or null underlying given");
+
+        Volatility sigma1 =
+            p1_->blackVolatility()->blackVol(p1_->time(exercise->lastDate()),
+                                             payoff->strike());
+        Volatility sigma2 =
+            p2_->blackVolatility()->blackVol(p2_->time(exercise->lastDate()),
+                                             payoff->strike());
+
+        Time T = p2_->time(arguments_.exercise->lastDate());
+
+        Real s1=p1_->x0();
+        Real s2=p2_->x0();
+        Rate q1= p1_->dividendYield()->zeroRate(T, Continuous, NoFrequency);
+        Rate q2= p2_->dividendYield()->zeroRate(T, Continuous, NoFrequency);
+        Rate r=p1_->riskFreeRate()->zeroRate(T, Continuous, NoFrequency);
+        Rate b1=r-q1;
+        Rate b2=r-q2;
+        Real rho = correlation_->value();
+
+        Real y1=(log(s1/strike)+(b1-(sigma1*sigma1)/2)*T)/(sigma1*std::sqrt(T));
+        Real y2=(log(s2/arguments_.X2)+(b2-(sigma2*sigma2)/2)*T)/(sigma2*std::sqrt(T));
+
+        switch (payoff->optionType()) {
+          case Option::Call:
+            results_.value=s2*std::exp((b2-r)*T)*M(y2+sigma2*std::sqrt(T),y1+rho*sigma2*std::sqrt(T))-arguments_.X2*std::exp(-r*T)*M(y2,y1);
+            break;
+          case Option::Put:
+            results_.value=arguments_.X2*std::exp(-r*T)*M(-y2,-y1)-s2*std::exp((b2-r)*T)*M(-y2-sigma2*std::sqrt(T),-y1-rho*sigma2*std::sqrt(T));
+            break;
+          default:
+            QL_FAIL("unknown option type");
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="11">
+    <source>analyticwriterextensibleoptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/analyticwriterextensibleoptionengine.hpp>
+#include <ql/math/distributions/bivariatenormaldistribution.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <utility>
+
+using namespace std;
+
+namespace QuantLib {
+
+    AnalyticWriterExtensibleOptionEngine::AnalyticWriterExtensibleOptionEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)) {
+        registerWith(process_);
+    }
+
+    void AnalyticWriterExtensibleOptionEngine::calculate() const {
+        // We take all the arguments:
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff1 =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff1, "not a plain vanilla payoff");
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff2 =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff2);
+        QL_REQUIRE(payoff2, "not a plain vanilla payoff");
+
+        ext::shared_ptr<Exercise> exercise1 = arguments_.exercise;
+
+        ext::shared_ptr<Exercise> exercise2 = arguments_.exercise2;
+
+
+        // We create and apply the calculate process:
+
+        Option::Type type = payoff1->optionType();
+
+        // STEP 1:
+
+        // S = spot
+        Real spot = process_->stateVariable()->value();
+
+        // For the B&S formulae:
+        DayCounter dividendDC = process_->dividendYield()->dayCounter();
+        Rate dividend = process_->dividendYield()->zeroRate(
+                  exercise1->lastDate(), dividendDC, Continuous, NoFrequency);
+
+        DayCounter riskFreeDC = process_->riskFreeRate()->dayCounter();
+        Rate riskFree = process_->riskFreeRate()->zeroRate(
+                  exercise1->lastDate(), riskFreeDC, Continuous, NoFrequency);
+
+        // The time to maturity:
+        Time t1 = riskFreeDC.yearFraction(
+                                    process_->riskFreeRate()->referenceDate(),
+                                    arguments_.exercise->lastDate());
+        Time t2 = riskFreeDC.yearFraction(
+                                    process_->riskFreeRate()->referenceDate(),
+                                    arguments_.exercise2->lastDate());
+
+        // b = r-q:
+        Real b = riskFree - dividend;
+
+        Real forwardPrice = spot * std::exp(b*t1);
+
+        Volatility volatility = process_->blackVolatility()->blackVol(
+                                    exercise1->lastDate(), payoff1->strike());
+
+        Real stdDev = volatility*std::sqrt(t1);
+
+        Real discount = std::exp(-riskFree*t1);
+
+        // Call the B&S method:
+        Real black = blackFormula(type, payoff1->strike(),
+                                  forwardPrice, stdDev, discount);
+
+        // STEP 2:
+
+        // Standard bivariate normal distribution:
+        Real ro = std::sqrt(t1/t2);
+        Real z1 = (std::log(spot/payoff2->strike()) +
+                   (b+std::pow(volatility, 2)/2)*t2)/(volatility*std::sqrt(t2));
+        Real z2 = (std::log(spot/payoff1->strike()) +
+                   (b+std::pow(volatility, 2)/2)*t1)/(volatility*std::sqrt(t1));
+
+        // Call the bivariate method:
+        BivariateCumulativeNormalDistributionWe04DP biv(-ro);
+
+
+        // STEP 3:
+
+        Real bivariate1, bivariate2, result;
+
+        // Final computing:
+        if (type == Option::Call) {
+            // Call case:
+            bivariate1 = biv(z1, -z2);
+            bivariate2 = biv(z1-volatility*std::sqrt(t2),
+                             -z2+volatility*std::sqrt(t1));
+            result = black + spot*std::exp((b-riskFree)*t2)*bivariate1
+                - payoff2->strike()*std::exp((-riskFree)*t2)*bivariate2;
+        } else {
+            // Put case:
+            bivariate1 = biv(-z1, z2);
+            bivariate2 = biv(-z1+volatility*std::sqrt(t2),
+                             z2-volatility*std::sqrt(t1));
+            result = black - spot*std::exp((b-riskFree)*t2)*bivariate1
+                + payoff2->strike()*std::exp((-riskFree)*t2)*bivariate2;
+        }
+
+        // Save the result:
+        results_.value = result;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="12">
+    <source>complexchooseroption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/complexchooseroption.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    ComplexChooserOption::ComplexChooserOption(
+        Date choosingDate,
+        Real strikeCall,
+        Real strikePut,
+        const ext::shared_ptr<Exercise>& exerciseCall,
+        const ext::shared_ptr<Exercise>& exercisePut)
+    : OneAssetOption(ext::make_shared<PlainVanillaPayoff>(Option::Call,
+                                                            strikeCall),
+                     exerciseCall),
+      choosingDate_(choosingDate),
+      strikeCall_(strikeCall),
+      strikePut_(strikePut),
+      exerciseCall_(exerciseCall),
+      exercisePut_(exercisePut) {}
+
+    void ComplexChooserOption::setupArguments(
+                                       PricingEngine::arguments* args) const {
+        OneAssetOption::setupArguments(args);
+        auto* moreArgs = dynamic_cast<ComplexChooserOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+        moreArgs->choosingDate=choosingDate_;
+        moreArgs->strikeCall=strikeCall_;
+        moreArgs->strikePut=strikePut_;
+        moreArgs->exerciseCall = exerciseCall_;
+        moreArgs->exercisePut = exercisePut_;
+    }
+
+    void ComplexChooserOption::arguments::validate() const {
+        OneAssetOption::arguments::validate();
+        QL_REQUIRE(choosingDate != Date() , " no choosing date given");
+        QL_REQUIRE(choosingDate < exerciseCall->lastDate(),
+                   "choosing date later than or equal to Call maturity date");
+        QL_REQUIRE(choosingDate < exercisePut->lastDate(),
+                   "choosing date later than or equal to Put maturity date");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="13">
+    <source>compoundoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Dimitri Reiswich
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/compoundoption.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    CompoundOption::CompoundOption(const ext::shared_ptr<StrikedTypePayoff>& motherPayoff,
+                                   const ext::shared_ptr<Exercise>& motherExercise,
+                                   ext::shared_ptr<StrikedTypePayoff> daughterPayoff,
+                                   ext::shared_ptr<Exercise> daughterExercise)
+    : OneAssetOption(motherPayoff, motherExercise), daughterPayoff_(std::move(daughterPayoff)),
+      daughterExercise_(std::move(daughterExercise)) {}
+
+    void CompoundOption::setupArguments(PricingEngine::arguments* args) const {
+        OneAssetOption::setupArguments(args);
+
+        auto* moreArgs = dynamic_cast<CompoundOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+        moreArgs->daughterPayoff = daughterPayoff_;
+        moreArgs->daughterExercise = daughterExercise_;
+    }
+
+    void CompoundOption::arguments::validate() const {
+        OneAssetOption::arguments::validate();
+        QL_REQUIRE(daughterPayoff,
+                   "no payoff given for underlying option");
+        QL_REQUIRE(daughterExercise,
+                   "no exercise given for underlying option");
+        QL_REQUIRE(exercise->lastDate() <= daughterExercise->lastDate(),
+                   "maturity of compound option exceeds "
+                   "maturity of underlying option");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="14">
+    <source>continuousarithmeticasianlevyengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/continuousarithmeticasianlevyengine.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/pricingengines/blackcalculator.hpp>
+#include <utility>
+
+using namespace std;
+
+namespace QuantLib {
+
+    ContinuousArithmeticAsianLevyEngine::ContinuousArithmeticAsianLevyEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Handle<Quote> currentAverage,
+        Date startDate)
+    : process_(std::move(process)), currentAverage_(std::move(currentAverage)),
+      startDate_(startDate) {
+        registerWith(process_);
+        registerWith(currentAverage_);
+    }
+
+    void ContinuousArithmeticAsianLevyEngine::calculate() const {
+        QL_REQUIRE(arguments_.averageType == Average::Arithmetic,
+                   "not an Arithmetic average option");
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "not an European Option");
+        QL_REQUIRE(startDate_ <= process_->riskFreeRate()->referenceDate(),
+                   "startDate must be earlier than or equal to reference date");
+
+        DayCounter rfdc  = process_->riskFreeRate()->dayCounter();
+        DayCounter divdc = process_->dividendYield()->dayCounter();
+        DayCounter voldc = process_->blackVolatility()->dayCounter();
+        Real spot = process_->stateVariable()->value();
+
+        // payoff
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+
+        // original time to maturity
+        Date maturity = arguments_.exercise->lastDate();
+        Time T = rfdc.yearFraction(startDate_,
+                                   arguments_.exercise->lastDate());
+        // remaining time to maturity
+        Time T2 = rfdc.yearFraction(process_->riskFreeRate()->referenceDate(),
+                                    arguments_.exercise->lastDate());
+
+        Real strike = payoff->strike();
+
+        Volatility volatility =
+            process_->blackVolatility()->blackVol(maturity, strike);
+
+        CumulativeNormalDistribution N;
+
+        Rate riskFreeRate = process_->riskFreeRate()->
+            zeroRate(maturity, rfdc, Continuous, NoFrequency);
+        Rate dividendYield = process_->dividendYield()->
+            zeroRate(maturity, divdc, Continuous, NoFrequency);
+        Real b = riskFreeRate - dividendYield;
+
+        Real Se = (std::fabs(b) > 1000*QL_EPSILON) 
+            ? (spot/(T*b))*(exp((b-riskFreeRate)*T2)-exp(-riskFreeRate*T2))
+            : spot*T2/T * std::exp(-riskFreeRate*T2);
+
+        Real X;
+        if (T2 < T) {
+            QL_REQUIRE(!currentAverage_.empty() && currentAverage_->isValid(),
+                       "current average required");
+            X = strike - ((T-T2)/T)*currentAverage_->value();
+        } else {
+            X = strike;
+        }
+
+        Real m = (std::fabs(b) > 1000*QL_EPSILON) ? ((exp(b*T2)-1)/b) : T2;
+
+        Real M = (2*spot*spot/(b+volatility*volatility)) *
+            (((exp((2*b+volatility*volatility)*T2)-1)
+              / (2*b+volatility*volatility))-m);
+
+        Real D = M/(T*T);
+
+        Real V = log(D)-2*(riskFreeRate*T2+log(Se));
+
+        Real d1 = (1/sqrt(V))*((log(D)/2)-log(X));
+        Real d2 = d1-sqrt(V);
+
+        if(payoff->optionType()==Option::Call)
+            results_.value = Se*N(d1) - X*exp(-riskFreeRate*T2)*N(d2);
+        else
+            results_.value = Se*N(d1) - X*exp(-riskFreeRate*T2)*N(d2)
+                             - Se + X*exp(-riskFreeRate*T2);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="15">
+    <source>continuousarithmeticasianvecerengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+  Copyright (C) 2014 Bernd Lewerenz
+
+  This file is part of QuantLib, a free-software/open-source library
+  for financial quantitative analysts and developers - http://quantlib.org/
+
+  QuantLib is free software: you can redistribute it and/or modify it
+  under the terms of the QuantLib license.  You should have received a
+  copy of the license along with this program; if not, please email
+  <quantlib-dev@lists.sf.net>. The license is also available online at
+  <http://quantlib.org/license.shtml>.
+
+  This program is distributed in the hope that it will be useful, but WITHOUT
+  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+  FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/continuousarithmeticasianvecerengine.hpp>
+#include <ql/instruments/vanillaoption.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/rounding.hpp>
+#include <ql/methods/finitedifferences/dminus.hpp>
+#include <ql/methods/finitedifferences/dplus.hpp>
+#include <ql/methods/finitedifferences/dplusdminus.hpp>
+#include <ql/methods/finitedifferences/tridiagonaloperator.hpp>
+#include <ql/pricingengines/blackcalculator.hpp>
+#include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    ContinuousArithmeticAsianVecerEngine::ContinuousArithmeticAsianVecerEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Handle<Quote> currentAverage,
+        Date startDate,
+        Size timeSteps,
+        Size assetSteps,
+        Real z_min,
+        Real z_max)
+    : process_(std::move(process)), currentAverage_(std::move(currentAverage)),
+      startDate_(startDate), z_min_(z_min), z_max_(z_max), timeSteps_(timeSteps),
+      assetSteps_(assetSteps) {
+        registerWith(process_);
+        registerWith(currentAverage_);
+    }
+
+    void ContinuousArithmeticAsianVecerEngine::calculate() const {
+        Real expectedAverage;
+
+        QL_REQUIRE(arguments_.averageType == Average::Arithmetic,
+                   "not an Arithmetic average option");
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "not an European Option");
+
+        DayCounter rfdc  = process_->riskFreeRate()->dayCounter();
+        DayCounter divdc = process_->dividendYield()->dayCounter();
+        DayCounter voldc = process_->blackVolatility()->dayCounter();
+        Real S_0 = process_->stateVariable()->value();
+
+        // payoff
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+
+        // original time to maturity
+        Date maturity = arguments_.exercise->lastDate();
+
+        Real X = payoff->strike();
+        QL_REQUIRE(z_min_<=0 && z_max_>=0,
+                   "strike (0 for vecer fixed strike asian)  not on Grid");
+
+        Volatility sigma =
+            process_->blackVolatility()->blackVol(maturity, X);
+
+        Rate r = process_->riskFreeRate()->
+            zeroRate(maturity, rfdc, Continuous, NoFrequency);
+        Rate q = process_->dividendYield()->
+            zeroRate(maturity, divdc, Continuous, NoFrequency);
+
+        Date today(Settings::instance().evaluationDate());
+
+        QL_REQUIRE(startDate_>=today,
+                   "Seasoned Asian not yet implemented");
+
+        // Expiry in Years
+        Time T = rfdc.yearFraction(today,
+                                   arguments_.exercise->lastDate());
+        Time T1 = rfdc.yearFraction(today,
+                                    startDate_ );            // Average Begin
+        Time T2 = T;            // Average End (In this version only Maturity...)
+
+        if ((T2 - T1) < 0.001) {
+            // its a vanilla option. Use vanilla engine
+            VanillaOption europeanOption(payoff, arguments_.exercise);
+            europeanOption.setPricingEngine(
+                        ext::make_shared<AnalyticEuropeanEngine>(process_));
+            results_.value = europeanOption.NPV();
+
+        } else {
+            Real Theta = 0.5;        // Mixed Scheme: 0.5 = Crank Nicolson
+            Real Z_0 = cont_strategy(0,T1,T2,q,r) - std::exp(-r*T) * X /S_0;
+
+            QL_REQUIRE(Z_0>=z_min_ && Z_0<=z_max_,
+                       "spot not on grid");
+
+            Real h = (z_max_ - z_min_) / assetSteps_; // Space step size
+            Real k = T / timeSteps_;         // Time Step size
+
+            Real sigma2 = sigma * sigma, vecerTerm;
+
+            Array SVec(assetSteps_+1),u_initial(assetSteps_+1),
+                  u(assetSteps_+1),rhs(assetSteps_+1);
+
+            for (Natural i= 0; i<= SVec.size()-1;i++) {
+                SVec[i] = z_min_ + i * h;     // Value of Underlying on the grid
+            }
+
+            // Begin gamma construction
+            TridiagonalOperator gammaOp = DPlusDMinus(assetSteps_+1,h);
+
+            Array upperD = gammaOp.upperDiagonal();
+            Array lowerD = gammaOp.lowerDiagonal();
+            Array Dia    = gammaOp.diagonal();
+
+            // Construct Vecer operator
+            TridiagonalOperator explicit_part(gammaOp.size());
+            TridiagonalOperator implicit_part(gammaOp.size());
+
+            for (Natural i= 0; i<= SVec.size()-1;i++) {
+                u_initial[i] = std::max<Real>(SVec[i] , 0.0); // Call Payoff
+            }
+
+            u = u_initial;
+
+            // Start Time Loop
+
+            for (Natural j = 1; j<=timeSteps_;j++) {
+                if (Theta != 1.0) { // Explicit Part
+                    for (Natural i = 1; i<= SVec.size()-2;i++) {
+                        vecerTerm = SVec[i] - std::exp(-q * (T-(j-1)*k))
+                                  * cont_strategy(T-(j-1)*k,T1,T2,q,r);
+                        gammaOp.setMidRow(i,
+                            0.5 * sigma2 * vecerTerm * vecerTerm  * lowerD[i-1],
+                            0.5 * sigma2 * vecerTerm * vecerTerm  * Dia[i],
+                            0.5 * sigma2 *  vecerTerm * vecerTerm * upperD[i]);
+                    }
+                    explicit_part = TridiagonalOperator::identity(gammaOp.size()) +
+                                    (1 - Theta) * k * gammaOp;
+                    explicit_part.setFirstRow(1.0,0.0); // Apply before applying
+                    explicit_part.setLastRow(-1.0,1.0); // Neumann BC
+
+                    u = explicit_part.applyTo(u);
+
+                    // Apply after applying (Neumann BC)
+                    u[assetSteps_] = u[assetSteps_-1] + h;
+                    u[0] = 0;
+                } // End Explicit Part
+
+                if (Theta != 0.0) {  // Implicit Part
+                    for (Natural i = 1; i<= SVec.size()-2;i++) {
+                        vecerTerm = SVec[i] - std::exp(-q * (T-j*k)) *
+                                    cont_strategy(T-j*k,T1,T2,q,r);
+                        gammaOp.setMidRow(i,
+                            0.5 * sigma2 * vecerTerm * vecerTerm * lowerD[i-1],
+                            0.5 * sigma2 * vecerTerm * vecerTerm  * Dia[i],
+                            0.5 * sigma2 * vecerTerm * vecerTerm * upperD[i]);
+                    }
+
+                    implicit_part = TridiagonalOperator::identity(gammaOp.size()) -
+                                    Theta * k * gammaOp;
+
+                    // Apply before solving
+                    implicit_part.setFirstRow(1.0,0.0);
+                    implicit_part.setLastRow(-1.0,1.0);
+                    rhs = u;
+                    rhs[0] = 0; // Lower BC
+                    rhs[assetSteps_] = h; // Upper BC (Neumann) Delta=1
+                    u = implicit_part.solveFor(rhs);
+                } // End implicit Part
+            } // End Time Loop
+
+            DownRounding Rounding(0);
+            auto lowerI = Integer(Rounding((Z_0 - z_min_) / h));
+            // Interpolate solution
+            Real pv;
+
+            pv = u[lowerI] + (u[lowerI+1] - u[lowerI]) * (Z_0 - SVec[lowerI])/h;
+            results_.value = S_0 * pv;
+
+            if (payoff->optionType()==Option::Put) {
+                // Apply Call Put Parity for Asians
+                if (r == q) {
+                    expectedAverage = S_0;
+                } else {
+                    expectedAverage =
+                        S_0 * (std::exp( (r-q) * T2) -
+                               std::exp( (r-q) * T1)) / ((r-q) * (T2-T1));
+                }
+
+                Real asianForward = std::exp(-r * T2) * (expectedAverage -  X);
+                results_.value = results_.value - asianForward;
+            }
+        }
+    }
+
+    // Replication of Average by holding this amount in Assets
+    Real ContinuousArithmeticAsianVecerEngine::cont_strategy(Time t,
+                                                             Time T1,
+                                                             Time T2,
+                                                             Real v,
+                                                             Real r) const {
+        Real const eps= 0.00001;
+
+        QL_REQUIRE(T1 <= T2, "Average Start must be before Average End");
+        if (std::fabs(t-T2) < eps) {
+            return 0.0;
+        } else {
+            if (t<T1) {
+                if (std::fabs(r-v) >= eps) {
+                    return (std::exp(v * (t-T2)) *
+                           (1 - std::exp((v-r) * (T2-T1) ))  /
+                           (( r - v) * (T2 - T1) ));
+                } else {
+                    return std::exp(v*(t-T2));
+                } // end else v-r ==0
+            } else { // t<T1
+                if (std::fabs(r-v) >= eps) {
+                    return std::exp(v * (t-T2)) *
+                           (1 - std::exp( (v - r) * (T2-t) )) /
+                           (( r - v) * (T2 - T1)  );
+                } else {
+                    return std::exp(v * (t-T2)) * (T2 - t) / (T2 - T1);
+                }
+            }
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="16">
+    <source>everestoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/everestoption.hpp>
+#include <ql/instruments/payoffs.hpp>
+
+namespace QuantLib {
+
+    EverestOption::EverestOption(Real notional,
+                                 Rate guarantee,
+                                 const ext::shared_ptr<Exercise>& exercise)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(new NullPayoff), exercise),
+      notional_(notional), guarantee_(guarantee) {}
+
+    Rate EverestOption::yield() const {
+        calculate();
+        QL_REQUIRE(yield_ != Null<Rate>(), "yield not provided");
+        return yield_;
+    }
+
+    void EverestOption::setupArguments(PricingEngine::arguments* args) const {
+        MultiAssetOption::setupArguments(args);
+
+        auto* arguments = dynamic_cast<EverestOption::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->notional = notional_;
+        arguments->guarantee= guarantee_;
+    }
+
+    void EverestOption::fetchResults(const PricingEngine::results* r) const {
+        MultiAssetOption::fetchResults(r);
+        const auto* results = dynamic_cast<const EverestOption::results*>(r);
+        QL_ENSURE(results != nullptr, "no results returned from pricing engine");
+        yield_ = results->yield;
+    }
+
+
+    EverestOption::arguments::arguments()
+    : notional(Null<Real>()), guarantee(Null<Rate>()) {}
+
+    void EverestOption::arguments::validate() const {
+        MultiAssetOption::arguments::validate();
+        QL_REQUIRE(notional != Null<Rate>(), "no notional given");
+        QL_REQUIRE(notional != 0.0, "null notional given");
+        QL_REQUIRE(guarantee != Null<Rate>(), "no guarantee given");
+    }
+
+
+    void EverestOption::results::reset() {
+        MultiAssetOption::results::reset();
+        yield = Null<Rate>();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="17">
+    <source>himalayaoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/himalayaoption.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    HimalayaOption::HimalayaOption(const std::vector<Date>& fixingDates,
+                                   Real strike)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(
+                                new PlainVanillaPayoff(Option::Call, strike)),
+                       ext::shared_ptr<Exercise>(
+                                   new EuropeanExercise(fixingDates.back()))),
+      fixingDates_(fixingDates) {}
+
+    void HimalayaOption::setupArguments(PricingEngine::arguments* args) const {
+        MultiAssetOption::setupArguments(args);
+
+        auto* arguments = dynamic_cast<HimalayaOption::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->fixingDates = fixingDates_;
+    }
+
+    void HimalayaOption::arguments::validate() const {
+        MultiAssetOption::arguments::validate();
+        QL_REQUIRE(!fixingDates.empty(), "no fixing dates given");
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="18">
+    <source>holderextensibleoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/holderextensibleoption.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    HolderExtensibleOption::HolderExtensibleOption(
+                           Option::Type type,
+                           Real premium,
+                           Date secondExpiryDate,
+                           Real secondStrike,
+                           const ext::shared_ptr<StrikedTypePayoff>& payoff,
+                           const ext::shared_ptr<Exercise>& exercise)
+    : OneAssetOption(payoff,exercise),
+      premium_(premium),
+      secondExpiryDate_(secondExpiryDate),
+      secondStrike_(secondStrike) {}
+
+    void HolderExtensibleOption::setupArguments(
+                                       PricingEngine::arguments* args) const {
+        OneAssetOption::setupArguments(args);
+        auto* moreArgs = dynamic_cast<HolderExtensibleOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+        moreArgs->premium = premium_;
+        moreArgs->secondExpiryDate = secondExpiryDate_;
+        moreArgs->secondStrike = secondStrike_;
+    }
+
+    void HolderExtensibleOption:: arguments::validate() const {
+        OneAssetOption::arguments::validate();
+        QL_REQUIRE(premium > 0,"negative premium not allowed");
+        QL_REQUIRE(secondExpiryDate != Date() , "no extending date given");
+        QL_REQUIRE(secondExpiryDate >= exercise->lastDate(),
+                   "extended date is earlier than or equal to first maturity date");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="19">
+    <source>kirkspreadoptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/kirkspreadoptionengine.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <utility>
+
+using namespace std;
+
+namespace QuantLib {
+
+    KirkSpreadOptionEngine::KirkSpreadOptionEngine(ext::shared_ptr<BlackProcess> process1,
+                                                   ext::shared_ptr<BlackProcess> process2,
+                                                   Handle<Quote> correlation)
+    : process1_(std::move(process1)), process2_(std::move(process2)), rho_(std::move(correlation)) {
+        registerWith(process1_);
+        registerWith(process2_);
+        registerWith(rho_);
+    }
+
+    void KirkSpreadOptionEngine::calculate() const {
+
+        // First: tests on types
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "not an European Option");
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "not a plain-vanilla payoff");
+
+        // forward values - futures, so b=0
+        Real forward1 = process1_->stateVariable()->value();
+        Real forward2 = process2_->stateVariable()->value();
+
+        Date exerciseDate = arguments_.exercise->lastDate();
+
+        // Volatilities
+        Real sigma1 =
+            process1_->blackVolatility()->blackVol(exerciseDate,forward1);
+        Real sigma2 =
+            process2_->blackVolatility()->blackVol(exerciseDate,forward2);
+
+        DiscountFactor riskFreeDiscount =
+            process1_->riskFreeRate()->discount(exerciseDate);
+
+        Real strike = payoff->strike();
+
+        // Unique F (forward) value for pricing
+        Real F = forward1/(forward2+strike);
+
+        // Its volatility
+        Real sigma =
+            sqrt(pow(sigma1,2)
+                 + pow((sigma2*(forward2/(forward2+strike))),2)
+                 - 2*rho_->value()*sigma1*sigma2*(forward2/(forward2+strike)));
+
+        // Day counter and Dates handling variables
+        DayCounter rfdc = process1_->riskFreeRate()->dayCounter();
+        Time t = rfdc.yearFraction(process1_->riskFreeRate()->referenceDate(),
+                                   arguments_.exercise->lastDate());
+
+        // Black-Scholes solution values
+        Real d1 = (log(F)+ 0.5*pow(sigma,2)*t) / (sigma*sqrt(t));
+        Real d2 = d1 - sigma*sqrt(t);
+
+        NormalDistribution pdf;
+        CumulativeNormalDistribution cum;
+        Real Nd1 = cum(d1);
+        Real Nd2 = cum(d2);
+        Real NMd1 = cum(-d1);
+        Real NMd2 = cum(-d2);
+
+        Option::Type optionType = payoff->optionType();
+
+        if (optionType==Option::Call) {
+            results_.value = riskFreeDiscount*(F*Nd1-Nd2)*(forward2+strike);
+        } else {
+            results_.value = riskFreeDiscount*(NMd2 -F*NMd1)*(forward2+strike);
+        }
+
+        Real callValue = optionType == Option::Call ? results_.value : riskFreeDiscount*(F*Nd1-Nd2)*(forward2+strike);
+        results_.theta = -((log(riskFreeDiscount)/t)*callValue
+                           + riskFreeDiscount*(forward1*sigma)/(2*sqrt(t))*pdf(d1));
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="20">
+    <source>margrabeoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/margrabeoption.hpp>
+#include <ql/instruments/payoffs.hpp>
+
+namespace QuantLib {
+
+    MargrabeOption::MargrabeOption(Integer Q1,
+                                   Integer Q2,
+                                   const ext::shared_ptr<Exercise>& exercise)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(new NullPayoff), exercise),
+      Q1_(Q1),
+      Q2_(Q2) {}
+
+    Real MargrabeOption::delta1() const {
+        calculate();
+        QL_REQUIRE(delta1_ != Null<Real>(), "delta1 not provided");
+        return delta1_;
+    }
+
+    Real MargrabeOption::delta2() const {
+        calculate();
+        QL_REQUIRE(delta2_ != Null<Real>(), "delta2 not provided");
+        return delta2_;
+    }
+
+    Real MargrabeOption::gamma1() const {
+        calculate();
+        QL_REQUIRE(gamma1_ != Null<Real>(), "gamma1 not provided");
+        return gamma1_;
+    }
+
+    Real MargrabeOption::gamma2() const {
+        calculate();
+        QL_REQUIRE(gamma2_ != Null<Real>(), "gamma2 not provided");
+        return gamma2_;
+    }
+
+    void MargrabeOption::setupArguments(PricingEngine::arguments* args) const {
+
+        MultiAssetOption::setupArguments(args);
+
+        auto* moreArgs = dynamic_cast<MargrabeOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+
+        moreArgs->Q1 = Q1_;
+        moreArgs->Q2 = Q2_;
+    }
+
+    void MargrabeOption::arguments::validate() const {
+
+        MultiAssetOption::arguments::validate();
+
+        QL_REQUIRE(Q1 != Null<Integer>(), "unspecified quantity for asset 1");
+        QL_REQUIRE(Q2 != Null<Integer>(), "unspecified quantity for asset 2");
+        QL_REQUIRE(Q1 > 0, "quantity of asset 1 must be positive");
+        QL_REQUIRE(Q2 > 0, "quantity of asset 2 must be positive");
+    }
+
+    void MargrabeOption::fetchResults(const PricingEngine::results* r) const {
+        MultiAssetOption::fetchResults(r);
+        const auto* results = dynamic_cast<const MargrabeOption::results*>(r);
+        QL_REQUIRE(results != nullptr, "wrong result type");
+        delta1_          = results->delta1;
+        delta2_          = results->delta2;
+        gamma1_          = results->gamma1;
+        gamma2_          = results->gamma2;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="21">
+    <source>mceverestengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/mceverestengine.hpp>
+
+namespace QuantLib {
+
+    EverestMultiPathPricer::EverestMultiPathPricer(Real notional,
+                                                   Real guarantee,
+                                                   DiscountFactor discount)
+    : notional_(notional), guarantee_(guarantee), discount_(discount) {}
+
+    Real EverestMultiPathPricer::operator()(const MultiPath& multiPath) const {
+
+        Size n = multiPath.pathSize();
+        QL_REQUIRE(n>0, "the path cannot be empty");
+
+        Size numAssets = multiPath.assetNumber();
+        QL_REQUIRE(numAssets>0, "there must be some paths");
+
+        // We search the yield min
+        Real minYield = multiPath[0].back() / multiPath[0].front() - 1.0;
+        for (Size j=1; j<numAssets; ++j) {
+            Rate yield = multiPath[j].back() / multiPath[j].front() - 1.0;
+            minYield = std::min(minYield, yield);
+        }
+        return (1.0 + minYield + guarantee_) * notional_ * discount_;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="22">
+    <source>mchimalayaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/mchimalayaengine.hpp>
+#include <ql/payoff.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    HimalayaMultiPathPricer::HimalayaMultiPathPricer(ext::shared_ptr<Payoff> payoff,
+                                                     DiscountFactor discount)
+    : payoff_(std::move(payoff)), discount_(discount) {}
+
+    Real HimalayaMultiPathPricer::operator()(const MultiPath& multiPath)
+                                                                      const {
+        Size numAssets = multiPath.assetNumber();
+        Size numNodes = multiPath.pathSize();
+        QL_REQUIRE(numAssets > 0, "no asset given");
+
+        std::vector<bool> remainingAssets(numAssets, true);
+        Real averagePrice = 0.0;
+        Size fixings = numNodes-1;
+        for (Size i = 1; i < numNodes; i++) {
+            Real bestPrice = 0.0;
+            Real bestYield = QL_MIN_REAL;
+            // dummy assignement to avoid compiler warning
+            Size removeAsset = 0;
+            for (Size j = 0; j < numAssets; j++) {
+                if (remainingAssets[j]) {
+                    Real price = multiPath[j][i];
+                    Real yield = price/multiPath[j].front();
+                    if (yield >= bestYield) {
+                        bestPrice = price;
+                        removeAsset = j;
+                    }
+                }
+            }
+            remainingAssets[removeAsset] = false;
+            averagePrice += bestPrice;
+        }
+        averagePrice /= std::min(fixings, numAssets);
+
+        Real payoff = (*payoff_)(averagePrice);
+        return payoff * discount_;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="23">
+    <source>mcpagodaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/mcpagodaengine.hpp>
+
+namespace QuantLib {
+
+    PagodaMultiPathPricer::PagodaMultiPathPricer(Real roof, Real fraction,
+                                                 DiscountFactor discount)
+    : discount_(discount), roof_(roof), fraction_(fraction) {}
+
+    Real PagodaMultiPathPricer::operator()(const MultiPath& multiPath) const {
+
+        Size numAssets = multiPath.assetNumber();
+        Size numSteps = multiPath.pathSize();
+
+        Real averagePerformance = 0.0;
+        for (Size i = 1; i < numSteps; i++) {
+            for (Size j = 0; j < numAssets; j++) {
+                averagePerformance +=
+                    multiPath[j].front() *
+                    (multiPath[j][i]/multiPath[j][i-1] - 1.0);
+            }
+        }
+        averagePerformance /= numAssets;
+
+        return discount_ * fraction_
+            * std::max<Real>(0.0, std::min(roof_, averagePerformance));
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="24">
+    <source>pagodaoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/pagodaoption.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    PagodaOption::PagodaOption(const std::vector<Date>& fixingDates,
+                               Real roof,
+                               Real fraction)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(new NullPayoff),
+                       ext::shared_ptr<Exercise>(
+                                   new EuropeanExercise(fixingDates.back()))),
+      fixingDates_(fixingDates), roof_(roof), fraction_(fraction) {}
+
+
+    void PagodaOption::setupArguments(PricingEngine::arguments* args) const {
+        MultiAssetOption::setupArguments(args);
+
+        auto* arguments = dynamic_cast<PagodaOption::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->fixingDates = fixingDates_;
+        arguments->roof = roof_;
+        arguments->fraction = fraction_;
+    }
+
+
+    PagodaOption::arguments::arguments()
+    : roof(Null<Real>()), fraction(Null<Real>()) {}
+
+    void PagodaOption::arguments::validate() const {
+        MultiAssetOption::arguments::validate();
+        QL_REQUIRE(!fixingDates.empty(), "no fixingDates given");
+        QL_REQUIRE(roof != Null<Real>(), "no roof given");
+        QL_REQUIRE(fraction != Null<Real>(), "no fraction given");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="25">
+    <source>partialtimebarrieroption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/partialtimebarrieroption.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    PartialTimeBarrierOption::PartialTimeBarrierOption(
+                           PartialBarrier::Type barrierType,
+                           PartialBarrier::Range barrierRange,
+                           Real barrier,
+                           Real rebate,
+                           Date coverEventDate,
+                           const ext::shared_ptr<StrikedTypePayoff>& payoff,
+                           const ext::shared_ptr<Exercise>& exercise)
+    : OneAssetOption(payoff, exercise),
+      barrierType_(barrierType), barrierRange_(barrierRange),
+      barrier_(barrier), rebate_(rebate),
+      coverEventDate_(coverEventDate) {}
+
+    void PartialTimeBarrierOption::setupArguments(
+                                       PricingEngine::arguments* args) const {
+        OneAssetOption::setupArguments(args);
+
+        auto* moreArgs = dynamic_cast<PartialTimeBarrierOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+        moreArgs->barrierType = barrierType_;
+        moreArgs->barrierRange = barrierRange_;
+        moreArgs->barrier = barrier_;
+        moreArgs->rebate = rebate_;
+        moreArgs->coverEventDate = coverEventDate_;
+    }
+
+    PartialTimeBarrierOption::arguments::arguments()
+    : barrierType(PartialBarrier::Type(-1)),
+      barrierRange(PartialBarrier::Range(-1)),
+      barrier(Null<Real>()), rebate(Null<Real>()),
+      coverEventDate(Null<Date>()) {}
+
+    void PartialTimeBarrierOption::arguments::validate() const {
+        OneAssetOption::arguments::validate();
+        
+        // checking barrier type and suitable barrier range
+        switch (barrierType) {
+          case PartialBarrier::DownIn:
+          case PartialBarrier::UpIn:
+            QL_REQUIRE(barrierRange == PartialBarrier::Start ||
+                       barrierRange == PartialBarrier::End,
+                       "in-barrier requires Start or End range");
+            break;
+          case PartialBarrier::DownOut:
+          case PartialBarrier::UpOut:
+            QL_REQUIRE(barrierRange == PartialBarrier::Start ||
+                       barrierRange == PartialBarrier::EndB1 ||
+                       barrierRange == PartialBarrier::EndB2,
+                       "out-barrier requires Start, EndB1 or EndB2 range");
+            break;
+          default:
+            QL_FAIL("unknown barrier type");
+        }
+
+        QL_REQUIRE(barrier != Null<Real>(), "no barrier given");
+        QL_REQUIRE(rebate != Null<Real>(), "no rebate given");
+        QL_REQUIRE(coverEventDate != Null<Date>(), "no cover event date given");
+        QL_REQUIRE(coverEventDate < exercise->lastDate(),
+                   "cover event date equal or later than exercise date");
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="26">
+    <source>simplechooseroption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/simplechooseroption.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    SimpleChooserOption::SimpleChooserOption(
+                                  Date choosingDate,
+                                  Real strike,
+                                  const ext::shared_ptr<Exercise>& exercise)
+    : OneAssetOption(ext::shared_ptr<Payoff>(
+                                new PlainVanillaPayoff(Option::Call, strike)),
+                     exercise),
+      choosingDate_(choosingDate) {}
+
+    void SimpleChooserOption::setupArguments(
+                                    PricingEngine::arguments* args) const {
+        OneAssetOption::setupArguments(args);
+        auto* moreArgs = dynamic_cast<SimpleChooserOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+        moreArgs->choosingDate=choosingDate_;
+    }
+
+    void SimpleChooserOption::arguments::validate() const {
+        OneAssetOption::arguments::validate();
+        QL_REQUIRE(choosingDate != Date(), " no choosing date given");
+        QL_REQUIRE(choosingDate < exercise->lastDate(),
+                   "choosing date later than or equal to maturity date");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="27">
+    <source>twoassetbarrieroption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/twoassetbarrieroption.hpp>
+#include <ql/exercise.hpp>
+#include <ql/event.hpp>
+
+namespace QuantLib {
+
+    TwoAssetBarrierOption::TwoAssetBarrierOption(
+                           Barrier::Type barrierType,
+                           Real barrier,
+                           const ext::shared_ptr<StrikedTypePayoff>& payoff,
+                           const ext::shared_ptr<Exercise>& exercise)
+    : Option(payoff, exercise), barrierType_(barrierType), barrier_(barrier) {}
+
+    void TwoAssetBarrierOption::setupArguments(
+                                       PricingEngine::arguments* args) const {
+        Option::setupArguments(args);
+        auto* moreArgs = dynamic_cast<TwoAssetBarrierOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+        moreArgs->barrierType = barrierType_;
+        moreArgs->barrier = barrier_;
+    }
+    
+    bool TwoAssetBarrierOption::isExpired() const {
+        return detail::simple_event(exercise_->lastDate()).hasOccurred();
+    }
+
+    TwoAssetBarrierOption::arguments::arguments()
+    : barrierType(Barrier::Type(-1)), barrier(Null<Real>()) {}
+
+    void TwoAssetBarrierOption::arguments::validate() const {
+        Option::arguments::validate();
+
+        switch (barrierType) {
+          case Barrier::DownIn:
+          case Barrier::UpIn:
+          case Barrier::DownOut:
+          case Barrier::UpOut:
+            break;
+          default:
+            QL_FAIL("unknown type");
+        }
+
+        QL_REQUIRE(barrier != Null<Real>(), "no barrier given");
+    }
+
+    bool TwoAssetBarrierOption::engine::triggered(Real underlying) const {
+        switch (arguments_.barrierType) {
+          case Barrier::DownIn:
+          case Barrier::DownOut:
+            return underlying < arguments_.barrier;
+          case Barrier::UpIn:
+          case Barrier::UpOut:
+            return underlying > arguments_.barrier;
+          default:
+            QL_FAIL("unknown type");
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="28">
+    <source>twoassetcorrelationoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/twoassetcorrelationoption.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    TwoAssetCorrelationOption::TwoAssetCorrelationOption(
+                           Option::Type type,
+                           Real strike1,
+                           Real strike2,
+                           const ext::shared_ptr<Exercise>& exercise)
+    : MultiAssetOption(ext::make_shared<PlainVanillaPayoff>(type, strike1),
+                       exercise), X2_(strike2) {}
+
+    void TwoAssetCorrelationOption::setupArguments(
+                                       PricingEngine::arguments* args) const {
+        MultiAssetOption::setupArguments(args);
+        auto* moreArgs = dynamic_cast<TwoAssetCorrelationOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+
+        moreArgs->X2 = X2_;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="29">
+    <source>writerextensibleoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/event.hpp>
+#include <ql/experimental/exoticoptions/writerextensibleoption.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    WriterExtensibleOption::WriterExtensibleOption(
+        const ext::shared_ptr<PlainVanillaPayoff>& payoff1,
+        const ext::shared_ptr<Exercise>& exercise1,
+        const ext::shared_ptr<PlainVanillaPayoff>& payoff2,
+        ext::shared_ptr<Exercise> exercise2)
+    : OneAssetOption(payoff1, exercise1), payoff2_(payoff2), exercise2_(std::move(exercise2)) {}
+
+    void WriterExtensibleOption::setupArguments(
+                                       PricingEngine::arguments* args) const {
+        OneAssetOption::setupArguments(args);
+
+        auto* otherArguments = dynamic_cast<WriterExtensibleOption::arguments*>(args);
+        QL_REQUIRE(otherArguments != nullptr, "wrong arguments type");
+
+        otherArguments->payoff2 = payoff2_;
+        otherArguments->exercise2 = exercise2_;
+    }
+
+    bool WriterExtensibleOption::isExpired() const {
+        return detail::simple_event(exercise2_->lastDate()).hasOccurred();
+    }
+
+    void WriterExtensibleOption::arguments::validate() const {
+        OneAssetOption::arguments::validate();
+        QL_REQUIRE(payoff2, "no second payoff given");
+        QL_REQUIRE(exercise2, "no second exercise given");
+        QL_REQUIRE(exercise2->lastDate() > exercise->lastDate(),
+                   "second exercise date is not later than the first");
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

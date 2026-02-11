@@ -1,0 +1,4617 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>basecorrelationstructure.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/basecorrelationstructure.hpp>
+
+
+namespace QuantLib {
+
+    /* Default Factories for some specific two dimensional interpolations 
+    through template specialization. The signature of the 2D interpolator 
+        constructor is not guaranteed.*/
+    template<>
+    void 
+    BaseCorrelationTermStructure<BilinearInterpolation>::setupInterpolation() {
+         interpolation_ =  
+             BilinearInterpolation(trancheTimes_.begin(), 
+            trancheTimes_.end(), lossLevel_.begin(), lossLevel_.end(), 
+            correlations_);
+     }
+
+     /* Notice See that some interpolators might take you out of the [-1,1]
+     correlation domain.
+    */
+    template<>
+    void 
+    BaseCorrelationTermStructure<BicubicSpline>::setupInterpolation() {
+         interpolation_ =  
+             BicubicSpline(trancheTimes_.begin(), 
+            trancheTimes_.end(), lossLevel_.begin(), lossLevel_.end(), 
+            correlations_);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>basket.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+ Copyright (C) 2009, 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/basket.hpp>
+#include <ql/experimental/credit/defaultlossmodel.hpp>
+#include <ql/experimental/credit/loss.hpp>
+#include <ql/time/daycounters/actualactual.hpp>
+#include <numeric>
+#include <utility>
+
+using namespace std;
+
+namespace QuantLib {
+
+    Basket::Basket(const Date& refDate,
+                   const vector<string>& names,
+                   vector<Real> notionals,
+                   ext::shared_ptr<Pool> pool,
+                   Real attachment,
+                   Real detachment,
+                   ext::shared_ptr<Claim> claim)
+    : notionals_(std::move(notionals)), pool_(std::move(pool)), claim_(std::move(claim)),
+      attachmentRatio_(attachment), detachmentRatio_(detachment), basketNotional_(0.0),
+      attachmentAmount_(0.0), detachmentAmount_(0.0), trancheNotional_(0.0), refDate_(refDate) {
+        QL_REQUIRE(!notionals_.empty(), "notionals empty");
+        QL_REQUIRE (attachmentRatio_ >= 0 &&
+                    attachmentRatio_ <= detachmentRatio_ &&
+                    detachmentRatio_ <= 1,
+                    "invalid attachment/detachment ratio");
+        QL_REQUIRE(pool_, "Empty pool pointer.");
+        QL_REQUIRE(notionals_.size() == pool_->size(), 
+                   "unmatched data entry sizes in basket");
+
+        // registrations relevant to the loss status, not to the expected 
+        // loss values; those are through models.
+        registerWith(Settings::instance().evaluationDate());
+        registerWith(claim_);
+
+        computeBasket();
+
+        // At this point Issuers in the pool might or might not have
+        //   probability term structures for the defultKeys(eventType+
+        //   currency+seniority) entering in this basket. This is not
+        //   necessarily a problem.
+        for (double notional : notionals_) {
+            basketNotional_ += notional;
+            attachmentAmount_ += notional * attachmentRatio_;
+            detachmentAmount_ += notional * detachmentRatio_;
+        }
+        trancheNotional_ = detachmentAmount_ - attachmentAmount_;
+    }
+
+    /*\todo Alternatively send a relinkable handle so it can be changed from 
+    the outside. In that case reconsider the observability chain.
+    */
+    void Basket::setLossModel(
+        const ext::shared_ptr<DefaultLossModel>& lossModel) {
+
+        if (lossModel_ != nullptr)
+            unregisterWith(lossModel_);
+        lossModel_ = lossModel;
+        if (lossModel_ != nullptr) {
+            //recovery quotes, defaults(once Issuer is observable)etc might 
+            //  trigger us:
+            registerWith(lossModel_);
+        }
+        LazyObject::update(); //<- just set calc=false
+    }
+
+    void Basket::performCalculations() const {
+        // Calculations for status
+        computeBasket();// or we might be called from an statistic member 
+                        // without being initialized yet (first called)
+        QL_REQUIRE(lossModel_, "Basket has no default loss model assigned.");
+
+        /* The model must notify us if the another basket calls it for 
+        reasignment. The basket works as an argument to the deafult loss models 
+        so, even if the models dont cache anything, they will be using the wrong
+        default TS. \todo: This has a possible optimization: the basket 
+        incorporates trancheability and many models do their compuations 
+        independently of that (some do but do it inefficiently when asked for 
+        two tranches on the same basket; e,g, recursive model) so it might be 
+        more efficient sending the pool only; however the modtionals and other 
+        basket info are still used.*/
+        lossModel_->setBasket(const_cast<Basket*>(this));
+    }
+
+    Real Basket::notional() const {
+        return std::accumulate(notionals_.begin(), notionals_.end(), 0.0);
+    }
+
+    Disposable<vector<Real> > Basket::probabilities(const Date& d) const {
+        vector<Real> prob(size());
+        vector<DefaultProbKey> defKeys = defaultKeys();
+        for (Size j = 0; j < size(); j++)
+            prob[j] = pool_->get(pool_->names()[j]).defaultProbability(
+                defKeys[j])->defaultProbability(d);
+        return prob;
+    }
+
+    Real Basket::cumulatedLoss(const Date& endDate) const {
+        QL_REQUIRE(endDate >= refDate_, 
+            "Target date lies before basket inception");
+        Real loss = 0.0;
+        for (Size i = 0; i < size(); i++) {
+            ext::shared_ptr<DefaultEvent> credEvent =
+                pool_->get(pool_->names()[i]).defaultedBetween(refDate_,
+                    endDate, pool_->defaultKeys()[i]);
+            if (credEvent != nullptr) {
+                /* \todo If the event has not settled one would need to 
+                introduce some model recovery rate (independently of a loss 
+                model) This remains to be done.
+                */  
+                if(credEvent->hasSettled())
+                    loss += claim_->amount(credEvent->date(),
+                            // notionals_[i],
+                            exposure(pool_->names()[i], credEvent->date()),
+                            credEvent->settlement().recoveryRate(
+                                pool_->defaultKeys()[i].seniority()));
+            }
+        }
+        return loss;
+    }
+
+    Real Basket::settledLoss(const Date& endDate) const {
+        QL_REQUIRE(endDate >= refDate_, 
+            "Target date lies before basket inception");
+        
+        Real loss = 0.0;
+        for (Size i = 0; i < size(); i++) {
+            ext::shared_ptr<DefaultEvent> credEvent =
+                pool_->get(pool_->names()[i]).defaultedBetween(refDate_,
+                    endDate, pool_->defaultKeys()[i]);
+            if (credEvent != nullptr) {
+                if(credEvent->hasSettled()) {
+                    loss += claim_->amount(credEvent->date(),
+                            //notionals_[i],
+                            exposure(pool_->names()[i], credEvent->date()),
+                            //NOtice I am requesting an exposure in the past...
+                            /* also the seniority does not belong to the 
+                            counterparty anymore but to the position.....*/
+                            credEvent->settlement().recoveryRate(
+                                pool_->defaultKeys()[i].seniority()));
+                }
+            }
+        }
+        return loss;
+    }
+
+    Real Basket::remainingNotional() const {
+        return evalDateRemainingNot_;
+    }
+
+    Disposable<std::vector<Size> > 
+        Basket::liveList(const Date& endDate) const {
+        std::vector<Size> calcBufferLiveList;
+        for (Size i = 0; i < size(); i++)
+            if (!pool_->get(pool_->names()[i]).defaultedBetween(
+                    refDate_,
+                    endDate,
+                    pool_->defaultKeys()[i]))
+                calcBufferLiveList.push_back(i);
+
+        return calcBufferLiveList;
+    }
+
+    Real Basket::remainingNotional(const Date& endDate) const {
+        Real notional = 0;
+        vector<DefaultProbKey> defKeys = defaultKeys();
+        for (Size i = 0; i < size(); i++) {
+            if (!pool_->get(pool_->names()[i]).defaultedBetween(refDate_,
+                                                        endDate,
+                                                        defKeys[i]))
+                notional += notionals_[i];
+        }
+        return notional;
+    }
+
+    Disposable<vector<Real> > 
+        Basket::remainingNotionals(const Date& endDate) const 
+    {
+        QL_REQUIRE(endDate >= refDate_, 
+            "Target date lies before basket inception");
+
+        std::vector<Real> calcBufferNotionals;
+        const std::vector<Size>& alive = liveList(endDate);
+        for(Size i=0; i<alive.size(); i++)
+            calcBufferNotionals.push_back(
+                exposure(pool_->names()[i], endDate)
+                );// some better way to trim it? 
+        return calcBufferNotionals;
+    }
+
+    Disposable<std::vector<Probability> > 
+        Basket::remainingProbabilities(const Date& d) const 
+    {
+        QL_REQUIRE(d >= refDate_, "Target date lies before basket inception");
+        vector<Real> prob;
+        const std::vector<Size>& alive = liveList();
+
+        for(Size i=0; i<alive.size(); i++)
+            prob.push_back(pool_->get(pool_->names()[i]).defaultProbability(
+                pool_->defaultKeys()[i])->defaultProbability(d, true));
+        return prob;
+    }
+
+    /* It is supossed to return the addition of ALL notionals from the 
+    requested ctpty......*/
+    Real Basket::exposure(const std::string& name, const Date& d) const {
+        //'this->names_' contains duplicates, contrary to 'pool->names'
+        auto match = std::find(pool_->names().begin(), pool_->names().end(), name);
+        QL_REQUIRE(match != pool_->names().end(), "Name not in basket.");
+        Real totalNotional = 0.;
+        do{
+            totalNotional += 
+             // NOT IMPLEMENTED YET:
+    //positions_[std::distance(names_.begin(), match)]->expectedExposure(d);
+                notionals_[std::distance(pool_->names().begin(), match)];
+            ++match;
+            match = std::find(match, pool_->names().end(), name);
+        }while(match != pool_->names().end());
+
+        return totalNotional;
+        //Size position = std::distance(poolNames.begin(), 
+        //    std::find(poolNames.begin(), poolNames.end(), name));
+        //QL_REQUIRE(position < pool_->size(), "Name not in pool list");
+
+        //return positions_[position]->expectedExposure(d);
+    }
+
+    Disposable<std::vector<std::string> >
+        Basket::remainingNames(const Date& endDate) const 
+    {
+        // maybe return zero directly instead?:
+        QL_REQUIRE(endDate >= refDate_, 
+            "Target date lies before basket inception");
+
+        const std::vector<Size>& alive = liveList(endDate);
+        std::vector<std::string> calcBufferNames;
+        calcBufferNames.reserve(alive.size());
+        for (unsigned long i : alive)
+            calcBufferNames.push_back(pool_->names()[i]);
+        return calcBufferNames;
+    }
+
+    Disposable<vector<DefaultProbKey> >
+        Basket::remainingDefaultKeys(const Date& endDate) const 
+    {
+        QL_REQUIRE(endDate >= refDate_,
+            "Target date lies before basket inception");
+
+        const std::vector<Size>& alive = liveList(endDate);
+        vector<DefaultProbKey> defKeys;
+        defKeys.reserve(alive.size());
+        for (unsigned long i : alive)
+            defKeys.push_back(pool_->defaultKeys()[i]);
+        return defKeys;
+    }
+
+    Size Basket::remainingSize() const {
+        return evalDateLiveList_.size();
+    }
+
+    Size Basket::remainingSize(const Date& d) const {
+        return remainingDefaultKeys(d).size();
+    }
+
+    /* computed on the inception values, notice the positions might have 
+    amortized or changed in value and the total outstanding notional might 
+    differ from the inception one.*/
+    Real Basket::remainingDetachmentAmount(const Date& endDate) const {
+        return detachmentAmount_;
+    }
+
+    Real Basket::remainingAttachmentAmount(const Date& endDate) const {
+        // maybe return zero directly instead?:
+        QL_REQUIRE(endDate >= refDate_, 
+            "Target date lies before basket inception");
+        Real loss = settledLoss(endDate);
+        return std::min(detachmentAmount_, attachmentAmount_ + 
+            std::max(0.0, loss - attachmentAmount_));
+    }
+
+    Probability Basket::probOverLoss(const Date& d, Real lossFraction) const {
+        // convert initial basket fraction to remaining basket fraction
+        calculate();
+        // if eaten up all the tranche the prob of losing any amount is 1 
+        //  (we have already lost it)
+        if(evalDateRemainingNot_ == 0.) return 1.;
+
+        // Turn to live (remaining) tranche units to feed into the model request
+        Real xPtfl = attachmentAmount_ + 
+            (detachmentAmount_-attachmentAmount_)*lossFraction;
+        Real xPrim = (xPtfl- evalDateAttachAmount_)/
+            (detachmentAmount_-evalDateAttachAmount_);
+        // in live tranche fractional units
+        // if the level falls within realized losses the prob is 1.
+        if(xPtfl < 0.) return 1.;
+
+        return lossModel_->probOverLoss(d, xPrim);
+    }
+
+    Real Basket::percentile(const Date& d, Probability prob) const {
+        calculate();
+        return lossModel_->percentile(d, prob);
+    }
+
+    Real Basket::expectedTrancheLoss(const Date& d) const {
+        calculate();
+        return cumulatedLoss() + lossModel_->expectedTrancheLoss(d);
+    }
+
+    Disposable<std::vector<Real> > 
+        Basket::splitVaRLevel(const Date& date, Real loss) const {
+        calculate();
+        return lossModel_->splitVaRLevel(date, loss);
+    }
+
+    Real Basket::expectedShortfall(const Date& d, Probability prob) const {
+        calculate();
+        return lossModel_->expectedShortfall(d, prob);
+    }
+
+    Disposable<std::map<Real, Probability> > 
+        Basket::lossDistribution(const Date& d) const {
+        calculate();
+        return lossModel_->lossDistribution(d);
+    }
+
+    std::vector<Probability> 
+        Basket::probsBeingNthEvent(Size n, const Date& d) const {
+
+        Size alreadyDefaulted = pool_->size() - remainingNames().size();
+        if(alreadyDefaulted >=n) 
+            return std::vector<Probability>(remainingNames().size(), 0.);
+
+        calculate();
+        return lossModel_->probsBeingNthEvent(n-alreadyDefaulted, d);
+    }
+
+    Real Basket::defaultCorrelation(const Date& d, Size iName, Size jName) const{
+        calculate();
+        return lossModel_->defaultCorrelation(d, iName, jName);
+
+    }
+
+    /*! Returns the probaility of having a given or larger number of 
+    defaults in the basket portfolio at a given time.
+    */
+    Probability Basket::probAtLeastNEvents(Size n, const Date& d) const{
+        calculate();
+        return lossModel_->probAtLeastNEvents(n, d);
+
+    }
+
+    Real Basket::recoveryRate(const Date& d, Size iName) const {
+        calculate();
+        return 
+            lossModel_->expectedRecovery(d, iName, pool_->defaultKeys()[iName]);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>blackcdsoptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Stamm
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/credit/blackcdsoptionengine.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <ql/quote.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    BlackCdsOptionEngine::BlackCdsOptionEngine(Handle<DefaultProbabilityTermStructure> probability,
+                                               Real recoveryRate,
+                                               Handle<YieldTermStructure> termStructure,
+                                               Handle<Quote> volatility)
+    : probability_(std::move(probability)), recoveryRate_(recoveryRate),
+      termStructure_(std::move(termStructure)), volatility_(std::move(volatility)) {
+
+        registerWith(probability_);
+        registerWith(termStructure_);
+        registerWith(volatility_);
+    }
+
+    void BlackCdsOptionEngine::calculate() const {
+
+        Date maturityDate = arguments_.swap->coupons().front()->date();
+        Date exerciseDate = arguments_.exercise->date(0);
+        QL_REQUIRE(maturityDate > exerciseDate,
+                   "Underlying CDS should start after option maturity");
+        Date settlement   = termStructure_->referenceDate();
+
+        Rate spotFwdSpread = arguments_.swap->fairSpread();
+        Rate swapSpread    = arguments_.swap->runningSpread();
+
+        DayCounter tSDc = termStructure_->dayCounter();
+
+        // The sense of the underlying/option has to be sent this way
+        // to the Black formula, no sign.
+        Real riskyAnnuity =
+            std::fabs(arguments_.swap->couponLegNPV() / swapSpread);
+        results_.riskyAnnuity = riskyAnnuity;
+
+        Time T = tSDc.yearFraction(settlement, exerciseDate);
+
+        Real stdDev = volatility_->value()  * std::sqrt(T);
+        Option::Type callPut = (arguments_.side == Protection::Buyer) ?
+                                                   Option::Call : Option::Put;
+
+        results_.value =
+            blackFormula(callPut, swapSpread, spotFwdSpread,
+                         stdDev, riskyAnnuity);
+
+        // if a non knock-out payer option, add front end protection value
+        if (arguments_.side == Protection::Buyer && !arguments_.knocksOut) {
+            Real frontEndProtection =
+                callPut * arguments_.swap->notional()
+                * (1.-recoveryRate_)
+                * probability_->defaultProbability(exerciseDate)
+                * termStructure_->discount(exerciseDate);
+            results_.value += frontEndProtection;
+        }
+    }
+
+    Handle<YieldTermStructure> BlackCdsOptionEngine::termStructure() {
+        return termStructure_;
+    }
+
+    Handle<Quote> BlackCdsOptionEngine::volatility() {
+        return volatility_;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>cdo.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/event.hpp>
+#include <ql/experimental/credit/cdo.hpp>
+#include <utility>
+
+using namespace std;
+
+namespace QuantLib {
+
+    CDO::CDO(Real attachment,
+             Real detachment,
+             vector<Real> nominals,
+             const vector<Handle<DefaultProbabilityTermStructure> >& basket,
+             Handle<OneFactorCopula> copula,
+             bool protectionSeller,
+             Schedule premiumSchedule,
+             Rate premiumRate,
+             DayCounter dayCounter,
+             Rate recoveryRate,
+             Rate upfrontPremiumRate,
+             Handle<YieldTermStructure> yieldTS,
+             Size nBuckets,
+             const Period& integrationStep)
+    : attachment_(attachment), detachment_(detachment), nominals_(std::move(nominals)),
+      basket_(basket), copula_(std::move(copula)), protectionSeller_(protectionSeller),
+      premiumSchedule_(std::move(premiumSchedule)), premiumRate_(premiumRate),
+      dayCounter_(std::move(dayCounter)), recoveryRate_(recoveryRate),
+      upfrontPremiumRate_(upfrontPremiumRate), yieldTS_(std::move(yieldTS)), nBuckets_(nBuckets),
+      integrationStep_(integrationStep) {
+
+        QL_REQUIRE (!basket.empty(), "basket is empty");
+        QL_REQUIRE (attachment_ >= 0 && attachment_ < detachment_
+                    && detachment_ <= 1,
+                    "illegal attachment/detachment point");
+
+        registerWith (yieldTS_);
+        registerWith (copula_);
+        for (auto& i : basket_)
+            registerWith(i);
+
+        QL_REQUIRE (nominals_.size() <= basket_.size(),
+                    "nominal vector size too large");
+
+        if (nominals_.size() < basket_.size()) {
+            Size n = basket_.size() - nominals_.size();
+            Real back = nominals_.back();
+            for (Size i = 0; i < n; i++)
+                nominals_.push_back(back);
+        }
+
+        QL_REQUIRE (nominals_.size() == basket_.size(),
+                    "nominal size " << nominals_.size()
+                    << " != basket size " << basket_.size());
+
+        nominal_ = 0;
+        for (Size i = 0; i < nominals_.size(); i++) {
+            lgds_.push_back (nominals_[i] * (1.0 - recoveryRate_));
+            nominal_ += nominals_[i];
+            lgd_ += lgds_[i];
+        }
+        xMax_ = detachment_ * nominal_;
+        xMin_ = attachment_ * nominal_;
+    }
+
+
+    bool CDO::isExpired () const {
+        return detail::simple_event(premiumSchedule_.dates().back())
+               .hasOccurred(yieldTS_->referenceDate());
+    }
+
+
+    void CDO::setupExpired() const {
+        Instrument::setupExpired();
+    }
+
+
+    Real CDO::expectedTrancheLoss (Date d) const {
+        if (d <= basket_.front()->referenceDate())
+            return 0;
+
+        vector<Real> defProb (basket_.size());
+        for (Size j = 0; j < basket_.size(); j++)
+            defProb[j] = basket_[j]->defaultProbability (d);
+
+        LossDistBucketing op (nBuckets_, xMax_);
+        Distribution dist = copula_->integral (op, lgds_, defProb);
+
+        return dist.trancheExpectedValue (xMin_, xMax_);
+
+        // The following causes two errors in test against literature values.
+        // FIXME: Investigate accuracy.
+        // return dist.cumulativeExcessProbability (xMin_, xMax_);
+
+        //   TranchePayoff func (xMin_, xMax_);
+        //   return (dist.expectedValue (func)
+        //    + (xMax_ - xMin_) * (1.0 - dist.cumulatedProbability (xMax_)));
+    }
+
+
+    void CDO::performCalculations() const {
+
+        QL_REQUIRE(!yieldTS_.empty(), "no yield term structure set");
+
+        errorEstimate_ = Null<Real>();
+
+        NPV_ = 0.0;
+        premiumValue_ = 0;
+        protectionValue_ = 0;
+        error_ = 0;
+
+        /* Expectations e1 and e2 are portfolio loss given default,
+           i.e.  with recovery already "bult in". Multiplication by
+           (1-r) is therefore not necessary, neither in premium nor
+           protection value calculation.
+        */
+
+        Real e1 = 0;
+        Date today = yieldTS_->referenceDate();
+        if (premiumSchedule_[0] > today)
+            e1 = expectedTrancheLoss (premiumSchedule_[0]);
+
+        for (Size i = 1; i < premiumSchedule_.size(); i++) {
+            Date d2 = premiumSchedule_[i];
+            if (d2 < today)
+                continue;
+
+            Date d1 = premiumSchedule_[i-1];
+
+            Date d, d0 = d1;
+            do {
+                d = NullCalendar().advance (d0 > today ? d0 : today,
+                                            integrationStep_);
+                if (d > d2)
+                    d = d2;
+
+                Real e2 = expectedTrancheLoss (d);
+
+                premiumValue_ += (xMax_ - xMin_ - e2)
+                    * premiumRate_ * dayCounter_.yearFraction (d0, d)
+                    * yieldTS_->discount (d);
+
+                if (e2 < e1) {
+                    error_ ++;
+                }
+
+                protectionValue_ -= (e2 - e1) * yieldTS_->discount (d);
+
+                d0 = d;
+                e1 = e2;
+            }
+            while (d < d2);
+        }
+
+        if (premiumSchedule_[0] >= today)
+            upfrontPremiumValue_ = (xMax_ - xMin_) * upfrontPremiumRate_ *
+                yieldTS_->discount(premiumSchedule_[0]);
+        else
+            upfrontPremiumValue_ = 0.0;
+
+        if (!protectionSeller_) {
+            premiumValue_ *= -1;
+            upfrontPremiumValue_ *= -1;
+            protectionValue_ *= -1;
+        }
+
+        NPV_ = premiumValue_ + protectionValue_ + upfrontPremiumValue_;
+    }
+
+
+    Rate CDO::premiumValue () const {
+        calculate();
+        return premiumValue_;
+    }
+
+    Rate CDO::protectionValue () const {
+        calculate();
+        return protectionValue_;
+    }
+
+    Size CDO::error () const {
+        calculate();
+        return error_;
+    }
+
+    Rate CDO::fairPremium () const {
+        calculate();
+        return - premiumRate_ * protectionValue_ / premiumValue_;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>cdsoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Stamm
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/cdsoption.hpp>
+#include <ql/experimental/credit/blackcdsoptionengine.hpp>
+#include <ql/exercise.hpp>
+#include <ql/quotes/simplequote.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        class ImpliedVolHelper {
+          public:
+            ImpliedVolHelper(
+                   const CdsOption& cdsoption,
+                   const Handle<DefaultProbabilityTermStructure>& probability,
+                   Real recoveryRate,
+                   const Handle<YieldTermStructure>& termStructure,
+                   Real targetValue)
+            : targetValue_(targetValue), vol_(ext::make_shared<SimpleQuote>(0.0)) {
+
+                Handle<Quote> h(vol_);
+                engine_ = ext::shared_ptr<PricingEngine>(
+                           new BlackCdsOptionEngine(probability, recoveryRate,
+                                                    termStructure, h));
+                cdsoption.setupArguments(engine_->getArguments());
+
+                results_ =
+                    dynamic_cast<const Instrument::results*>(
+                                                       engine_->getResults());
+            }
+            Real operator()(Volatility x) const {
+                vol_->setValue(x);
+                engine_->calculate();
+                return results_->value-targetValue_;
+            }
+          private:
+            ext::shared_ptr<PricingEngine> engine_;
+            Real targetValue_;
+            ext::shared_ptr<SimpleQuote> vol_;
+            const Instrument::results* results_;
+        };
+
+    }
+
+
+    CdsOption::CdsOption(const ext::shared_ptr<CreditDefaultSwap>& swap,
+                         const ext::shared_ptr<Exercise>& exercise,
+                         bool knocksOut)
+    : Option(ext::shared_ptr<Payoff>(new NullPayoff), exercise),
+      swap_(swap), knocksOut_(knocksOut) {
+        QL_REQUIRE(swap->side() == Protection::Buyer || knocksOut_,
+                   "receiver CDS options must knock out");
+        QL_REQUIRE(!swap->upfront(), "underlying must be running-spread only");
+        registerWith(swap_);
+    }
+
+    bool CdsOption::isExpired () const {
+        return detail::simple_event(exercise_->dates().back()).hasOccurred();
+    }
+
+    void CdsOption::setupExpired() const {
+        Instrument::setupExpired();
+        riskyAnnuity_ = 0.0;
+    }
+
+    void CdsOption::setupArguments(PricingEngine::arguments* args) const {
+        swap_->setupArguments(args);
+        Option::setupArguments(args);
+
+        auto* arguments = dynamic_cast<CdsOption::arguments*>(args);
+
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->swap      = swap_;
+        arguments->knocksOut = knocksOut_;
+    }
+
+    void CdsOption::fetchResults(const PricingEngine::results* r) const {
+        Option::fetchResults(r);
+        const auto* results = dynamic_cast<const CdsOption::results*>(r);
+        QL_ENSURE(results != nullptr, "wrong results type");
+        riskyAnnuity_ = results->riskyAnnuity;
+    }
+
+
+
+    Rate CdsOption::atmRate() const{
+        return swap_->fairSpread();
+    }
+
+    Real CdsOption::riskyAnnuity() const {
+        calculate();
+        QL_REQUIRE(riskyAnnuity_ != Null<Real>(), "risky annuity not provided");
+        return riskyAnnuity_;
+    }
+
+    Volatility CdsOption::impliedVolatility(
+                   Real targetValue,
+                   const Handle<YieldTermStructure>& termStructure,
+                   const Handle<DefaultProbabilityTermStructure>& probability,
+                   Real recoveryRate,
+                   Real accuracy,
+                   Size maxEvaluations,
+                   Volatility minVol,
+                   Volatility maxVol) const {
+        calculate();
+        QL_REQUIRE(!isExpired(), "instrument expired");
+
+        Volatility guess = 0.10;
+
+        ImpliedVolHelper f(*this, probability, recoveryRate,
+                           termStructure, targetValue);
+        Brent solver;
+        solver.setMaxEvaluations(maxEvaluations);
+        return solver.solve(f, accuracy, guess, minVol, maxVol);
+    }
+
+
+
+    void CdsOption::arguments::validate() const {
+        CreditDefaultSwap::arguments::validate();
+        Option::arguments::validate();
+        QL_REQUIRE(swap, "CDS not set");
+        QL_REQUIRE(exercise, "exercise not set");
+    }
+
+    void CdsOption::results::reset() {
+        Option::results::reset();
+        riskyAnnuity = Null<Real>();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>correlationstructure.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/correlationstructure.hpp>
+
+namespace QuantLib {
+
+    CorrelationTermStructure::CorrelationTermStructure(
+        const Calendar& cal,
+        BusinessDayConvention bdc,
+        const DayCounter& dc)
+    : TermStructure(dc), bdc_(bdc){
+        calendar_ = cal;
+    }
+
+    CorrelationTermStructure::CorrelationTermStructure(
+        Natural settlementDays,
+        const Calendar& cal,
+        BusinessDayConvention bdc,
+        const DayCounter& dc)
+    : TermStructure(settlementDays, cal, dc), bdc_(bdc){ }
+
+}
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>defaultevent.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 StatPro Italia srl
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/defaultevent.hpp>
+#include <ql/experimental/credit/recoveryratequote.hpp>
+#include <ql/patterns/visitor.hpp>
+#include <ql/settings.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    Date DefaultEvent::date() const {
+        return defaultDate_;
+    }
+
+    void DefaultEvent::accept(AcyclicVisitor& v) {
+        auto* v1 = dynamic_cast<Visitor<DefaultEvent>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            Event::accept(v);
+    }
+
+    // They will be sorted by settlement date
+    Date DefaultEvent::DefaultSettlement::date() const {
+        return settlementDate_;
+    }
+
+    void DefaultEvent::DefaultSettlement::accept(AcyclicVisitor& v) {
+        auto* v1 = dynamic_cast<Visitor<DefaultEvent::DefaultSettlement>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            Event::accept(v);
+    }
+
+    DefaultEvent::DefaultSettlement::DefaultSettlement(
+        const Date& date,
+        const std::map<Seniority, Real>& recoveryRates )
+    : settlementDate_(date), recoveryRates_(recoveryRates) {
+        QL_REQUIRE(recoveryRates.find(NoSeniority) ==
+            recoveryRates.end(),
+            "NoSeniority is not a valid realized seniority.");
+    }
+
+    DefaultEvent::DefaultSettlement::DefaultSettlement(
+        const Date& date,
+        Seniority seniority,
+        const Real recoveryRate)
+    : settlementDate_(date), recoveryRates_(makeIsdaConvMap()) {
+        if (seniority == NoSeniority) {
+            for (auto& i : recoveryRates_) {
+                i.second = recoveryRate;
+            }
+        } else {
+            recoveryRates_[seniority] = recoveryRate;
+        }
+    }
+
+    Real DefaultEvent::DefaultSettlement::recoveryRate(
+        Seniority sen) const {
+        // expensive require cause called often...... fix me
+        QL_REQUIRE(sen != NoSeniority,
+            "NoSeniority is not valid for recovery rate request.");
+        auto itmatch = recoveryRates_.find(sen);
+        if(itmatch != recoveryRates_.end()) {
+            return itmatch->second;
+        }else{
+            return Null<Real>();
+        }
+    }
+
+    DefaultEvent::DefaultEvent(const Date& creditEventDate,
+                               const DefaultType& atomicEvType,
+                               Currency curr,
+                               Seniority bondsSen,
+                               // Settlement information:
+                               const Date& settleDate,
+                               const std::map<Seniority, Real>& recoveryRates)
+    : bondsCurrency_(std::move(curr)), defaultDate_(creditEventDate), eventType_(atomicEvType),
+      bondsSeniority_(bondsSen),
+      defSettlement_(settleDate, recoveryRates.empty() ? makeIsdaConvMap() : recoveryRates) {
+        if(settleDate != Null<Date>()) {// has settled
+            QL_REQUIRE(settleDate >= creditEventDate,
+              "Settlement date should be after default date.");
+            QL_REQUIRE(recoveryRates.find(bondsSen) != recoveryRates.end(),
+              "Settled events must contain the seniority of the default");
+        }
+    }
+
+    DefaultEvent::DefaultEvent(const Date& creditEventDate,
+                               const DefaultType& atomicEvType,
+                               Currency curr,
+                               Seniority bondsSen,
+                               // Settlement information:
+                               const Date& settleDate,
+                               Real recoveryRate)
+    : bondsCurrency_(std::move(curr)), defaultDate_(creditEventDate), eventType_(atomicEvType),
+      bondsSeniority_(bondsSen), defSettlement_(settleDate, bondsSen, recoveryRate) {
+        if(settleDate != Null<Date>()) {
+            QL_REQUIRE(settleDate >= creditEventDate,
+            "Settlement date should be after default date.");
+        }
+    }
+
+    bool DefaultEvent::matchesDefaultKey(
+        const DefaultProbKey& contractKey) const {
+        if(bondsCurrency_ != contractKey.currency()) return false;
+        // a contract with NoSeniority matches all events
+        if((bondsSeniority_ != contractKey.seniority())
+            && (contractKey.seniority() != NoSeniority))
+            return false;
+        // loop on all event types in the contract and chek if we match any,
+        //   calls derived types
+        for(Size i=0; i<contractKey.size(); i++) {
+            if(this->matchesEventType(contractKey.eventTypes()[i])) return true;
+        }
+        return false;
+    }
+
+
+
+    bool operator==(const DefaultEvent& lhs, const DefaultEvent& rhs) {
+        return (lhs.currency() == rhs.currency()) &&
+            (lhs.defaultType() == rhs.defaultType()) &&
+            (lhs.date() == rhs.date()) &&
+            (lhs.eventSeniority() == rhs.eventSeniority());
+    }
+
+
+    bool FailureToPayEvent::matchesEventType(
+        const ext::shared_ptr<DefaultType>& contractEvType) const {
+        ext::shared_ptr<FailureToPay> eveType =
+            ext::dynamic_pointer_cast<FailureToPay>(contractEvType);
+        // this chekcs the atomic types, no need to call parents method
+        if(!eveType) return false;
+        if(defaultedAmount_ < eveType->amountRequired()) return false;
+        Date today = Settings::instance().evaluationDate();
+        return this->hasOccurred(today - eveType->gracePeriod(), true);
+    }
+
+
+
+    FailureToPayEvent::FailureToPayEvent(const Date& creditEventDate,
+                                         const Currency& curr,
+                                         Seniority bondsSen,
+                                         Real defaultedAmount,
+                                         // Settlement information:
+                                         const Date& settleDate,
+                                         const std::map<Seniority, Real>&
+                                            recoveryRates)
+    : DefaultEvent(creditEventDate,
+                   DefaultType(AtomicDefault::FailureToPay,
+                               Restructuring::XR),
+                   curr,
+                   bondsSen,
+                   settleDate,
+                   recoveryRates),
+      defaultedAmount_(defaultedAmount) { }
+
+    FailureToPayEvent::FailureToPayEvent(const Date& creditEventDate,
+                                         const Currency& curr,
+                                         Seniority bondsSen,
+                                         Real defaultedAmount,
+                                         // Settlement information:
+                                         const Date& settleDate,
+                                         Real recoveryRates)
+    : DefaultEvent(creditEventDate,
+                   DefaultType(AtomicDefault::FailureToPay,
+                               Restructuring::XR),
+                   curr,
+                   bondsSen,
+                   settleDate,
+                   recoveryRates),
+      defaultedAmount_(defaultedAmount) { }
+
+
+
+    BankruptcyEvent::BankruptcyEvent(const Date& creditEventDate,
+                                     const Currency& curr,
+                                     Seniority bondsSen,
+                                     // Settlement information:
+                                     const Date& settleDate,
+                                     const std::map<Seniority, Real>&
+                                        recoveryRates)
+    : DefaultEvent(creditEventDate,
+                   DefaultType(AtomicDefault::Bankruptcy,
+                               Restructuring::XR),
+                   curr,
+                   bondsSen,
+                   settleDate,
+                   recoveryRates) {
+        if(hasSettled()) {
+            QL_REQUIRE(recoveryRates.size() == makeIsdaConvMap().size(),
+              "Bankruptcy event should have settled for all seniorities.");
+        }
+    }
+
+    BankruptcyEvent::BankruptcyEvent(const Date& creditEventDate,
+                                     const Currency& curr,
+                                     Seniority bondsSen,
+                                     // Settlement information:
+                                     const Date& settleDate,
+                                     // means same for all
+                                     Real recoveryRates)
+    : DefaultEvent(creditEventDate,
+                   DefaultType(AtomicDefault::Bankruptcy,
+                               Restructuring::XR),
+                   curr,
+                   bondsSen,
+                   settleDate,
+                   recoveryRates) { }
+
+}
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>defaultprobabilitykey.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 StatPro Italia srl
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/defaultprobabilitykey.hpp>
+#if defined(QL_PATCH_MSVC)
+#pragma warning(push)
+#pragma warning(disable:4181)
+#endif
+#include <algorithm>
+#include <set>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+
+        struct points_to {
+            explicit points_to(const DefaultType& t) : t(t) {}
+            bool operator()(const ext::shared_ptr<DefaultType>& p) const {
+                return *p == t;
+            }
+            const DefaultType& t;
+        };
+        
+    }
+    
+    bool operator==(const DefaultProbKey& lhs, const DefaultProbKey& rhs) {
+        if(lhs.seniority() != rhs.seniority()) return false;
+        if(lhs.currency() != rhs.currency()) return false;
+
+        Size mySize = rhs.eventTypes().size();
+        if(mySize != lhs.eventTypes().size()) return false;
+        // the all types must be equal in the weak sense.
+        for(Size i=0; i<mySize; i++) {
+            if(std::find_if(lhs.eventTypes().begin(), lhs.eventTypes().end(),
+                            points_to(*rhs.eventTypes()[i])) == lhs.eventTypes().end())
+                return false;
+        }// naah, I bet this can be done with a double lambda
+        return true;
+    }
+
+    DefaultProbKey::DefaultProbKey() : obligationCurrency_(Currency()) {}
+
+    DefaultProbKey::DefaultProbKey(std::vector<ext::shared_ptr<DefaultType> > eventTypes,
+                                   Currency cur,
+                                   Seniority sen)
+    : eventTypes_(std::move(eventTypes)), obligationCurrency_(std::move(cur)), seniority_(sen) {
+        std::set<AtomicDefault::Type> buffer;
+        Size numEvents = eventTypes_.size();
+        for(Size i=0; i< numEvents; i++)
+            buffer.insert(eventTypes_[i]->defaultType());
+        QL_REQUIRE(buffer.size() == numEvents,
+            "Duplicated event type in contract definition");
+    }
+
+    NorthAmericaCorpDefaultKey::NorthAmericaCorpDefaultKey(
+        const Currency& currency,
+        Seniority sen,
+        Period graceFailureToPay,
+        Real amountFailure,
+        Restructuring::Type resType)
+    : DefaultProbKey(std::vector<ext::shared_ptr<DefaultType> >(),
+                     currency, sen) {
+        eventTypes_.push_back( ext::shared_ptr<DefaultType>(
+            new FailureToPay(graceFailureToPay,
+            amountFailure)));
+        // no specifics for Bankruptcy
+        eventTypes_.push_back( ext::make_shared<DefaultType>(
+            AtomicDefault::Bankruptcy,
+                            Restructuring::XR));
+        if(resType != Restructuring::NoRestructuring)
+            eventTypes_.push_back( ext::make_shared<DefaultType>(
+                AtomicDefault::Restructuring, resType));
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>defaulttype.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 StatPro Italia srl
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/defaulttype.hpp>
+#include <ql/errors.hpp>
+
+namespace QuantLib {
+
+    DefaultType::DefaultType(AtomicDefault::Type defType,
+                             Restructuring::Type restType)
+    : defTypes_(defType), restrType_(restType) {
+        // checks restruct and norestruct are never together.
+        QL_REQUIRE((defType == AtomicDefault::Restructuring) != // xor
+                   (restrType_ == Restructuring::NoRestructuring),
+                   "Incoherent credit event type definition.");
+    }
+
+    bool operator==(const DefaultType& lhs, const DefaultType& rhs) {
+        return (lhs.defaultType() == rhs.defaultType()) &&
+            (lhs.restructuringType() == rhs.restructuringType());
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>distribution.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file distribution.cpp
+    \brief Discretized probability density and cumulative probability
+ */
+
+#include <ql/experimental/credit/distribution.hpp>
+#include <ql/math/comparison.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/errors.hpp>
+#include <algorithm>
+#include <functional>
+
+namespace QuantLib {
+
+    //-------------------------------------------------------------------------
+    Distribution::Distribution (int nBuckets, Real xmin, Real xmax)
+    //-------------------------------------------------------------------------
+        : size_(nBuckets),
+          xmin_(xmin), xmax_(xmax), count_(nBuckets),
+          x_(nBuckets,0), dx_(nBuckets,0),
+          density_(nBuckets,0),
+          cumulativeDensity_(nBuckets,0),
+          excessProbability_(nBuckets,0),
+          cumulativeExcessProbability_(nBuckets,0),
+          average_(nBuckets,0),
+          overFlow_(0), underFlow_(0),
+          isNormalized_(false) {
+        for (int i = 0; i < nBuckets; i++) {
+            dx_[i] = (xmax - xmin) / nBuckets;
+            x_[i] = (i == 0 ? xmin : x_[i-1] + dx_[i-1]);
+        }
+        // ensure we match exactly the domain, otherwise we might fail the
+        //   locate test because of precission mismatches
+        dx_.back() = xmax - x_.back();
+    }
+
+    //-------------------------------------------------------------------------
+    int Distribution::locate (Real x) {
+    //-------------------------------------------------------------------------
+        QL_REQUIRE ((x >= x_.front() || close(x, x_.front())) &&
+                    (x <= x_.back() + dx_.back()
+                     || close(x, x_.back() + dx_.back())),
+                    "coordinate " << x
+                    << " out of range [" << x_.front() << "; "
+                    << x_.back() + dx_.back() << "]");
+        for (Size i = 0; i < x_.size(); i++) {
+            if (x_[i] > x)
+                return i - 1;
+        }
+        return x_.size() - 1;
+    }
+
+    //-------------------------------------------------------------------------
+    Real Distribution::dx (Real x) {
+    //-------------------------------------------------------------------------
+        int i = locate (x);
+        return dx_[i];
+    }
+
+    //-------------------------------------------------------------------------
+    void Distribution::add (Real value) {
+    //-------------------------------------------------------------------------
+        isNormalized_ = false;
+        if (value < x_.front()) underFlow_++;
+        else {
+            for (Size i = 0; i < count_.size(); i++) {
+                if (x_[i] + dx_[i] > value) {
+                    count_[i]++;
+                    average_[i] += value;
+                    return;
+                }
+            }
+            overFlow_++;
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    void Distribution::addDensity (int bucket, Real value) {
+    //-------------------------------------------------------------------------
+        QL_REQUIRE (bucket >= 0 && bucket < size_, "bucket out of range");
+        isNormalized_ = false;
+        density_[bucket] += value;
+    }
+
+    //-------------------------------------------------------------------------
+    void Distribution::addAverage (int bucket, Real value) {
+    //-------------------------------------------------------------------------
+        QL_REQUIRE (bucket >= 0 && bucket < size_, "bucket out of range");
+        isNormalized_ = false;
+        average_[bucket] += value;
+    }
+
+    //-------------------------------------------------------------------------
+    void Distribution::normalize () {
+    //-------------------------------------------------------------------------
+        if (isNormalized_)
+            return;
+
+        int count = underFlow_ + overFlow_;
+        for (int i = 0; i < size_; i++)
+            count += count_[i];
+
+        excessProbability_[0] = 1.0;
+        cumulativeExcessProbability_[0] = 0.0;
+        for (int i = 0; i < size_; i++) {
+            if (count > 0) {
+                density_[i] = 1.0 / dx_[i] * count_[i] / count;
+                if (count_[i] > 0)
+                    average_[i] /= count_[i];
+            }
+            if (density_[i] == 0.0)
+                average_[i] = x_[i] + dx_[i]/2;
+
+            cumulativeDensity_[i] = density_[i] * dx_[i];
+            if (i > 0) {
+                cumulativeDensity_[i] += cumulativeDensity_[i-1];
+                excessProbability_[i] = 1.0 - cumulativeDensity_[i-1];
+//                     excessProbability_[i] = excessProbability_[i-1]
+//                         - density_[i-1] * dx_[i-1];
+//                     cumulativeExcessProbability_[i]
+//                         = (excessProbability_[i-1] +
+//                            excessProbability_[i]) / 2 * dx_[i-1]
+//                         + cumulativeExcessProbability_[i-1];
+                cumulativeExcessProbability_[i]
+                    = excessProbability_[i-1] * dx_[i-1]
+                    + cumulativeExcessProbability_[i-1];
+            }
+        }
+
+        isNormalized_ = true;
+    }
+
+    //-------------------------------------------------------------------------
+    Real Distribution::confidenceLevel (Real quantil) {
+    //-------------------------------------------------------------------------
+        normalize();
+        for (int i = 0; i < size_; i++) {
+            if (cumulativeDensity_[i] > quantil)
+                return x_[i] + dx_[i];
+        }
+        return x_.back() + dx_.back();
+    }
+
+    //-------------------------------------------------------------------------
+    Real Distribution::expectedValue () {
+    //-------------------------------------------------------------------------
+        normalize();
+        Real expected = 0;
+        for (int i = 0; i < size_; i++) {
+            Real x = x_[i] + dx_[i]/2;
+            expected += x * dx_[i] * density_[i];
+        }
+        return expected;
+    }
+
+    //-------------------------------------------------------------------------
+    Real Distribution::trancheExpectedValue (Real a, Real d) {
+    //-------------------------------------------------------------------------
+        normalize();
+        Real expected = 0;
+        for (int i = 0; i < size_; i++) {
+            Real x = x_[i] + dx_[i]/2;
+            if (x < a)
+                continue;
+            if (x > d)
+                break;
+            expected += (x - a) * dx_[i] * density_[i];
+        }
+
+        expected += (d - a) * (1.0 - cumulativeDensity (d));
+
+        return expected;
+    }
+
+//     Real Distribution::cumulativeExcessProbability (Real a, Real b) {
+//         //normalize();
+//         Real integral = 0.0;
+//         for (int i = 0; i < size_; i++) {
+//             if (x_[i] >= b) break;
+//             if (x_[i] >= a)
+//                 integral += dx_[i] * excessProbability_[i];
+//         }
+//         return integral;
+//     }
+
+    //-------------------------------------------------------------------------
+    Real Distribution::cumulativeExcessProbability (Real a, Real b) {
+    //-------------------------------------------------------------------------
+        normalize();
+        QL_REQUIRE (b <= xmax_,
+                 "end of interval " << b << " out of range ["
+                 << xmin_ << ", " << xmax_ << "]");
+        QL_REQUIRE (a >= xmin_,
+                 "start of interval " << a << " out of range ["
+                 << xmin_ << ", " << xmax_ << "]");
+
+        int i = locate (a);
+        int j = locate (b);
+        return cumulativeExcessProbability_[j]-cumulativeExcessProbability_[i];
+    }
+
+    //-------------------------------------------------------------------------
+    Real Distribution::cumulativeDensity (Real x) {
+    //-------------------------------------------------------------------------
+        Real tiny = dx_.back() * 1e-3;
+        QL_REQUIRE (x > 0, "x must be positive");
+        normalize();
+        for (int i = 0; i < size_; i++) {
+            if (x_[i] + dx_[i] + tiny >= x)
+                return ((x - x_[i]) * cumulativeDensity_[i]
+                     + (x_[i] + dx_[i] - x) * cumulativeDensity_[i-1]) / dx_[i];
+        }
+        QL_FAIL ("x = " << x << " beyond distribution cutoff "
+                 << x_.back() + dx_.back());
+    }
+
+    //-------------------------------------------------------------------------
+    // Dangerous to perform calls to members after this; transform and clone?
+    void Distribution::tranche (Real attachmentPoint, Real detachmentPoint) {
+    //-------------------------------------------------------------------------
+        QL_REQUIRE (attachmentPoint < detachmentPoint,
+                 "attachment >= detachment point");
+        QL_REQUIRE (x_.back() > attachmentPoint && 
+                    x_.back()+dx_.back() >= detachmentPoint,
+                 "attachment or detachment too large");
+
+        normalize();
+
+        // shift
+        while (x_[0] < attachmentPoint) {
+            x_.erase(x_.begin());
+            dx_.erase(dx_.begin());
+            count_.erase(count_.begin());
+            density_.erase(density_.begin());
+            cumulativeDensity_.erase(cumulativeDensity_.begin());
+            excessProbability_.erase(excessProbability_.begin());
+        }
+
+        // remove losses over detachment point:
+        auto detachPosit = std::find_if(x_.begin(), x_.end(), greater_than<Real>(detachmentPoint));
+        if(detachPosit != x_.end())
+            x_.erase(detachPosit + 1, x_.end());
+
+        size_ = x_.size();
+        cumulativeDensity_.erase(cumulativeDensity_.begin() + size_, 
+            cumulativeDensity_.end());
+        cumulativeDensity_.back() = 1.; 
+        count_.erase(count_.begin() + size_, count_.end());
+        dx_.erase(dx_.begin() + size_, dx_.end());
+
+        // truncate
+        for (double& i : x_) {
+            i = std::min(std::max(i - attachmentPoint, 0.), detachmentPoint - attachmentPoint);
+        }
+
+        density_.clear(); 
+        excessProbability_.clear();
+        cumulativeExcessProbability_.clear(); //? reuse?
+        density_.push_back((cumulativeDensity_[0]-0.)/dx_[0]);
+        excessProbability_.push_back(1.);
+        for(Integer i=1; i<size_-1; i++) {
+            excessProbability_.push_back(1.-cumulativeDensity_[i-1]);
+            density_.push_back((cumulativeDensity_[i]-
+                cumulativeDensity_[i-1])/dx_[i]);
+        }
+        excessProbability_.push_back(1.-cumulativeDensity_.back());
+        density_.push_back((1.-cumulativeDensity_.back())/dx_.back());
+    }
+
+    //-------------------------------------------------------------------------
+    Distribution ManipulateDistribution::convolve (const Distribution& d1,
+                                                   const Distribution& d2) {
+    //-------------------------------------------------------------------------
+        // force equal constant bucket sizes
+        QL_REQUIRE (d1.dx_[0] == d2.dx_[0], "bucket sizes differ in d1 and d2");
+        for (Size i = 1; i < d1.size(); i++)
+            QL_REQUIRE (d1.dx_[i] == d1.dx_[i-1], "bucket size varies in d1");
+        for (Size i = 1; i < d2.size(); i++)
+            QL_REQUIRE (d2.dx_[i] == d2.dx_[i-1], "bucket size varies in d2");
+
+        // force offset 0
+        QL_REQUIRE (d1.xmin_ == 0.0 && d2.xmin_ == 0.0,
+                 "distributions offset larger than 0");
+
+        Distribution dist(d1.size() + d2.size() - 1,
+                          0.0, // assuming both distributions have xmin = 0
+                          d1.xmax_ + d2.xmax_);
+
+        for (Size i1 = 0; i1 < d1.size(); i1++) {
+            Real dx = d1.dx_[i1];
+            for (Size i2 = 0; i2 < d2.size(); i2++)
+                dist.density_[i1+i2] = d1.density_[i1] * d2.density_[i2] * dx;
+        }
+
+        // update cumulated and excess
+        dist.excessProbability_[0] = 1.0;
+        for (Size i = 0; i < dist.size(); i++) {
+            dist.cumulativeDensity_[i] = dist.density_[i] * dist.dx_[i];
+            if (i > 0) {
+                dist.cumulativeDensity_[i] += dist.cumulativeDensity_[i-1];
+                dist.excessProbability_[i] = dist.excessProbability_[i-1]
+                    - dist.density_[i-1] * dist.dx_[i-1];
+            }
+        }
+
+        return dist;
+    }
+
+
+    //-------------------------------------------------------------------------
+    Real Distribution::expectedShortfall (Real percValue) {
+    //-------------------------------------------------------------------------
+        QL_REQUIRE(percValue >= 0. && percValue <= 1., 
+            "Incorrect percentile");
+        normalize();
+        Real expected = 0;
+        Integer iVal = locate(confidenceLevel(percValue));
+
+        if(iVal == size_-1) return x_.back();
+
+        for (int i = iVal; i < size_; i++)
+            expected += x_[i] * 
+                (cumulativeDensity_[i] - cumulativeDensity_[i-1]);
+        return expected/(1.-cumulativeDensity_.at(iVal));
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="11">
+    <source>gaussianlhplossmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+ Copyright (C) 2009, 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/gaussianlhplossmodel.hpp>
+
+#ifndef QL_PATCH_SOLARIS
+
+
+using std::sqrt;
+
+namespace QuantLib {
+
+    CumulativeNormalDistribution const GaussianLHPLossModel::phi_ = 
+        CumulativeNormalDistribution();
+
+    GaussianLHPLossModel::GaussianLHPLossModel(
+            const Handle<Quote>& correlQuote,
+            const std::vector<Handle<RecoveryRateQuote> >& quotes)
+        : LatentModel<GaussianCopulaPolicy>(sqrt(correlQuote->value()),
+            quotes.size(),
+            //g++ complains default value not seen as typename
+            GaussianCopulaPolicy::initTraits()),
+          sqrt1minuscorrel_(std::sqrt(1.-correlQuote->value())),
+          correl_(correlQuote),
+          rrQuotes_(quotes), 
+          beta_(sqrt(correlQuote->value())),
+          biphi_(-sqrt(correlQuote->value()))
+        {
+            registerWith(correl_);
+            for (const auto& quote : quotes)
+                registerWith(quote);
+    }
+
+    GaussianLHPLossModel::GaussianLHPLossModel(
+            Real correlation,
+            const std::vector<Real>& recoveries)
+        : LatentModel<GaussianCopulaPolicy>(sqrt(correlation),
+            recoveries.size(),
+            //g++ complains default value not seen as typename
+            GaussianCopulaPolicy::initTraits()),
+          sqrt1minuscorrel_(std::sqrt(1.-correlation)),
+          correl_(Handle<Quote>(ext::make_shared<SimpleQuote>(correlation))),
+          beta_(sqrt(correlation)),
+          biphi_(-sqrt(correlation))
+        {
+        for (double recoverie : recoveries)
+            rrQuotes_.emplace_back(ext::make_shared<RecoveryRateQuote>(recoverie));
+        }
+
+        GaussianLHPLossModel::GaussianLHPLossModel(
+            const Handle<Quote>& correlQuote,
+            const std::vector<Real>& recoveries)
+        : LatentModel<GaussianCopulaPolicy>(sqrt(correlQuote->value()),
+            recoveries.size(),
+            //g++ complains default value not seen as typename
+            GaussianCopulaPolicy::initTraits()),
+          sqrt1minuscorrel_(std::sqrt(1.-correlQuote->value())),
+          correl_(correlQuote),
+          beta_(sqrt(correlQuote->value())),
+          biphi_(-sqrt(correlQuote->value()))
+        {
+            registerWith(correl_);
+            for (double recoverie : recoveries)
+                rrQuotes_.emplace_back(ext::make_shared<RecoveryRateQuote>(recoverie));
+        }
+
+
+        Real GaussianLHPLossModel::expectedTrancheLossImpl(
+            Real remainingNot, // << at the given date 'd'
+            Real prob, // << at the given date 'd'
+            Real averageRR, // << at the given date 'd'
+            // these are percentual values:
+            Real attachLimit, Real detachLimit) const 
+        {
+
+            if (attachLimit >= detachLimit) return 0.;// or is it an error?
+            // expected remaining notional:
+            if (remainingNot == 0.) return 0.;
+
+            const Real one = 1.0 - 1.0e-12;  // FIXME DUE TO THE INV CUMUL AT 1
+            const Real k1 = std::min(one, attachLimit /(1.0 - averageRR)
+                ) + QL_EPSILON;
+            const Real k2 = std::min(one, detachLimit /(1.0 - averageRR)
+                ) + QL_EPSILON;
+
+            if (prob > 0) {
+                const Real ip = InverseCumulativeNormal::standard_value(prob);
+                const Real invFlightK1 = 
+                    (ip-sqrt1minuscorrel_ * 
+                        InverseCumulativeNormal::standard_value(k1))/beta_;
+                const Real invFlightK2 = (ip-sqrt1minuscorrel_*
+                    InverseCumulativeNormal::standard_value(k2))/beta_;
+
+                return remainingNot * (detachLimit * phi_(invFlightK2) 
+                    - attachLimit * phi_(invFlightK1) + (1.-averageRR) * 
+                    (biphi_(ip, -invFlightK2) - biphi_(ip, -invFlightK1)) );
+            }
+            else return 0.0;
+        }
+
+        Real GaussianLHPLossModel::probOverLoss(const Date& d,
+            Real remainingLossFraction) const {
+            // these test goes into basket<<<<<<<<<<<<<<<<<<<<<<<<<
+            QL_REQUIRE(remainingLossFraction >=0., "Incorrect loss fraction.");
+            QL_REQUIRE(remainingLossFraction <=1., "Incorrect loss fraction.");
+
+            Real remainingAttachAmount = basket_->remainingAttachmentAmount();
+            Real remainingDetachAmount = basket_->remainingDetachmentAmount();
+            // live unerlying portfolio loss fraction (remaining portf fraction)
+
+            const Real remainingBasktNot = basket_->remainingNotional(d);
+            const Real attach = 
+                std::min(remainingAttachAmount / remainingBasktNot, 1.);
+            const Real detach = 
+                std::min(remainingDetachAmount / remainingBasktNot, 1.);
+
+            Real portfFract = 
+                attach + remainingLossFraction * (detach - attach);
+
+            Real averageRR = averageRecovery(d);
+            Real maxAttLossFract = (1.-averageRR);
+            if(portfFract > maxAttLossFract) return 0.;
+
+            // for non-equity losses add the probability jump at zero tranche 
+            //   losses (since this method returns prob of losing more or 
+            //   equal to)
+            if(portfFract <= QL_EPSILON) return 1.;
+
+            Probability prob = averageProb(d);
+
+            Real ip = InverseCumulativeNormal::standard_value(prob);
+            Real invFlightK = (ip-sqrt1minuscorrel_*
+                InverseCumulativeNormal::standard_value(portfFract
+                    /(1.-averageRR)))/beta_;
+
+            return  phi_(invFlightK);//probOver
+        }
+
+        Real GaussianLHPLossModel::expectedShortfall(const Date& d, 
+            Probability perctl) const 
+        {
+            // loss as a fraction of the live portfolio
+            Real ptflLossPerc = percentilePortfolioLossFraction(d, perctl);
+            Real remainingAttachAmount = basket_->remainingAttachmentAmount();
+            Real remainingDetachAmount = basket_->remainingDetachmentAmount();
+
+            const Real remainingNot = basket_->remainingNotional(d);
+            const Real attach = 
+                std::min(remainingAttachAmount / remainingNot, 1.);
+            const Real detach = 
+                std::min(remainingDetachAmount / remainingNot, 1.);
+
+            if(ptflLossPerc >= detach-QL_EPSILON) 
+                return remainingNot * (detach-attach);//equivalent
+
+            Real maxLossLevel = std::max(attach, ptflLossPerc);
+            Probability prob = averageProb(d);
+            Real averageRR = averageRecovery(d);
+
+            Real valA = expectedTrancheLossImpl(remainingNot, prob, 
+                averageRR, maxLossLevel, detach);
+            Real valB = // probOverLoss(d, maxLossLevel);//in live tranche units
+            // from fraction of basket notional to fraction of tranche notional
+                probOverLoss(d, std::min(std::max((maxLossLevel - attach)
+                /(detach - attach), 0.), 1.));
+            return ( valA + (maxLossLevel - attach) * remainingNot * valB )
+                / (1.-perctl);
+        }
+
+        Real GaussianLHPLossModel::percentilePortfolioLossFraction(
+            const Date& d, Real perctl) const 
+        {
+            // this test goes into basket<<<<<<<<<<<<<<<<<<<<<<<<<
+            QL_REQUIRE(perctl >= 0. && perctl <=1., 
+                "Percentile argument out of bounds.");
+
+            if(perctl==0.) return 0.;// portfl == attach
+            if(perctl==1.) perctl = 1. - QL_EPSILON; // portfl == detach
+
+            return (1.-averageRecovery(d)) * 
+                phi_( ( InverseCumulativeNormal::standard_value(averageProb(d))
+                    + beta_ * InverseCumulativeNormal::standard_value(perctl) )
+                        /sqrt1minuscorrel_);
+        }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="12">
+    <source>integralcdoengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+ Copyright (C) 2009, 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/integralcdoengine.hpp>
+
+#ifndef QL_PATCH_SOLARIS
+
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+
+namespace QuantLib {
+
+    void IntegralCDOEngine::calculate() const {
+        Date today = Settings::instance().evaluationDate();
+
+        results_.protectionValue = 0.0;
+        results_.premiumValue = 0.0;
+        results_.upfrontPremiumValue = 0.0;
+        results_.error = 0;
+        results_.expectedTrancheLoss.clear();
+        // todo Should be remaining when considering realized loses
+        results_.xMin = arguments_.basket->attachmentAmount();
+        results_.xMax = arguments_.basket->detachmentAmount();
+        results_.remainingNotional = results_.xMax - results_.xMin;
+        const Real inceptionTrancheNotional = 
+            arguments_.basket->trancheNotional();
+
+        // compute expected loss at the beginning of first relevant period
+        Real e1 = 0;
+        // todo add includeSettlement date flows variable to engine.
+        if (!arguments_.normalizedLeg[0]->hasOccurred(today)) 
+             // cast to fixed rate coupon?
+            e1 = arguments_.basket->expectedTrancheLoss(
+                ext::dynamic_pointer_cast<Coupon>(
+                    arguments_.normalizedLeg[0])->accrualStartDate()); 
+        results_.expectedTrancheLoss.push_back(e1);// zero or realized losses?
+
+        for (auto& i : arguments_.normalizedLeg) {
+            if (i->hasOccurred(today)) {
+                // add includeSettlement date flows variable to engine.
+                results_.expectedTrancheLoss.push_back(0.);
+                continue;
+            }
+
+            const ext::shared_ptr<Coupon> coupon = ext::dynamic_pointer_cast<Coupon>(i);
+
+            Date d1 = coupon->accrualStartDate();
+            Date d2 = coupon->date();
+
+            Date d, d0 = d1;
+            Real e2;
+            do {
+                d = NullCalendar().advance(d0 > today ? d0 : today,
+                                           stepSize_);
+                if (d > d2) d = d2;
+
+                e2 = arguments_.basket->expectedTrancheLoss(d);
+
+                results_.premiumValue
+                    // ..check for e2 including past/realized losses
+                    += (inceptionTrancheNotional - e2)
+                    * arguments_.runningRate
+                    * arguments_.dayCounter.yearFraction(d0, d)
+                    * discountCurve_->discount(d);
+
+                // TO DO: Addd default coupon accrual value here-----
+
+                if (e2 < e1) results_.error ++;
+
+                results_.protectionValue
+                    += (e2 - e1) * discountCurve_->discount(d);
+
+                d0 = d;
+                e1 = e2;
+            }
+            while (d < d2);
+            results_.expectedTrancheLoss.push_back(e2);
+        }
+
+        // add includeSettlement date flows variable to engine.
+        if (!arguments_.normalizedLeg[0]->hasOccurred(today))
+            results_.upfrontPremiumValue
+                = inceptionTrancheNotional * arguments_.upfrontRate
+                    * discountCurve_->discount(
+                        ext::dynamic_pointer_cast<Coupon>(
+                            arguments_.normalizedLeg[0])->accrualStartDate());
+
+        if (arguments_.side == Protection::Buyer) {
+            results_.protectionValue *= -1;
+            results_.premiumValue *= -1;
+            results_.upfrontPremiumValue *= -1;
+        }
+
+        results_.value = results_.premiumValue - results_.protectionValue
+            + results_.upfrontPremiumValue;
+        results_.errorEstimate = Null<Real>();
+        // Fair spread GIVEN the upfront
+        Real fairSpread = 0.;
+        if (results_.premiumValue != 0.0) {
+            fairSpread =
+                -(results_.protectionValue + results_.upfrontPremiumValue)
+                  *arguments_.runningRate/results_.premiumValue;
+        }
+
+        results_.additionalResults["fairPremium"] = fairSpread;
+        results_.additionalResults["premiumLegNPV"] = 
+            results_.premiumValue + results_.upfrontPremiumValue;
+        results_.additionalResults["protectionLegNPV"] = 
+            results_.protectionValue;
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="13">
+    <source>integralntdengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/integralntdengine.hpp>
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/experimental/credit/basket.hpp>
+#include <numeric>
+
+namespace QuantLib {
+
+    void IntegralNtdEngine::calculate() const {
+        Date today = Settings::instance().evaluationDate();
+
+        results_.errorEstimate = Null<Real>();
+        results_.value = 0.0;
+        results_.premiumValue = 0.0;
+        results_.upfrontPremiumValue = 0.;
+        Real accrualValue = 0.0;
+        Real claimValue = 0.0;
+        Date d, d0;
+        /* Given the expense of probsBeingNthEvent both in integrable and 
+        monte carlo algorithms this engine tests who to call.
+        Warning: This is not entirely a basket property but of the model too.
+        The basket has to have all notionals equal but it is the model which
+        determines the recovery; having all the market recoveries equal is not
+        enough since we might be using a loss model which is stochastic in the
+        recovery rates.
+        */
+        bool basketIsHomogeneous = true;// hardcoded by now
+
+        for (auto& i : arguments_.premiumLeg) {
+            ext::shared_ptr<FixedRateCoupon> coupon = ext::dynamic_pointer_cast<FixedRateCoupon>(i);
+            Date d = i->date();
+            if (d > discountCurve_->referenceDate()) {
+                /*
+                std::vector<Probability> probsTriggering =
+                    arguments_.basket->probsBeingNthEvent(arguments_.ntdOrder, 
+                        d);
+                Probability defaultProb = 
+                    std::accumulate(probsTriggering.begin(), 
+                    probsTriggering.end(), Real(0.));
+                // OVERKILL???? 1-probAtLeastNEvents is enough
+
+*/
+                // prob of contract not having been triggered by date of payment
+                Probability probNonTriggered = 
+                    1. - arguments_.basket->probAtLeastNEvents(
+                        arguments_.ntdOrder, d);
+
+                results_.premiumValue +=
+                    i->amount() * discountCurve_->discount(d) * probNonTriggered;
+                ////   * (1.0 - defaultProb);
+
+                if (coupon->accrualStartDate() >= 
+                    discountCurve_->referenceDate())
+                    d = coupon->accrualStartDate();
+                else
+                    d = discountCurve_->referenceDate();
+
+                // do steps of specified size
+                d0 = d;
+                Period stepSize = integrationStepSize_;
+/*
+                probsTriggering =
+                    arguments_.basket->probsBeingNthEvent(arguments_.ntdOrder, 
+                    ///////REDUNDANT?
+                        d0);
+                Probability defProb0 = std::accumulate(probsTriggering.begin(), 
+                ///OVERKILL????
+                    probsTriggering.end(), Real(0.));
+*/
+                Probability defProb0 = arguments_.basket->probAtLeastNEvents(
+                        arguments_.ntdOrder, d0);
+                std::vector<Probability> probsTriggering, probsTriggering1;
+                do {
+                    DiscountFactor disc = discountCurve_->discount(d);
+
+                    Probability defProb1;
+                    if(basketIsHomogeneous) {//take test out of the while loop
+                        defProb1 = arguments_.basket->probAtLeastNEvents(
+                            arguments_.ntdOrder, d);
+                        claimValue -= (defProb1-defProb0)
+                            * arguments_.basket->claim()->amount(d, 
+                                arguments_.notional, 
+                                arguments_.basket->recoveryRate(d, 0))
+                            * disc;
+
+                    }else{
+                        probsTriggering1 =
+                            arguments_.basket->probsBeingNthEvent(
+                                arguments_.ntdOrder, d);
+                        defProb1 = std::accumulate(probsTriggering1.begin(), 
+                            probsTriggering1.end(), Real(0.));
+                        /*Recoveries might differ along names, depending on 
+                        which name is triggering the contract the loss will be 
+                        different  
+                        There is an issue here; MC engines can still be used 
+                        since the prob of triggering the contract can be 
+                        extracted from the simulation from the 
+                        probsBeingNthEvent statistic. Yet, when the RR is 
+                        stochastic the realized value of the RR is the expected 
+                        one subject/conditional to the contract being triggered;
+                        not simply the expected value. For this reason the MC 
+                        can not be used through the statistic but has to consume
+                        the simulations directly.
+                        */
+                        for(Size iName=0; 
+                            iName<arguments_.basket->remainingSize(); 
+                            iName++) 
+                        {
+                            claimValue -= (probsTriggering1[iName]-
+                                probsTriggering[iName])
+                                * arguments_.basket->claim()->amount(d, 
+                                    arguments_.notional,// [iName]! 
+                                    arguments_.basket->recoveryRate(d, iName))
+                                * disc;
+                        }
+                        probsTriggering = probsTriggering1;
+                    }
+
+                    Probability dcfdd = defProb1 - defProb0;
+                    defProb0 = defProb1;
+
+                    if (arguments_.settlePremiumAccrual)
+                        accrualValue += coupon->accruedAmount(d)*disc*dcfdd;
+
+                    d0 = d;
+                    d = d0 + stepSize;
+                    // reduce step size ?
+                    if (stepSize != 1*Days && d > coupon->accrualEndDate()) {
+                        stepSize = 1*Days;
+                        d = d0 + stepSize;
+                    }
+                }
+                while (d <= coupon->accrualEndDate());
+            }
+        }
+
+        // The upfront might be due before the curve ref date...
+        if (!arguments_.premiumLeg[0]->hasOccurred(today))
+            results_.upfrontPremiumValue =
+                arguments_.basket->remainingNotional() 
+                    * arguments_.upfrontRate
+                    * discountCurve_->discount(
+                        ext::dynamic_pointer_cast<FixedRateCoupon>(
+                            arguments_.premiumLeg[0])->accrualStartDate());
+        if (arguments_.side == Protection::Buyer) {
+            results_.premiumValue *= -1;
+            accrualValue *= -1;
+            claimValue *= -1;
+            results_.upfrontPremiumValue *= -1;
+        }
+
+        results_.value = results_.premiumValue + accrualValue + claimValue + 
+            results_.upfrontPremiumValue;
+
+        results_.fairPremium = -arguments_.premiumRate * claimValue 
+            / (results_.premiumValue + accrualValue);
+        // alternatively use results buffers and omit locals.
+        results_.protectionValue = claimValue;
+
+        results_.additionalResults["fairPremium"] = results_.fairPremium;
+        results_.additionalResults["premiumLegNPV"] = 
+            results_.premiumValue + results_.upfrontPremiumValue;
+        results_.additionalResults["protectionLegNPV"] = 
+            results_.protectionValue;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="14">
+    <source>issuer.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008, 2009 StatPro Italia srl
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/issuer.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+        bool between(const ext::shared_ptr<DefaultEvent>& e,
+                     const Date& start,
+                     const Date& end,
+                     bool includeRefDate = false) {
+            return !e->hasOccurred(start, includeRefDate) &&
+                e->hasOccurred(end, includeRefDate);
+        }
+    }
+
+    Issuer::Issuer(std::vector<std::pair<DefaultProbKey, Handle<DefaultProbabilityTermStructure> > >
+                       probabilities,
+                   DefaultEventSet events)
+    : probabilities_(std::move(probabilities)), events_(std::move(events)) {}
+
+    Issuer::Issuer(const std::vector<std::vector<ext::shared_ptr<DefaultType> > >& eventTypes,
+                   const std::vector<Currency>& currencies,
+                   const std::vector<Seniority>& seniorities,
+                   const std::vector<Handle<DefaultProbabilityTermStructure> >& curves,
+                   DefaultEventSet events)
+    : events_(std::move(events)) {
+        QL_REQUIRE((eventTypes.size() == curves.size()) &&
+            (curves.size()== currencies.size()) &&
+            (currencies.size() == seniorities.size()),
+            "Incompatible size of Issuer parameters.");
+
+        for(Size i=0; i <eventTypes.size(); i++) {
+            DefaultProbKey keytmp(eventTypes[i], currencies[i],
+                seniorities[i]);
+            probabilities_.emplace_back(keytmp, curves[i]);
+        }
+    }
+
+    const Handle<DefaultProbabilityTermStructure>&
+        Issuer::defaultProbability(const DefaultProbKey& key) const {
+        for (const auto& probabilitie : probabilities_)
+            if (key == probabilitie.first)
+                return probabilitie.second;
+        QL_FAIL("Probability curve not available.");
+    }
+
+    ext::shared_ptr<DefaultEvent>
+    Issuer::defaultedBetween(const Date& start,
+                             const Date& end,
+                             const DefaultProbKey& contractKey,
+                             bool includeRefDate
+                             ) const
+    {
+        // to do: the set is ordered, see how to use it to speed this up
+        for (const auto& event : events_) {
+            if (event->matchesDefaultKey(contractKey) && between(event, start, end, includeRefDate))
+                return event;
+        }
+        return ext::shared_ptr<DefaultEvent>();
+    }
+
+
+    std::vector<ext::shared_ptr<DefaultEvent> >
+    Issuer::defaultsBetween(const Date& start,
+                            const Date& end,
+                            const DefaultProbKey& contractKey,
+                            bool includeRefDate
+                            ) const
+    {
+        std::vector<ext::shared_ptr<DefaultEvent> > defaults;
+        // to do: the set is ordered, see how to use it to speed this up
+        for (const auto& event : events_) {
+            if (event->matchesDefaultKey(contractKey) && between(event, start, end, includeRefDate))
+                defaults.push_back(event);
+        }
+        return defaults;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="15">
+    <source>lossdistribution.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/lossdistribution.hpp>
+#include <ql/math/randomnumbers/mt19937uniformrng.hpp>
+
+using namespace std;
+
+namespace QuantLib {
+
+    //--------------------------------------------------------------------------
+    Real LossDist::binomialProbabilityOfNEvents(int n, vector<Real>& p) {
+    //--------------------------------------------------------------------------
+        BinomialDistribution binomial (p[0], p.size());
+        return binomial(n);
+    }
+
+    //--------------------------------------------------------------------------
+    Real LossDist::binomialProbabilityOfAtLeastNEvents(int n, vector<Real>& p) {
+    //--------------------------------------------------------------------------
+        CumulativeBinomialDistribution binomial(p[0], p.size());
+        return 1.0 - binomial(n-1);
+        /*
+        Real defp = 0;
+        for (Size i = n; i <= p.size(); i++)
+            defp += binomialProbabilityOfNEvents (i, p);
+
+        return defp;
+        */
+    }
+
+    //--------------------------------------------------------------------------
+    vector<Real> LossDist::probabilityOfNEvents(vector<Real>& p) {
+    //--------------------------------------------------------------------------
+        Size n = p.size();
+        vector<Real> probability(n+1, 0.0);
+        vector<Real> prev;
+        probability[0] = 1.0;
+        for (Size j = 0; j < n; j++) {
+            prev = probability;
+            probability[0] = prev[0] * (1.0 - p[j]);
+            for (Size i = 1; i <= j; i++)
+                probability[i] = prev[i-1] * p[j] + prev[i] * (1.0 - p[j]);
+            probability[j+1] = prev[j] * p[j];
+        }
+
+        return probability;
+    }
+
+    //--------------------------------------------------------------------------
+    Real LossDist::probabilityOfNEvents(int k, vector<Real>& p) {
+    //--------------------------------------------------------------------------
+        return probabilityOfNEvents(p)[k];
+
+//      vector<Real> w (p.size(), 0);
+//      vector<Real> u (k+1, 0);
+//      vector<Real> v (k+1, 0);
+
+//      Real pZero = 1.0;
+//      for (Size i = 0; i < w.size(); i++) {
+//          pZero *= (1.0 - p[i]);
+//          w[i] = p[i] / (1.0 - p[i]);
+//      }
+
+//      if (k == 0) return pZero;
+
+//      int kk = k;
+//      Real prodw = 1.0;
+
+//      Cumulated probability of up to n events:
+//      Cut off when the cumulated probability reaches 1,
+//      i.e. set all following probabilities of exactly n events to zero.
+//      Real sum = 1.0;
+
+//      u[0] = 1.0;
+//      for (int i = 1; i <= kk; i++) {
+//          v[i] = 0;
+//          for (Size j = 0; j < w.size(); j++)
+//              v[i] += pow (w[j], i);
+//          u[i] = 0;
+//          for (int j = 1; j <= i; j++)
+//              u[i] +=  pow (-1.0, j+1) * v[j] * u[i-j];
+//          u[i] /= i;
+
+//          cut off
+//          if (sum * pZero >= 1.0 || u[i] < 0 || u[i] * pZero >= 1.0)
+//              u[i] = 0;
+
+//          sum += u[i];
+//      }
+
+//      return pZero * prodw * u[kk];
+    }
+
+    //--------------------------------------------------------------------------
+    Real LossDist::probabilityOfAtLeastNEvents (int k, vector<Real>& p) {
+    //--------------------------------------------------------------------------
+        vector<Real> probability = probabilityOfNEvents(p);
+        Real sum = 1.0;
+        for (int j = 0; j < k; j++)
+            sum -= probability[j];
+        return sum;
+        /*
+        Real sum = 0;
+        for (Size i = k; i <= p.size(); i++)
+            sum += probabilityOfNEvents (i, p);
+        return sum;
+        */
+    }
+
+    //--------------------------------------------------------------------------
+    Real ProbabilityOfNEvents::operator()(vector<Real> p) const {
+    //--------------------------------------------------------------------------
+        return LossDist::probabilityOfNEvents (n_, p);
+    }
+
+    //--------------------------------------------------------------------------
+    Real ProbabilityOfAtLeastNEvents::operator()(vector<Real> p) const {
+    //--------------------------------------------------------------------------
+        return LossDist::probabilityOfAtLeastNEvents (n_, p);
+    }
+
+    //--------------------------------------------------------------------------
+    Real BinomialProbabilityOfAtLeastNEvents::operator()(vector<Real> p) const {
+        //--------------------------------------------------------------------------
+        return LossDist::binomialProbabilityOfAtLeastNEvents(n_, p);
+    }
+
+    //--------------------------------------------------------------------------
+    Distribution LossDistBinomial::operator()(Size n, Real volume,
+                                              Real probability) const {
+    //--------------------------------------------------------------------------
+        n_ = n;
+        probability_.clear();
+        probability_.resize(n_+1, 0.0);
+        Distribution dist (nBuckets_, 0.0, maximum_);
+        BinomialDistribution binomial (probability, n);
+        for (Size i = 0; i <= n; i++) {
+            if (volume_ * i <= maximum_) {
+                probability_[i] = binomial(i);
+                Size bucket = dist.locate(volume * i);
+                dist.addDensity (bucket, probability_[i] / dist.dx(bucket));
+                dist.addAverage (bucket, volume * i);
+            }
+        }
+
+        excessProbability_.clear();
+        excessProbability_.resize(n_+1, 0.0);
+        excessProbability_[n_] = probability_[n_];
+        for (int k = n_-1; k >= 0; k--)
+            excessProbability_[k] = excessProbability_[k+1] + probability_[k];
+
+        dist.normalize();
+
+        return dist;
+    }
+
+    //--------------------------------------------------------------------------
+    Distribution LossDistBinomial::operator()(const vector<Real>& nominals,
+                                    const vector<Real>& probabilities) const {
+    //--------------------------------------------------------------------------
+        return operator()(nominals.size(), nominals[0], probabilities[0]);
+    }
+
+    //--------------------------------------------------------------------------
+    Distribution LossDistHomogeneous::operator()(Real volume,
+                                                 const vector<Real>& p) const {
+    //--------------------------------------------------------------------------
+        volume_ = volume;
+        n_ = p.size();
+        probability_.clear();
+        probability_.resize(n_+1, 0.0);
+        vector<Real> prev;
+        probability_[0] = 1.0;
+        for (Size k = 0; k < n_; k++) {
+            prev = probability_;
+            probability_[0] = prev[0] * (1.0 - p[k]);
+            for (Size i = 1; i <= k; i++)
+                probability_[i] = prev[i-1] * p[k] + prev[i] * (1.0 - p[k]);
+            probability_[k+1] = prev[k] * p[k];
+        }
+
+        excessProbability_.clear();
+        excessProbability_.resize(n_+1, 0.0);
+        excessProbability_[n_] = probability_[n_];
+        for (int k = n_ - 1; k >= 0; k--)
+            excessProbability_[k] = excessProbability_[k+1] + probability_[k];
+
+        Distribution dist (nBuckets_, 0.0, maximum_);
+        for (Size i = 0; i <= n_; i++) {
+            if (volume * i <= maximum_) {
+                Size bucket = dist.locate(volume * i);
+                dist.addDensity (bucket, probability_[i] / dist.dx(bucket));
+                dist.addAverage (bucket, volume*i);
+            }
+        }
+
+        dist.normalize();
+
+        return dist;
+    }
+
+    //--------------------------------------------------------------------------
+    Distribution LossDistHomogeneous::operator()(const vector<Real>& nominals,
+                                    const vector<Real>& probabilities) const {
+    //--------------------------------------------------------------------------
+        return operator()(nominals[0], probabilities);
+    }
+
+    //--------------------------------------------------------------------------
+    Distribution LossDistBucketing::operator()(const vector<Real>& nominals,
+                                    const vector<Real>& probabilities) const {
+    //--------------------------------------------------------------------------
+        QL_REQUIRE (nominals.size() == probabilities.size(), "sizes differ: "
+                    << nominals.size() << " vs " << probabilities.size());
+
+        vector<Real> p (nBuckets_, 0.0);
+        vector<Real> a (nBuckets_, 0.0);
+        vector<Real> ap (nBuckets_, 0.0);
+
+        p[0] = 1.0;
+        a[0] = 0.0;
+        Real dx = maximum_ / nBuckets_;
+        for (Size k = 1; k < nBuckets_; k++)
+            a[k] = dx * k + dx/2;
+
+        for (Size i = 0; i < nominals.size(); i++) {
+            Real L = nominals[i];
+            Real P = probabilities[i];
+            for (int k = a.size()-1; k >= 0; k--) {
+                if (p[k] > 0) {
+                    int u = locateTargetBucket (a[k] + L, k);
+                    QL_REQUIRE (u >= 0, "u=" << u << " at i=" << i << " k=" << k);
+                    QL_REQUIRE (u >= k, "u=" << u << "<k=" << k << " at i=" << i);
+
+                    Real dp = p[k] * P;
+                    if (u == k)
+                        a[k] += P * L;
+                    else {
+                        // no update of a[u] and p[u] if u is beyond grid end
+                        if (u < int(nBuckets_)) {
+                            // a[u] remains unchanged, if dp = 0
+                            if (dp > 0.0) {
+                                // on Windows, p[u]/dp could cause a NaN for
+                                // some very small values of p[k].
+                                // Writing the above as (p[u]/p[k])/P prevents
+                                // the NaN. What can I say?
+                                Real f = 1.0 / (1.0 + (p[u]/p[k]) / P);
+                                a[u] = (1.0 - f) * a[u] + f * (a[k] + L);
+                            }
+                            /* formulation of Hull-White:
+                               if (p[u] + dp > 0)
+                                  a[u] = (p[u] * a[u] + dp * (a[k] + L))
+                                         / (p[u] + dp);
+                            */
+                            p[u] += dp;
+                        }
+                        p[k] -= dp;
+                    }
+                }
+                QL_REQUIRE(a[k] + epsilon_ >= dx * k && a[k] < dx * (k+1),
+                           "a out of range at k=" << k << ", contract " << i);
+            }
+        }
+
+        Distribution dist (nBuckets_, 0.0, maximum_);
+        for (Size i = 0; i < nBuckets_; i++) {
+            dist.addDensity (i, p[i] / dx);
+            dist.addAverage (i, a[i]);
+        }
+
+        return dist;
+    }
+
+    //--------------------------------------------------------------------------
+    int LossDistBucketing::locateTargetBucket (Real loss, Size i0) const {
+    //--------------------------------------------------------------------------
+        QL_REQUIRE (loss >= 0, "loss " << loss << " must be >= 0");
+        Real dx = maximum_ / nBuckets_;
+        for (Size i = i0; i < nBuckets_; i++)
+            if (dx * i > loss + epsilon_) return i - 1;
+        return nBuckets_;
+    }
+
+    //--------------------------------------------------------------------------
+    Distribution LossDistMonteCarlo::operator()(const vector<Real>& nominals,
+                                   const vector<Real>& probabilities) const {
+    //--------------------------------------------------------------------------
+        Distribution dist (nBuckets_, 0.0, maximum_);
+        // KnuthUniformRng rng(seed_);
+        // LecuyerUniformRng rng(seed_);
+        MersenneTwisterUniformRng rng(seed_);
+        for (Size i = 0; i < simulations_; i++) {
+            Real e = 0;
+            for (Size j = 0; j < nominals.size(); j++) {
+                Real r = rng.next().value;
+                if (r <= probabilities[j])
+                    e += nominals[j];
+            }
+            dist.add (e + epsilon_);
+        }
+
+        dist.normalize();
+
+        return dist;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="16">
+    <source>midpointcdoengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+ Copyright (C) 2009, 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/midpointcdoengine.hpp>
+
+#ifndef QL_PATCH_SOLARIS
+
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+
+namespace QuantLib {
+
+    void MidPointCDOEngine::calculate() const {
+        Date today = Settings::instance().evaluationDate();
+
+        results_.premiumValue = 0.0;
+        results_.protectionValue = 0.0;
+        results_.upfrontPremiumValue = 0.0;
+        results_.error = 0;
+        results_.expectedTrancheLoss.clear();
+        // todo Should be remaining when considering realized loses
+        results_.xMin = arguments_.basket->attachmentAmount();
+        results_.xMax = arguments_.basket->detachmentAmount();
+        results_.remainingNotional = results_.xMax - results_.xMin;
+        const Real inceptionTrancheNotional = 
+            arguments_.basket->trancheNotional();
+
+        // compute expected loss at the beginning of first relevant period
+        Real e1 = 0;
+        // todo add includeSettlement date flows variable to engine.
+        if (!arguments_.normalizedLeg[0]->hasOccurred(today))
+            // Notice that since there might be a gap between the end of 
+            // acrrual and payment dates and today be in between
+            // the tranche loss on that date might not be contingent but 
+            // realized:
+            e1 = arguments_.basket->expectedTrancheLoss(
+                ext::dynamic_pointer_cast<Coupon>(
+                    arguments_.normalizedLeg[0])->accrualStartDate());
+        results_.expectedTrancheLoss.push_back(e1);
+        //'e1'  should contain the existing loses.....? use remaining amounts?
+        for (auto& i : arguments_.normalizedLeg) {
+            if (i->hasOccurred(today)) {
+                results_.expectedTrancheLoss.push_back(0.);
+                continue;
+            }
+            ext::shared_ptr<Coupon> coupon = ext::dynamic_pointer_cast<Coupon>(i);
+            Date paymentDate = coupon->date();
+            Date startDate = std::max(coupon->accrualStartDate(),
+                                      discountCurve_->referenceDate());
+            Date endDate = coupon->accrualEndDate();
+            // we assume the loss within the period took place on this date:
+            Date defaultDate = startDate + (endDate-startDate)/2;
+
+            Real e2 = arguments_.basket->expectedTrancheLoss(endDate);
+            results_.expectedTrancheLoss.push_back(e2);
+            results_.premiumValue += 
+                ((inceptionTrancheNotional - e2) / inceptionTrancheNotional)
+                * coupon->amount()
+                * discountCurve_->discount(paymentDate);
+            // default flows:
+            const Real discount = discountCurve_->discount(defaultDate);
+
+            /* Accrual removed till the argument flag is implemented
+            // pays accrued on defaults' date
+            results_.premiumValue += coupon->accruedAmount(defaultDate)
+                * discount * (e2 - e1) / inceptionTrancheNotional;
+            */
+            results_.protectionValue += discount * (e2 - e1);
+            /* use it in a future version for coherence with the integral engine
+            * arguments_.leverageFactor;
+            */
+            e1 = e2;
+        }
+
+        //\todo treat upfron tnow as in the new CDS (see March 2014)
+        // add includeSettlement date flows variable to engine ?
+        if (!arguments_.normalizedLeg[0]->hasOccurred(today))
+            results_.upfrontPremiumValue 
+                = inceptionTrancheNotional * arguments_.upfrontRate 
+                    * discountCurve_->discount(
+                        ext::dynamic_pointer_cast<Coupon>(
+                            arguments_.normalizedLeg[0])->accrualStartDate());
+            /* use it in a future version for coherence with the integral engine
+                arguments_.leverageFactor * ;
+            */
+        if (arguments_.side == Protection::Buyer) {
+            results_.protectionValue *= -1;
+            results_.premiumValue *= -1;
+            results_.upfrontPremiumValue *= -1;
+        }
+        results_.value = results_.premiumValue - results_.protectionValue
+            + results_.upfrontPremiumValue;
+        results_.errorEstimate = Null<Real>();
+        // Fair spread GIVEN the upfront
+        Real fairSpread = 0.;
+        if (results_.premiumValue != 0.0) {
+            fairSpread =
+                -(results_.protectionValue + results_.upfrontPremiumValue)
+                  *arguments_.runningRate/results_.premiumValue;
+        }
+
+        results_.additionalResults["fairPremium"] = fairSpread;
+        results_.additionalResults["premiumLegNPV"] = 
+            results_.premiumValue + results_.upfrontPremiumValue;
+        results_.additionalResults["protectionLegNPV"] = 
+            results_.protectionValue;
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="17">
+    <source>nthtodefault.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/nthtodefault.hpp>
+#include <ql/experimental/credit/lossdistribution.hpp>
+#include <ql/instruments/claim.hpp>
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/event.hpp>
+#include <ql/experimental/credit/basket.hpp>
+
+namespace QuantLib {
+
+
+    NthToDefault::NthToDefault(
+        const ext::shared_ptr<Basket>& basket,
+        Size n,
+        Protection::Side side,
+        const Schedule& premiumSchedule,
+        Rate upfrontRate,
+        Rate premiumRate,
+        const DayCounter& dayCounter,
+        Real nominal,
+        bool settlePremiumAccrual
+        )
+    : basket_(basket), n_(n),
+      side_(side), nominal_(nominal),
+      premiumSchedule_(premiumSchedule), premiumRate_(premiumRate), 
+      upfrontRate_(upfrontRate), 
+      dayCounter_(dayCounter), settlePremiumAccrual_(settlePremiumAccrual)
+    {
+        QL_REQUIRE(n_ <= basket_->size(), 
+                   "NTD order provided is larger than the basket size.");
+
+        // Basket inception must lie before contract protection start.
+        QL_REQUIRE(basket->refDate() <= premiumSchedule.startDate(),
+            //using the start date of the schedule might be wrong, think of the CDS rule
+            "Basket did not exist before contract start.");
+
+        premiumLeg_ = FixedRateLeg(premiumSchedule)
+            .withNotionals(nominal)
+            .withCouponRates(premiumRate, dayCounter)
+            .withPaymentAdjustment(Unadjusted);
+
+        registerWith(basket_);
+    }
+
+
+// SOME OF THESE ARE INLINES---------------------------------
+    Size NthToDefault::basketSize() const { return basket_->size(); }
+
+    bool NthToDefault::isExpired() const {
+        return detail::simple_event(premiumLeg_.back()->date()).hasOccurred();
+    }
+
+    Rate NthToDefault::fairPremium() const {
+        calculate();
+        QL_REQUIRE(fairPremium_ != Null<Rate>(),
+                   "fair premium not available");
+        return fairPremium_;
+    }
+
+    Real NthToDefault::premiumLegNPV() const {
+        calculate();
+        QL_REQUIRE(premiumValue_ != Null<Rate>(),
+                   "premium leg not available");
+        QL_REQUIRE(upfrontPremiumValue_ != Null<Rate>(),
+                   "upfront value not available");
+        return premiumValue_ + upfrontPremiumValue_;
+    }
+
+    Real NthToDefault::protectionLegNPV() const {
+        calculate();
+        QL_REQUIRE(protectionValue_ != Null<Rate>(),
+                   "protection leg not available");
+        return protectionValue_;
+    }
+
+    Real NthToDefault::errorEstimate() const {
+        calculate();
+        QL_REQUIRE(errorEstimate_ != Null<Rate>(),
+                   "error estimate not available");
+        return errorEstimate_;
+
+    }
+
+    void NthToDefault::setupExpired() const {
+        Instrument::setupExpired();
+
+        premiumValue_ = 0.0;
+        protectionValue_ = 0.0;
+        upfrontPremiumValue_ = 0.0;
+        fairPremium_ = 0.0;
+        errorEstimate_ = 0.0;
+    }
+
+    void NthToDefault::setupArguments(PricingEngine::arguments* args) const {
+        auto* arguments = dynamic_cast<NthToDefault::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+        arguments->basket = basket_;
+        arguments->side = side_;
+        arguments->premiumLeg = premiumLeg_;
+        arguments->ntdOrder = n_;
+        arguments->settlePremiumAccrual = settlePremiumAccrual_;
+        arguments->notional = nominal_;
+        arguments->premiumRate = premiumRate_;
+        arguments->upfrontRate = upfrontRate_;
+    }
+
+    void NthToDefault::fetchResults(const PricingEngine::results* r) const {
+        Instrument::fetchResults(r);
+
+        const auto* results = dynamic_cast<const NthToDefault::results*>(r);
+        QL_REQUIRE(results != nullptr, "wrong result type");
+
+        premiumValue_ = results->premiumValue;
+        protectionValue_ = results->protectionValue;
+        upfrontPremiumValue_ = results->upfrontPremiumValue;
+        fairPremium_ = results->fairPremium;
+        errorEstimate_ = results->errorEstimate;
+    }
+
+    void NthToDefault::results::reset() {
+        Instrument::results::reset();
+        premiumValue = Null<Real>();
+        protectionValue = Null<Real>();
+        upfrontPremiumValue = Null<Real>();
+        fairPremium = Null<Real>();
+        errorEstimate = Null<Real>();
+        additionalResults.clear();
+    }
+
+    void NthToDefault::arguments::validate() const {
+        QL_REQUIRE(basket && !basket->names().empty(), "no basket given");
+        QL_REQUIRE(side != Protection::Side(-1), "side not set");
+        QL_REQUIRE(premiumRate != Null<Real>(), "no premium rate given");
+        QL_REQUIRE(upfrontRate != Null<Real>(), "no upfront rate given");
+        QL_REQUIRE(notional != Null<Real>(), "no notional given");
+        QL_REQUIRE(ntdOrder != Null<Size>(), "no NTD order given");
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="18">
+    <source>onefactorcopula.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/onefactorcopula.hpp>
+
+using namespace std;
+
+namespace QuantLib {
+
+    //-------------------------------------------------------------------------
+    Real OneFactorCopula::conditionalProbability(Real p, Real m) const {
+    //-------------------------------------------------------------------------
+        calculate ();
+        // FIXME
+        if (p < 1e-10) return 0;
+
+        Real c = correlation_->value();
+
+        Real res = cumulativeZ ((inverseCumulativeY (p) - sqrt(c) * m)
+                                / sqrt (1. - c));
+
+        QL_REQUIRE (res >= 0 && res <= 1,
+                    "conditional probability " << res << "out of range");
+
+        return res;
+    }
+
+    //-------------------------------------------------------------------------
+    vector<Real> OneFactorCopula::conditionalProbability(
+                                                     const vector<Real>& prob,
+                                                     Real m) const {
+    //-------------------------------------------------------------------------
+        calculate ();
+        vector<Real> p (prob.size(), 0);
+        for (Size i = 0; i < p.size(); i++)
+            p[i] = conditionalProbability (prob[i], m);
+        return p;
+    }
+
+    //-------------------------------------------------------------------------
+    Real OneFactorCopula::cumulativeY (Real y) const {
+    //-------------------------------------------------------------------------
+        calculate ();
+
+        QL_REQUIRE(!y_.empty(), "cumulative Y not tabulated yet");
+
+        // linear interpolation on the tabulated cumulative distribution of Y
+        if (y < y_.front())
+            return cumulativeY_.front();
+
+        for (Size i = 0; i < y_.size(); i++) {
+            if (y_[i] > y)
+                return (   (y_[i] - y)   * cumulativeY_[i-1]
+                           + (y - y_[i-1]) * cumulativeY_[i]   )
+                    / (y_[i] - y_[i-1]);
+        }
+
+        return cumulativeY_.back();
+    }
+
+    //-------------------------------------------------------------------------
+    Real OneFactorCopula::inverseCumulativeY (Real x) const {
+    //-------------------------------------------------------------------------
+        calculate ();
+
+        QL_REQUIRE(!y_.empty(), "cumulative Y not tabulated yet");
+
+        // linear interpolation on the tabulated cumulative distribution of Y
+        if (x < cumulativeY_.front())
+            return y_.front();
+
+        for (Size i = 0; i < cumulativeY_.size(); i++) {
+            if (cumulativeY_[i] > x)
+                return (   (cumulativeY_[i] - x)   * y_[i-1]
+                           + (x - cumulativeY_[i-1]) * y_[i]   )
+                    / (cumulativeY_[i] - cumulativeY_[i-1]);
+        }
+
+        return y_.back();
+    }
+
+    //-------------------------------------------------------------------------
+    int OneFactorCopula::checkMoments (Real tolerance) const {
+    //-------------------------------------------------------------------------
+        calculate ();
+
+        Real norm = 0, mean = 0, var = 0;
+        for (Size i = 0; i < steps(); i++) {
+            norm += densitydm (i);
+            mean += m(i) * densitydm (i);
+            var += pow (m(i), 2) * densitydm (i);
+        }
+
+        QL_REQUIRE (fabs (norm - 1.0) < tolerance, "norm out of tolerance range");
+        QL_REQUIRE (fabs (mean) < tolerance, "mean out of tolerance range");
+        QL_REQUIRE (fabs (var - 1.0) < tolerance, "variance out of tolerance range");
+
+        // FIXME: define range for Y via cutoff quantil?
+        Real zMin = -10;
+        Real zMax = +10;
+        Size zSteps = 200;
+        norm = 0;
+        mean = 0;
+        var = 0;
+        for (Size i = 1; i < zSteps; i++) {
+            Real z1 = zMin + (zMax - zMin) / zSteps * (i - 1);
+            Real z2 = zMin + (zMax - zMin) / zSteps * i;
+            Real z  = (z1 + z2) / 2;
+            Real densitydz = cumulativeZ (z2) - cumulativeZ (z1);
+            norm += densitydz;
+            mean += z * densitydz;
+            var += pow (z, 2) * densitydz;
+        }
+
+        QL_REQUIRE (fabs (norm - 1.0) < tolerance, "norm out of tolerance range");
+        QL_REQUIRE (fabs (mean) < tolerance, "mean out of tolerance range");
+        QL_REQUIRE (fabs (var - 1.0) < tolerance, "variance out of tolerance range");
+
+        // FIXME: define range for Y via cutoff quantil?
+        Real yMin = -10;
+        Real yMax = +10;
+        Size ySteps = 200;
+        norm = 0;
+        mean = 0;
+        var = 0;
+        for (Size i = 1; i < ySteps; i++) {
+            Real y1 = yMin + (yMax - yMin) / ySteps * (i - 1);
+            Real y2 = yMin + (yMax - yMin) / ySteps * i;
+            Real y  = (y1 + y2) / 2;
+            Real densitydy = cumulativeY (y2) - cumulativeY (y1);
+            norm += densitydy;
+            mean += y * densitydy;
+            var += y * y * densitydy;
+        }
+
+        QL_REQUIRE (fabs (norm - 1.0) < tolerance, "norm out of tolerance range");
+        QL_REQUIRE (fabs (mean) < tolerance, "mean out of tolerance range");
+        QL_REQUIRE (fabs (var - 1.0) < tolerance, "variance out of tolerance range");
+
+        return 0;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="19">
+    <source>onefactorgaussiancopula.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/onefactorgaussiancopula.hpp>
+
+namespace QuantLib {
+
+    //-----------------------------------------------------------------------
+    Real OneFactorGaussianCopula::testCumulativeY (Real y) const {
+    //-----------------------------------------------------------------------
+        Real c = correlation_->value();
+
+        if (c == 0)
+            return CumulativeNormalDistribution()(y);
+
+        if (c == 1)
+            return CumulativeNormalDistribution()(y);
+
+        NormalDistribution dz;
+        NormalDistribution dm;
+
+        Real minimum = -10;
+        Real maximum = +10;
+        int steps = 200;
+
+        Real delta = (maximum - minimum) / steps;
+        Real cumulated = 0;
+        if (c < 0.5) {
+            // outer integral -> 1 for c -> 0
+            // inner integral -> CumulativeNormal()(y) for c-> 0
+            for (Real m = minimum; m < maximum; m += delta)
+                for (Real z = minimum; z < (y - std::sqrt(c) * m) / std::sqrt (1. - c);
+                     z += delta)
+                    cumulated += dm (m) * dz (z);
+        }
+        else {
+            // outer integral -> 1 for c -> 1
+            // inner integral -> CumulativeNormal()(y) for c-> 1
+            for (Real z = minimum; z < maximum; z += delta)
+                for (Real m = minimum; m < (y - std::sqrt(1.0 - c) * z) / std::sqrt(c);
+                     m += delta)
+                    cumulated += dm (m) * dz (z);
+        }
+        cumulated *= (delta * delta);
+
+        return cumulated;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="20">
+    <source>onefactorstudentcopula.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/onefactorstudentcopula.hpp>
+
+namespace QuantLib {
+
+    //-------------------------------------------------------------------------
+    OneFactorStudentCopula::OneFactorStudentCopula (
+                                             const Handle<Quote>& correlation,
+                                             int nz, int nm,
+                                             Real maximum,
+                                             Size integrationSteps)
+    : OneFactorCopula (correlation, maximum, integrationSteps),
+      density_ (nm), cumulative_ (nz), nz_(nz), nm_(nm) {
+    //-------------------------------------------------------------------------
+
+        QL_REQUIRE (nz > 2 && nm > 2, "degrees of freedom must be > 2");
+
+        scaleM_ = std::sqrt (Real (nm_ - 2) / nm_);
+        scaleZ_ = std::sqrt (Real (nz_ - 2) / nz_);
+
+        calculate ();
+    }
+
+    //-------------------------------------------------------------------------
+    void OneFactorStudentCopula::performCalculations () const {
+    //-------------------------------------------------------------------------
+        y_.clear();
+        cumulativeY_.clear();
+
+        // FIXME:
+        // compute F(ymin) and F(ymax) for the fattest case nm = nz = 2
+        // set a desired confidence and work out ymin, ymax
+        Real ymin = -10;
+        Real ymax = +10;
+        Size steps = 200;
+        for (Size i = 0; i <= steps; i++) {
+            Real y = ymin + (ymax - ymin) * i / steps;
+            Real c = cumulativeYintegral (y);
+            y_.push_back (y);
+            cumulativeY_.push_back (c);
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    Real OneFactorStudentCopula::cumulativeYintegral (Real y) const {
+    //-------------------------------------------------------------------------
+        Real c = correlation_->value();
+
+        if (c == 0)
+            return CumulativeStudentDistribution(nz_)(y / scaleZ_);
+
+        if (c == 1)
+            return CumulativeStudentDistribution(nm_)(y / scaleM_);
+
+        StudentDistribution dz (nz_);
+        StudentDistribution dm (nm_);
+
+        // FIXME:
+        // Find a sensitive way of setting these parameters,
+        // e.g. depending on nm and nz, and the desired table range
+        Real minimum = -10; // -15
+        Real maximum = +10; // +15
+        int steps = 400;
+
+        Real delta = (maximum - minimum) / steps;
+        Real cumulated = 0;
+
+        if (c < 0.5) {
+            // outer integral -> 1 for c -> 0
+            // inner integral -> cumulativeStudent(nz)(y) for c-> 0
+            for (Real m = minimum + delta/2; m < maximum; m += delta)
+                for (Real z = minimum + delta/2;
+                     z < (y - std::sqrt(c) * m) / std::sqrt (1. - c); z += delta)
+                    cumulated += dm (m / scaleM_) / scaleM_
+                        * dz (z / scaleZ_) / scaleZ_;
+        }
+        else {
+            // outer integral -> 1 for c -> 1
+            // inner integral -> cumulativeStudent(nm)(y) for c-> 1
+            for (Real z = minimum + delta/2; z < maximum; z += delta)
+                for (Real m = minimum + delta/2;
+                     m < (y - std::sqrt(1.0 - c) * z) / std::sqrt(c); m += delta)
+                    cumulated += dm (m / scaleM_) / scaleM_
+                        * dz (z / scaleZ_) / scaleZ_;
+        }
+
+        return cumulated * delta * delta;
+    }
+
+    //-------------------------------------------------------------------------
+    OneFactorGaussianStudentCopula::OneFactorGaussianStudentCopula (
+                                             const Handle<Quote>& correlation,
+                                             int nz, Real maximum,
+                                             Size integrationSteps)
+    : OneFactorCopula (correlation, maximum, integrationSteps),
+      cumulative_(nz), nz_(nz) {
+    //-------------------------------------------------------------------------
+
+        QL_REQUIRE (nz > 2, "degrees of freedom must be > 2");
+
+        scaleZ_ = std::sqrt (Real (nz_ - 2) / nz_);
+
+        calculate ();
+    }
+
+    //-------------------------------------------------------------------------
+    void OneFactorGaussianStudentCopula::performCalculations () const {
+    //-------------------------------------------------------------------------
+        y_.clear();
+        cumulativeY_.clear();
+
+        // FIXME:
+        // compute F(ymin) and F(ymax) for the fattest case nm = nz = 2
+        // set a desired confidence and work out ymin, ymax
+        Real ymin = -10;
+        Real ymax = +10;
+        Size steps = 200;
+        for (Size i = 0; i <= steps; i++) {
+            Real y = ymin + (ymax - ymin) * i / steps;
+            Real c = cumulativeYintegral (y);
+            y_.push_back (y);
+            cumulativeY_.push_back (c);
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    Real OneFactorGaussianStudentCopula::cumulativeYintegral (Real y) const {
+    //-------------------------------------------------------------------------
+        Real c = correlation_->value();
+
+        if (c == 0)
+            return CumulativeStudentDistribution(nz_)(y / scaleZ_);
+
+        if (c == 1)
+            return CumulativeNormalDistribution()(y);
+
+        StudentDistribution dz (nz_);
+        NormalDistribution dm;
+
+        // FIXME:
+        // Find a sensitive way of setting these parameters,
+        // e.g. depending on nm and nz, and the desired table range
+        Real minimum = -10;
+        Real maximum = +10;
+        int steps = 400;
+
+        Real delta = (maximum - minimum) / steps;
+        Real cumulated = 0;
+
+        if (c < 0.5) {
+            // outer integral -> 1 for c -> 0
+            // inner integral -> cumulativeStudent(nz)(y) for c-> 0
+            for (Real m = minimum + delta/2; m < maximum; m += delta)
+                for (Real z = minimum + delta/2;
+                     z < (y - std::sqrt(c) * m) / std::sqrt (1. - c);
+                     z += delta)
+                    cumulated += dm (m) * dz (z / scaleZ_) / scaleZ_;
+        }
+        else {
+            // outer integral -> 1 for c -> 1
+            // inner integral -> cumulativeNormal(y) for c-> 1
+            for (Real z = minimum + delta/2; z < maximum; z += delta)
+                for (Real m = minimum + delta/2;
+                     m < (y - std::sqrt(1.0 - c) * z) / std::sqrt(c);
+                     m += delta)
+                    cumulated += dm (m) * dz (z / scaleZ_) / scaleZ_;
+        }
+
+        return cumulated * delta * delta;
+    }
+
+    //-------------------------------------------------------------------------
+    OneFactorStudentGaussianCopula::OneFactorStudentGaussianCopula (
+                                             const Handle<Quote>& correlation,
+                                             int nm, Real maximum,
+                                             Size integrationSteps)
+    : OneFactorCopula (correlation, maximum, integrationSteps),
+      density_ (nm), nm_(nm) {
+    //-------------------------------------------------------------------------
+
+        QL_REQUIRE (nm > 2, "degrees of freedom must be > 2");
+
+        scaleM_ = std::sqrt (Real (nm_ - 2) / nm_);
+
+        calculate ();
+    }
+
+    //-------------------------------------------------------------------------
+    void OneFactorStudentGaussianCopula::performCalculations () const {
+    //-------------------------------------------------------------------------
+        y_.clear();
+        cumulativeY_.clear();
+
+        // FIXME:
+        // compute F(ymin) and F(ymax) for the fattest case nm = nz = 2
+        // set a desired confidence and work out ymin, ymax
+        Real ymin = -10;
+        Real ymax = +10;
+        Size steps = 200;
+        for (Size i = 0; i <= steps; i++) {
+            Real y = ymin + (ymax - ymin) * i / steps;
+            Real c = cumulativeYintegral (y);
+            y_.push_back (y);
+            cumulativeY_.push_back (c);
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    Real OneFactorStudentGaussianCopula::cumulativeYintegral (Real y) const {
+    //-------------------------------------------------------------------------
+        Real c = correlation_->value();
+
+        if (c == 0)
+            return CumulativeNormalDistribution()(y);
+
+        if (c == 1)
+            return CumulativeStudentDistribution(nm_)(y / scaleM_);
+
+
+        StudentDistribution dm (nm_);
+        NormalDistribution dz;
+
+        // FIXME:
+        // Find a sensitive way of setting these parameters,
+        // e.g. depending on nm and nz, and the desired table range
+        Real minimum = -10;
+        Real maximum = +10;
+        int steps = 400;
+
+        Real delta = (maximum - minimum) / steps;
+        Real cumulated = 0;
+
+        if (c < 0.5) {
+            // outer integral -> 1 for c -> 0
+            // inner integral -> cumulativeNormal(y) for c-> 0
+            for (Real m = minimum + delta/2; m < maximum; m += delta)
+                for (Real z = minimum + delta/2;
+                     z < (y - std::sqrt(c) * m) / std::sqrt (1. - c);
+                     z += delta)
+                    cumulated += dm (m / scaleM_) / scaleM_ * dz (z);
+        }
+        else {
+            // outer integral -> 1 for c -> 1
+            // inner integral -> cumulativeStudent(nm)(y) for c-> 1
+            for (Real z = minimum + delta/2; z < maximum; z += delta)
+                for (Real m = minimum + delta/2;
+                     m < (y - std::sqrt(1.0 - c) * z) / std::sqrt(c);
+                     m += delta)
+                    cumulated += dm (m / scaleM_) / scaleM_ * dz (z);
+        }
+
+        return cumulated * delta * delta;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="21">
+    <source>pool.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/pool.hpp>
+#include <ql/functional.hpp>
+#include <iterator>
+
+namespace QuantLib {
+
+    Pool::Pool() {
+        clear();
+    }
+
+    Size Pool::size() const {
+        return names_.size();
+    }
+
+    void Pool::clear() {
+        data_.clear();
+        time_.clear();
+        names_.clear();
+    }
+
+    bool Pool::has(const std::string& name) const {
+        return data_.find(name) != data_.end();
+    }
+
+    void Pool::add (const std::string& name, const Issuer& issuer, 
+        const DefaultProbKey& contractTrigger) {
+        if (!has(name)) {
+            data_[name] = issuer;
+            time_[name] = 0.0;
+            names_.push_back(name);
+            defaultKeys_[name] = contractTrigger;
+        }
+    }
+
+    const Issuer& Pool::get (const std::string& name) const {
+        QL_REQUIRE(has(name), name + " not found");
+        return data_.find(name)->second;
+    }
+
+    const DefaultProbKey& Pool::defaultKey (const std::string& name) const {
+        QL_REQUIRE(has(name), name + " not found");
+        return defaultKeys_.find(name)->second;
+    }
+
+    Real Pool::getTime (const std::string& name) const {
+        QL_REQUIRE(has(name), name + " not found");
+        return time_.find(name)->second;
+    }
+
+    void Pool::setTime(const std::string& name, Real time) {
+        time_[name] = time;
+    }
+
+    const std::vector<std::string>& Pool::names() const {
+        return names_;
+    }
+
+    Disposable<std::vector<DefaultProbKey> > Pool::defaultKeys() const {
+        std::vector<DefaultProbKey> defaultKeys;
+        defaultKeys.reserve(defaultKeys_.size());
+        for (const auto & i : defaultKeys_)
+            defaultKeys.push_back(i.second);
+        return defaultKeys;
+    }
+
+}
+
+
+]]></document_content>
+  </document>
+  <document index="22">
+    <source>randomdefaultmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/randomdefaultmodel.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <utility>
+
+using namespace std;
+
+namespace QuantLib {
+
+    namespace {
+
+        // Utility for the numerical solver
+        class Root {
+          public:
+            Root(Handle<DefaultProbabilityTermStructure> dts, Real pd)
+            : dts_(std::move(dts)), pd_(pd) {}
+            Real operator()(Real t) const {
+                QL_REQUIRE (t >= 0.0, "t < 0");
+                return dts_->defaultProbability(t, true) - pd_;
+            }
+          private:
+            const Handle<DefaultProbabilityTermStructure> dts_;
+            Real pd_;
+        };
+
+    }
+
+    GaussianRandomDefaultModel::GaussianRandomDefaultModel(
+        const ext::shared_ptr<Pool>& pool,
+        const std::vector<DefaultProbKey>& defaultKeys,
+        const Handle<OneFactorCopula>& copula,
+        Real accuracy,
+        long seed)
+    : RandomDefaultModel(pool, defaultKeys), copula_(copula), accuracy_(accuracy), seed_(seed),
+      rsg_(PseudoRandom::make_sequence_generator(pool->size() + 1, seed)) {
+        registerWith(copula);
+    }
+
+    void GaussianRandomDefaultModel::reset() {
+        Size dim = pool_->size() + 1;
+        rsg_ = PseudoRandom::make_sequence_generator(dim, seed_);
+    }
+
+    void GaussianRandomDefaultModel::nextSequence(Real tmax) {
+        const std::vector<Real>& values = rsg_.nextSequence().value;
+        Real a = sqrt(copula_->correlation());
+        for (Size j = 0; j < pool_->size(); j++) {
+            const string name = pool_->names()[j];
+            const Handle<DefaultProbabilityTermStructure>&
+                dts = pool_->get(name).defaultProbability(defaultKeys_[j]);
+
+            Real y = a * values[0] + sqrt(1-a*a) * values[j+1];
+            Real p = CumulativeNormalDistribution()(y);
+
+            if (dts->defaultProbability(tmax) < p)
+                pool_->setTime(name, tmax+1);
+            else
+                pool_->setTime(name, Brent().solve(Root(dts,p),accuracy_,0,1));
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="23">
+    <source>recoveryratemodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/recoveryratemodel.hpp>
+
+namespace QuantLib {
+
+    ConstantRecoveryModel::ConstantRecoveryModel(
+                                       const Handle<RecoveryRateQuote>& quote)
+    : quote_(quote) {
+        registerWith(quote);
+    }
+
+    ConstantRecoveryModel::ConstantRecoveryModel(Real recovery,
+                                                 Seniority sen)
+    : quote_(Handle<RecoveryRateQuote>(ext::make_shared<RecoveryRateQuote>(
+                                    recovery, sen))) {}
+
+}
+]]></document_content>
+  </document>
+  <document index="24">
+    <source>recoveryratequote.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/recoveryratequote.hpp>
+
+namespace QuantLib {
+
+    const Real RecoveryRateQuote::IsdaConvRecoveries[] =  {
+        0.65,// SECDOM
+        0.4, // SNRFOR
+        0.2, // SUBLT2
+        0.2, // JRSUBUT2
+        0.15 // PREFT1
+    };
+
+    std::map<Seniority, Real> makeIsdaConvMap() {
+        return RecoveryRateQuote::makeIsdaMap(
+            RecoveryRateQuote::IsdaConvRecoveries);
+    }
+
+    RecoveryRateQuote::RecoveryRateQuote(Real value,
+                                         Seniority seniority)
+        : seniority_(seniority), recoveryRate_(value) {
+            QL_REQUIRE(value == Null<Real>() ||
+                (value >= 0. && value <= 1.),
+                "Recovery value must be a fractional unit.");
+    }
+
+    Real RecoveryRateQuote::setValue(Real value) {
+        Real diff = value-recoveryRate_;
+        if (diff != 0.0) {
+            recoveryRate_ = value;
+            notifyObservers();
+        }
+        return diff;
+    }
+
+    void RecoveryRateQuote::reset() {
+        setValue(Null<Real>());
+        seniority_ = NoSeniority;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="25">
+    <source>riskyassetswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008, 2009 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/event.hpp>
+#include <ql/experimental/credit/riskyassetswap.hpp>
+#include <ql/utilities/null_deleter.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    RiskyAssetSwap::RiskyAssetSwap(bool fixedPayer,
+                                   Real nominal,
+                                   Schedule fixedSchedule,
+                                   Schedule floatSchedule,
+                                   DayCounter fixedDayCounter,
+                                   DayCounter floatDayCounter,
+                                   Rate spread,
+                                   Rate recoveryRate,
+                                   Handle<YieldTermStructure> yieldTS,
+                                   Handle<DefaultProbabilityTermStructure> defaultTS,
+                                   Rate coupon)
+    : fixedPayer_(fixedPayer), nominal_(nominal), fixedSchedule_(std::move(fixedSchedule)),
+      floatSchedule_(std::move(floatSchedule)), fixedDayCounter_(std::move(fixedDayCounter)),
+      floatDayCounter_(std::move(floatDayCounter)), spread_(spread), recoveryRate_(recoveryRate),
+      yieldTS_(std::move(yieldTS)), defaultTS_(std::move(defaultTS)), coupon_(coupon) {
+
+        registerWith (yieldTS_);
+        registerWith (defaultTS_);
+    }
+
+    bool RiskyAssetSwap::isExpired () const {
+        return detail::simple_event(fixedSchedule_.dates().back())
+               .hasOccurred(yieldTS_->referenceDate());
+    }
+
+
+    void RiskyAssetSwap::setupExpired() const {
+        Instrument::setupExpired();
+    }
+
+
+    void RiskyAssetSwap::performCalculations() const {
+        // order of calls is essential
+        floatAnnuity_   = floatAnnuity();
+        fixedAnnuity_   = fixedAnnuity();
+        parCoupon_      = parCoupon();
+
+        if (coupon_ == Null<Rate>())  coupon_ = parCoupon_;
+
+        recoveryValue_  = recoveryValue();
+        riskyBondPrice_ = riskyBondPrice();
+
+        NPV_ = riskyBondPrice_
+            - coupon_ * fixedAnnuity_
+            + yieldTS_->discount (fixedSchedule_.dates().front())
+            - yieldTS_->discount (fixedSchedule_.dates().back())
+            + spread_ * floatAnnuity_;
+
+        NPV_ *= nominal_;
+
+        if (!fixedPayer_)
+            NPV_ *= -1;
+    }
+
+
+    Real RiskyAssetSwap::floatAnnuity () const {
+        Real annuity = 0;
+        for (Size i = 1; i < floatSchedule_.size(); i++) {
+            Time dcf = floatDayCounter_.yearFraction (floatSchedule_[i-1],
+                                                      floatSchedule_[i]);
+            annuity += dcf * yieldTS_->discount (floatSchedule_[i]);
+        }
+        return annuity;
+    }
+
+
+    Real RiskyAssetSwap::fixedAnnuity () const {
+        Real annuity = 0;
+        for (Size i = 1; i < floatSchedule_.size(); i++) {
+            Time dcf = fixedDayCounter_.yearFraction (floatSchedule_[i-1],
+                                                      floatSchedule_[i]);
+            annuity += dcf * yieldTS_->discount (floatSchedule_[i]);
+        }
+        return annuity;
+    }
+
+
+    Real RiskyAssetSwap::parCoupon () const {
+        return (yieldTS_->discount(fixedSchedule_.dates().front())
+                -yieldTS_->discount(fixedSchedule_.dates().back()))
+            / fixedAnnuity_;
+    }
+
+
+    Real RiskyAssetSwap::recoveryValue() const {
+        Real recoveryValue = 0;
+        // simple Euler integral to evaluate the recovery value
+        for (Size i = 1; i < fixedSchedule_.size(); i++) {
+            TimeUnit stepSize = Days;
+            Date d;
+            if (fixedSchedule_[i-1] >= defaultTS_->referenceDate())
+                d = fixedSchedule_[i-1];
+            else
+                d = defaultTS_->referenceDate();
+            Date d0 = d;
+            do {
+                Real disc = yieldTS_->discount (d);
+                Real dd   = defaultTS_->defaultDensity (d, true);
+                Real dcf  = defaultTS_->dayCounter().yearFraction (d0, d);
+
+                recoveryValue  += disc * dd * dcf;
+
+                d0 = d;
+
+                d = NullCalendar().advance (d0, 1, stepSize, Unadjusted);
+            }
+            while (d < fixedSchedule_[i]);
+        }
+        recoveryValue *= recoveryRate_;
+
+        return recoveryValue;
+    }
+
+
+    Real RiskyAssetSwap::riskyBondPrice () const {
+        Real value = 0;
+        for (Size i = 1; i < fixedSchedule_.size(); i++) {
+            Time dcf = fixedDayCounter_.yearFraction (fixedSchedule_[i-1],
+                                                      fixedSchedule_[i]);
+            value += dcf * yieldTS_->discount (fixedSchedule_[i])
+                * defaultTS_->survivalProbability (fixedSchedule_[i], true);
+        }
+        value *= coupon_;
+
+        value += yieldTS_->discount (fixedSchedule_.dates().back())
+            * defaultTS_->survivalProbability (fixedSchedule_.dates().back(),
+                                               true);
+
+        return value + recoveryValue_;
+    }
+
+
+    Real RiskyAssetSwap::fairSpread () {
+        calculate();
+
+        Real value = 0;
+        for (Size i = 1; i < fixedSchedule_.size(); i++) {
+            Time dcf = fixedDayCounter_.yearFraction (fixedSchedule_[i-1],
+                                                      fixedSchedule_[i]);
+            value += dcf * yieldTS_->discount (fixedSchedule_[i])
+                * defaultTS_->defaultProbability (fixedSchedule_[i], true);
+        }
+        value *= coupon_;
+
+        value += yieldTS_->discount (fixedSchedule_.dates().back())
+            * defaultTS_->defaultProbability (fixedSchedule_.dates().back(),
+                                              true);
+
+        Real initialDiscount = yieldTS_->discount(fixedSchedule_[0]);
+
+        return (1.0 - initialDiscount + value - recoveryValue_) / fixedAnnuity_;
+    }
+
+
+    AssetSwapHelper::AssetSwapHelper(const Handle<Quote>& spread,
+                                     const Period& tenor,
+                                     Natural settlementDays,
+                                     Calendar calendar,
+                                     const Period& fixedPeriod,
+                                     BusinessDayConvention fixedConvention,
+                                     DayCounter fixedDayCount,
+                                     const Period& floatPeriod,
+                                     BusinessDayConvention floatConvention,
+                                     DayCounter floatDayCount,
+                                     Real recoveryRate,
+                                     const RelinkableHandle<YieldTermStructure>& yieldTS,
+                                     const Period& integrationStepSize)
+    : DefaultProbabilityHelper(spread), tenor_(tenor), settlementDays_(settlementDays),
+      calendar_(std::move(calendar)), fixedConvention_(fixedConvention), fixedPeriod_(fixedPeriod),
+      fixedDayCount_(std::move(fixedDayCount)), floatConvention_(floatConvention),
+      floatPeriod_(floatPeriod), floatDayCount_(std::move(floatDayCount)),
+      recoveryRate_(recoveryRate), yieldTS_(yieldTS), integrationStepSize_(integrationStepSize) {
+
+        initializeDates();
+
+        registerWith(Settings::instance().evaluationDate());
+        registerWith(yieldTS);
+    }
+
+    Real AssetSwapHelper::impliedQuote() const {
+        QL_REQUIRE(!probability_.empty(),
+                   "default term structure not set");
+        // we didn't register as observers - force calculation
+        asw_->recalculate();
+        return asw_->fairSpread();
+    }
+
+    void AssetSwapHelper::setTermStructure(
+                                        DefaultProbabilityTermStructure* ts) {
+        DefaultProbabilityHelper::setTermStructure(ts);
+
+        probability_.linkTo(
+            ext::shared_ptr<DefaultProbabilityTermStructure>(ts, null_deleter()),
+            false);
+
+        initializeDates();
+    }
+
+    void AssetSwapHelper::update() {
+        if (evaluationDate_ != Settings::instance().evaluationDate())
+            initializeDates();
+
+        DefaultProbabilityHelper::update();
+    }
+
+    void AssetSwapHelper::initializeDates() {
+        evaluationDate_ = Settings::instance().evaluationDate();
+
+        earliestDate_ = calendar_.advance (evaluationDate_,
+                                           settlementDays_, Days);
+
+        Date maturity = earliestDate_ + tenor_;
+
+        latestDate_ = calendar_.adjust (maturity, fixedConvention_);
+
+        Schedule fixedSchedule(earliestDate_, maturity,
+                               fixedPeriod_, calendar_,
+                               fixedConvention_, fixedConvention_,
+                               DateGeneration::Forward, false);
+        Schedule floatSchedule(earliestDate_, maturity,
+                               floatPeriod_, calendar_,
+                               floatConvention_, floatConvention_,
+                               DateGeneration::Forward, false);
+
+        asw_ = ext::shared_ptr<RiskyAssetSwap>(
+                                      new RiskyAssetSwap(true,
+                                                         100.0,
+                                                         fixedSchedule,
+                                                         floatSchedule,
+                                                         fixedDayCount_,
+                                                         floatDayCount_,
+                                                         0.01,
+                                                         recoveryRate_,
+                                                         yieldTS_,
+                                                         probability_));
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="26">
+    <source>riskyassetswapoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/event.hpp>
+#include <ql/experimental/credit/riskyassetswapoption.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    RiskyAssetSwapOption::RiskyAssetSwapOption(ext::shared_ptr<RiskyAssetSwap> asw,
+                                               const Date& expiry,
+                                               Rate marketSpread,
+                                               Volatility spreadVolatility)
+    : asw_(std::move(asw)), expiry_(expiry), marketSpread_(marketSpread),
+      spreadVolatility_(spreadVolatility) {}
+
+    bool RiskyAssetSwapOption::isExpired() const {
+        return detail::simple_event(expiry_).hasOccurred();
+    }
+
+
+    void RiskyAssetSwapOption::performCalculations() const {
+        Real w;
+        if (asw_->fixedPayer()) // strike receiver = asw call = spread put
+            w = -1.0;
+        else
+            w = 1.0;
+
+        Date today = Settings::instance().evaluationDate();
+        Time expiryTime = Actual365Fixed().yearFraction(today, expiry_);
+        Real stdDev = spreadVolatility_ * std::sqrt(expiryTime);
+        Real d = (asw_->spread() - marketSpread_) / stdDev;
+        Real A0 = asw_->nominal() * asw_->floatAnnuity();
+
+        NPV_ = A0 * stdDev * (w*d * CumulativeNormalDistribution()(w*d)
+                              + NormalDistribution()(d));
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="27">
+    <source>riskybond.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/cashflowvectors.hpp>
+#include <ql/cashflows/couponpricer.hpp>
+#include <ql/cashflows/iborcoupon.hpp>
+#include <ql/cashflows/simplecashflow.hpp>
+#include <ql/experimental/credit/loss.hpp>
+#include <ql/experimental/credit/riskybond.hpp>
+#include <ql/time/daycounters/actualactual.hpp>
+#include <utility>
+
+using namespace std;
+
+namespace QuantLib {
+
+    RiskyBond::RiskyBond(std::string name,
+                         Currency ccy,
+                         Real recoveryRate,
+                         Handle<DefaultProbabilityTermStructure> defaultTS,
+                         Handle<YieldTermStructure> yieldTS,
+                         Natural settlementDays,
+                         Calendar calendar)
+    : name_(std::move(name)), ccy_(std::move(ccy)), recoveryRate_(recoveryRate),
+      defaultTS_(std::move(defaultTS)), yieldTS_(std::move(yieldTS)),
+      settlementDays_(settlementDays), calendar_(std::move(calendar)) {
+        registerWith (yieldTS_);
+        registerWith (defaultTS_);
+        //the two above might not be registered with evalDate
+        registerWith(Settings::instance().evaluationDate());
+    }
+
+    bool RiskyBond::isExpired() const {
+        return detail::simple_event(maturityDate()).hasOccurred();
+    }
+
+    void RiskyBond::setupExpired() const {
+        Instrument::setupExpired();
+    }
+
+    void RiskyBond::performCalculations() const {
+        NPV_ = 0;
+        Date today = Settings::instance().evaluationDate();
+        Date npvDate = calendar_.advance(today, settlementDays_, Days);
+        std::vector<ext::shared_ptr<CashFlow> > cf = cashflows();
+        Date d1 = effectiveDate();
+        for (auto& i : cf) {
+            Date d2 = i->date();
+            if (d2 > npvDate) {
+                d1 = max(npvDate , d1);
+                Date defaultDate = d1 + (d2-d1)/2;
+
+                Real coupon = i->amount() * defaultTS_->survivalProbability(d2);
+                Real recovery = notional(defaultDate) * recoveryRate_
+                    * (defaultTS_->survivalProbability(d1)
+                       -defaultTS_->survivalProbability(d2));
+                NPV_ += coupon * yieldTS()->discount(d2);
+                NPV_ += recovery * yieldTS()->discount(defaultDate);
+            }
+            d1 = d2;
+        }
+        valuationDate_ = npvDate;
+    }
+
+    Real RiskyBond::riskfreeNPV() const {
+        Date today = Settings::instance().evaluationDate();
+        Date npvDate = calendar_.advance(today, settlementDays_, Days);
+        Real npv = 0;
+        std::vector<ext::shared_ptr<CashFlow> > cf = cashflows();
+        for (auto& i : cf) {
+            Date d2 = i->date();
+            if (d2 > npvDate)
+                npv += i->amount() * yieldTS()->discount(d2);
+        }
+        return npv;
+    }
+
+    Real RiskyBond::totalFutureFlows() const {
+        Date today = Settings::instance().evaluationDate();
+        Date npvDate = calendar_.advance(today, settlementDays_, Days);
+        Real flow = 0;
+        std::vector<ext::shared_ptr<CashFlow> > cf = cashflows();
+        for (auto& i : cf) {
+            if (i->date() > npvDate)
+                flow += i->amount();
+        }
+        return flow;
+    }
+
+    std::vector<ext::shared_ptr<CashFlow> > RiskyBond::expectedCashflows() {
+        std::vector<ext::shared_ptr<CashFlow> > expected;
+        std::vector<ext::shared_ptr<CashFlow> > cf = cashflows();
+        Date today = Settings::instance().evaluationDate();
+        Date npvDate = calendar_.advance(today, settlementDays_, Days);
+        Date d1 = effectiveDate();
+        for (auto& i : cf) {
+            Date d2 = i->date();
+            if (d2 > npvDate) {
+                d1 = max(npvDate, d1);
+                Date defaultDate = d1 + (d2-d1)/2;
+
+                Real coupon = i->amount() * defaultTS_->survivalProbability(d2);
+                Real recovery = notional(defaultDate) * recoveryRate_
+                    * (defaultTS_->survivalProbability(d1)
+                       -defaultTS_->survivalProbability(d2));
+                ext::shared_ptr<CashFlow>
+                    flow1(new SimpleCashFlow(coupon, d2));
+                expected.push_back(flow1);
+
+                ext::shared_ptr<CashFlow>
+                    flow2(new SimpleCashFlow(recovery, defaultDate));
+                expected.push_back(flow2);
+            }
+            d1 = d2;
+        }
+        return expected;
+    }
+
+    //------------------------------------------------------------------------
+    RiskyFixedBond::RiskyFixedBond(const std::string& name,
+                                   const Currency& ccy,
+                                   Real recoveryRate,
+                                   const Handle<DefaultProbabilityTermStructure>& defaultTS,
+                                   const Schedule& schedule,
+                                   Real rate,
+                                   DayCounter dayCounter,
+                                   BusinessDayConvention paymentConvention,
+                                   std::vector<Real> notionals,
+                                   const Handle<YieldTermStructure>& yieldTS,
+                                   Natural settlementDays)
+    : RiskyBond(name, ccy, recoveryRate, defaultTS, yieldTS, settlementDays, schedule.calendar()),
+      schedule_(schedule), rate_(rate), dayCounter_(std::move(dayCounter)),
+      // paymentConvention_(paymentConvention),
+      notionals_(std::move(notionals)) {
+        // FIXME: Take paymentConvention into account
+        std::vector<Date> dates = schedule_.dates();
+        Real previousNotional = notionals_.front();
+        for (Size i = 1; i < dates.size(); i++) {
+            Real currentNotional = (i < notionals_.size() ?
+                             notionals_[i] :
+                             notionals_.back());
+            ext::shared_ptr<CashFlow> interest (new
+                   FixedRateCoupon(dates[i], previousNotional,
+                                   rate_, dayCounter_, dates[i-1], dates[i]));
+            ext::shared_ptr<CashFlow> amortization(new
+                 AmortizingPayment(previousNotional - currentNotional, dates[i]));
+            previousNotional = currentNotional;
+
+            leg_.push_back(interest);
+            interestLeg_.push_back(interest);
+            if (amortization->amount() != 0){
+                leg_.push_back(amortization);
+                redemptionLeg_.push_back(amortization);
+            }
+        }
+
+        ext::shared_ptr<CashFlow> redemption(new
+                 Redemption(previousNotional, schedule_.dates().back()));
+        leg_.push_back(redemption);
+        redemptionLeg_.push_back(redemption);
+    }
+
+    std::vector<ext::shared_ptr<CashFlow> > RiskyFixedBond::cashflows() const{
+        return leg_;
+    }
+    std::vector<ext::shared_ptr<CashFlow> > RiskyFixedBond::interestFlows() const{
+        return interestLeg_;
+    }
+    std::vector<ext::shared_ptr<CashFlow> > RiskyFixedBond::notionalFlows() const{
+        return redemptionLeg_;
+    }
+
+    Real RiskyFixedBond::notional(Date date) const {
+        if (date > maturityDate())
+            return 0.0;
+        Real ntl = notionals_.front();
+        for (Size i = 0; i < schedule_.size(); i++) {
+            if (i < notionals_.size() && schedule_[i] <= date)
+                ntl = notionals_[i];
+            else
+                break;
+        }
+        return ntl;
+    }
+
+    Date RiskyFixedBond::effectiveDate() const {
+        return schedule_.dates().front();
+    }
+
+    Date RiskyFixedBond::maturityDate() const {
+        return schedule_.dates().back();
+    }
+
+    //------------------------------------------------------------------------
+    RiskyFloatingBond::RiskyFloatingBond(const std::string& name,
+                                         const Currency& ccy,
+                                         Real recoveryRate,
+                                         const Handle<DefaultProbabilityTermStructure>& defaultTS,
+                                         const Schedule& schedule,
+                                         ext::shared_ptr<IborIndex> index,
+                                         Integer fixingDays,
+                                         Real spread,
+                                         std::vector<Real> notionals,
+                                         const Handle<YieldTermStructure>& yieldTS,
+                                         Natural settlementDays)
+    : RiskyBond(name, ccy, recoveryRate, defaultTS, yieldTS, settlementDays, schedule.calendar()),
+      schedule_(schedule), index_(std::move(index)), fixingDays_(fixingDays), spread_(spread),
+      notionals_(std::move(notionals)) {
+
+        // FIXME: Take paymentConvention into account
+        std::vector<Date> dates = schedule_.dates();
+        Real previousNotional = notionals_.front();
+        for (Size i = 1; i < dates.size(); i++) {
+            Real currentNotional = (i < notionals_.size() ?
+                             notionals_[i] :
+                             notionals_.back());
+            ext::shared_ptr<CashFlow> interest (new
+                   IborCoupon(dates[i], previousNotional, dates[i-1], dates[i],
+                              fixingDays_, index_, 1.0, spread_));
+            ext::shared_ptr<CashFlow> amortization(new
+                 AmortizingPayment(previousNotional - currentNotional, dates[i]));
+            previousNotional = currentNotional;
+
+            leg_.push_back(interest);
+            interestLeg_.push_back(interest);
+            if (amortization->amount() != 0){
+                leg_.push_back(amortization);
+                redemptionLeg_.push_back(amortization);
+            }
+        }
+
+        ext::shared_ptr<CashFlow> redemption(new
+                 Redemption(previousNotional, schedule_.dates().back()));
+        leg_.push_back(redemption);
+        redemptionLeg_.push_back(redemption);
+
+        ext::shared_ptr<IborCouponPricer>
+            fictitiousPricer(new
+                BlackIborCouponPricer(Handle<OptionletVolatilityStructure>()));
+        setCouponPricer(leg_,fictitiousPricer);
+    }
+
+    std::vector<ext::shared_ptr<CashFlow> > RiskyFloatingBond::cashflows()
+        const {
+        return leg_;
+    }
+
+    std::vector<ext::shared_ptr<CashFlow> > RiskyFloatingBond::interestFlows()
+    const {
+        return interestLeg_;
+    }
+
+    std::vector<ext::shared_ptr<CashFlow> > RiskyFloatingBond::notionalFlows()
+    const {
+        return redemptionLeg_;
+    }
+
+    Real RiskyFloatingBond::notional(Date date) const {
+        if (date > maturityDate())
+            return 0.0;
+        Real ntl = notionals_.front();
+        for (Size i = 0; i < schedule_.size(); i++) {
+            if (i < notionals_.size() && schedule_[i] <= date)
+                ntl = notionals_[i];
+            else
+                break;
+        }
+        return ntl;
+    }
+
+    Date RiskyFloatingBond::effectiveDate() const {
+        return schedule_.dates().front();
+    }
+
+    Date RiskyFloatingBond::maturityDate() const {
+        return schedule_.dates().back();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="28">
+    <source>syntheticcdo.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Roland Lichters
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/credit/syntheticcdo.hpp>
+
+#ifndef QL_PATCH_SOLARIS
+
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/event.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/experimental/credit/gaussianlhplossmodel.hpp>
+#include <ql/experimental/credit/midpointcdoengine.hpp>
+
+using namespace std;
+
+namespace QuantLib {
+
+    SyntheticCDO::SyntheticCDO(const ext::shared_ptr<Basket>& basket,
+                               Protection::Side side,
+                               const Schedule& schedule,
+                               Rate upfrontRate,
+                               Rate runningRate,
+                               const DayCounter& dayCounter,
+                               BusinessDayConvention paymentConvention,
+                               boost::optional<Real> notional)
+    : basket_(basket), side_(side), upfrontRate_(upfrontRate), runningRate_(runningRate),
+      leverageFactor_(notional ? notional.get() / basket->trancheNotional() : 1.), // NOLINT(readability-implicit-bool-conversion)
+      dayCounter_(dayCounter), paymentConvention_(paymentConvention) {
+        QL_REQUIRE(!basket->names().empty(), "basket is empty");
+        // Basket inception must lie before contract protection start.
+        QL_REQUIRE(basket->refDate() <= schedule.startDate(),
+        //using the start date of the schedule might be wrong, think of the 
+        //  CDS rule
+            "Basket did not exist before contract start.");
+
+        // Notice the notional is that of the basket at basket inception, some 
+        //   names might have defaulted in between
+        normalizedLeg_ = FixedRateLeg(schedule)
+            .withNotionals(basket_->trancheNotional() * leverageFactor_)
+            .withCouponRates(runningRate, dayCounter)
+            .withPaymentAdjustment(paymentConvention);
+
+        // Date today = Settings::instance().evaluationDate();
+        
+        // register with probabilities if the corresponding issuer is, baskets
+        //   are not registered with the DTS
+        for (Size i = 0; i < basket->names().size(); i++) {
+            /* This turns out to be a problem: depends on today but I am not 
+            modifying the registrations, if we go back in time in the 
+            calculations this would left me unregistered to some. Not impossible
+            to de-register and register when updating but i am dropping it.
+
+            if(!basket->pool()->get(basket->names()[i]).
+                defaultedBetween(schedule.dates()[0], today,
+                                     basket->pool()->defaultKeys()[i]))
+            */
+            // registers with the associated curve (issuer and event type)
+            // \todo make it possible to access them by name instead of index
+            registerWith(basket->pool()->get(basket->names()[i]).
+                defaultProbability(basket->pool()->defaultKeys()[i]));
+            /* \todo Issuers should be observables/obsrvr and they would in turn
+            regiter with the DTS; only we might get updates from curves we do
+            not use.
+            */
+        }
+        registerWith(basket_);
+    }
+
+    Rate SyntheticCDO::premiumValue () const {
+        calculate();
+        return premiumValue_;
+    }
+
+    Rate SyntheticCDO::protectionValue () const {
+        calculate();
+        return protectionValue_;
+    }
+
+    Real SyntheticCDO::premiumLegNPV() const {
+        calculate();
+        if(side_ == Protection::Buyer) return premiumValue_;
+        return -premiumValue_;
+    }
+
+    Real SyntheticCDO::protectionLegNPV() const {
+        calculate();
+        if(side_ == Protection::Buyer) return -protectionValue_;
+        return protectionValue_;
+    }
+
+    Rate SyntheticCDO::fairPremium () const {
+        calculate();
+        QL_REQUIRE(premiumValue_ != 0, "Attempted divide by zero while calculating syntheticCDO premium.");
+        return runningRate_
+            * (protectionValue_ - upfrontPremiumValue_) / premiumValue_;
+    }
+
+    Rate SyntheticCDO::fairUpfrontPremium () const {
+        calculate();
+        return (protectionValue_ - premiumValue_) / remainingNotional_;
+    }
+
+    Disposable<vector<Real> > SyntheticCDO::expectedTrancheLoss() const {
+        calculate();
+        return expectedTrancheLoss_;
+    }
+
+    Size SyntheticCDO::error () const {
+        calculate();
+        return error_;
+    }
+
+    bool SyntheticCDO::isExpired () const {
+        // FIXME: it could have also expired (knocked out) because theres
+        //   no remaining tranche notional.
+        return detail::simple_event(normalizedLeg_.back()->date())
+               .hasOccurred();
+    }
+
+    Real SyntheticCDO::remainingNotional() const {
+        calculate();
+        return remainingNotional_;
+    }
+
+    void SyntheticCDO::setupArguments(PricingEngine::arguments* args) const {
+        auto* arguments = dynamic_cast<SyntheticCDO::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+        arguments->basket = basket_;
+        arguments->side = side_;
+        arguments->normalizedLeg = normalizedLeg_;
+
+        arguments->upfrontRate = upfrontRate_;
+        arguments->runningRate = runningRate_;
+        arguments->dayCounter = dayCounter_;
+        arguments->paymentConvention = paymentConvention_;
+        arguments->leverageFactor = leverageFactor_;
+    }
+
+    void SyntheticCDO::fetchResults(const PricingEngine::results* r) const {
+        Instrument::fetchResults(r);
+
+        const auto* results = dynamic_cast<const SyntheticCDO::results*>(r);
+        QL_REQUIRE(results != nullptr, "wrong result type");
+
+        premiumValue_ = results->premiumValue;
+        protectionValue_ = results->protectionValue;
+        upfrontPremiumValue_ = results->upfrontPremiumValue;
+        remainingNotional_ = results->remainingNotional;
+        error_ = results->error;
+        expectedTrancheLoss_ = results->expectedTrancheLoss;
+    }
+
+    void SyntheticCDO::setupExpired() const {
+        Instrument::setupExpired();
+        premiumValue_ = 0.0;
+        protectionValue_ = 0.0;
+        upfrontPremiumValue_ = 0.0;
+        remainingNotional_ = 1.0;
+        expectedTrancheLoss_.clear();
+    }
+
+    void SyntheticCDO::arguments::validate() const {
+        QL_REQUIRE(side != Protection::Side(-1), "side not set");
+        QL_REQUIRE(basket && !basket->names().empty(), "no basket given");
+        QL_REQUIRE(runningRate != Null<Real>(), "no premium rate given");
+        QL_REQUIRE(upfrontRate != Null<Real>(), "no upfront rate given");
+        QL_REQUIRE(!dayCounter.empty(), "no day counter given");
+    }
+
+    void SyntheticCDO::results::reset() {
+        Instrument::results::reset();
+        premiumValue = Null<Real>();
+        protectionValue = Null<Real>();
+        upfrontPremiumValue = Null<Real>();
+        remainingNotional = Null<Real>();
+        error = 0;
+        expectedTrancheLoss.clear();
+    }
+
+
+
+
+
+    namespace {
+
+        class ObjectiveFunction {
+          public:
+            ObjectiveFunction(Real target,
+                              SimpleQuote& quote,
+                              PricingEngine& engine,
+                              const SyntheticCDO::results* results)
+            : target_(target), quote_(quote),
+              engine_(engine), results_(results) {}
+
+            Real operator()(Real guess) const {
+                quote_.setValue(guess);
+                engine_.calculate();
+                return results_->value - target_;
+            }
+          private:
+            Real target_;
+            SimpleQuote& quote_;
+            PricingEngine& engine_;
+            const SyntheticCDO::results* results_;
+        };
+
+    }
+
+    // untested, not sure this is not messing up, once it comes out of this
+    //   the basket model is different.....
+    Real SyntheticCDO::implicitCorrelation(const std::vector<Real>& recoveries, 
+        const Handle<YieldTermStructure>& discountCurve, 
+        Real targetNPV,
+        Real accuracy) const 
+    {
+        ext::shared_ptr<SimpleQuote> correl(new SimpleQuote(0.0));
+
+        ext::shared_ptr<GaussianLHPLossModel> lhp(new 
+            GaussianLHPLossModel(Handle<Quote>(correl), recoveries));
+
+        // lock
+        basket_->setLossModel(lhp);
+
+        MidPointCDOEngine engineIC(discountCurve);
+        setupArguments(engineIC.getArguments());
+        const auto* results = dynamic_cast<const SyntheticCDO::results*>(engineIC.getResults());
+
+        // aviod recal of the basket on engine updates through the quote
+        basket_->recalculate();
+        basket_->freeze();
+
+        ObjectiveFunction f(targetNPV, *correl, engineIC, results);
+        Rate guess = 0.001;
+        //  Rate step = guess*0.1;
+
+        // wrap/catch to be able to unfreeze the basket:
+        Real solution = Brent().solve(f, accuracy, guess, QL_EPSILON, 1.-QL_EPSILON);
+        basket_->unfreeze();
+        return solution;
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+</documents>

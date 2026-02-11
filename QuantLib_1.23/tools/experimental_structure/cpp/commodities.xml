@@ -1,0 +1,2210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>commodity.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commodity.hpp>
+#include <iomanip>
+#include <utility>
+
+namespace QuantLib {
+
+    Commodity::Commodity(ext::shared_ptr<SecondaryCosts> secondaryCosts)
+    : secondaryCosts_(std::move(secondaryCosts)) {}
+
+    const SecondaryCostAmounts& Commodity::secondaryCostAmounts() const {
+        return secondaryCostAmounts_;
+    }
+
+    const PricingErrors& Commodity::pricingErrors() const {
+        return pricingErrors_;
+    }
+
+    void Commodity::addPricingError(PricingError::Level errorLevel,
+                                    const std::string& error,
+                                    const std::string& detail) const {
+        pricingErrors_.push_back(PricingError(errorLevel, error, detail));
+    }
+
+
+    std::ostream& operator<<(std::ostream& out,
+                             const SecondaryCostAmounts& secondaryCostAmounts) {
+        std::string currencyCode;
+        Real totalAmount = 0;
+
+        out << "secondary costs" << std::endl;
+        for (const auto& secondaryCostAmount : secondaryCostAmounts) {
+            Real amount = secondaryCostAmount.second.value();
+            if (currencyCode.empty())
+                currencyCode = secondaryCostAmount.second.currency().code();
+            totalAmount += amount;
+            out << std::setw(28) << std::left << secondaryCostAmount.first << std::setw(12)
+                << std::right << std::fixed << std::setprecision(2) << amount << " " << currencyCode
+                << std::endl;
+        }
+        out << std::setw(28) << std::left << "total"
+            << std::setw(12) << std::right << std::fixed
+            << std::setprecision(2) << totalAmount << " " << currencyCode
+            << std::endl;
+        return out;
+    }
+
+
+    std::ostream& operator<<(std::ostream& out, const PricingError& error) {
+        switch (error.errorLevel) {
+          case PricingError::Info:
+            out << "info: ";
+            break;
+          case PricingError::Warning:
+            out << "warning: ";
+            break;
+          case PricingError::Error:
+            out << "*** error: ";
+            break;
+          case PricingError::Fatal:
+            out << "*** fatal: ";
+            break;
+        }
+        out << error.error;
+        if (!error.detail.empty())
+            out << ": " << error.detail;
+        return out;
+    }
+
+    std::ostream& operator<<(std::ostream& out, const PricingErrors& errors) {
+        if (!errors.empty()) {
+            out << "*** pricing errors" << std::endl;
+            for (const auto& error : errors)
+                out << error << std::endl;
+        }
+        return out;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>commoditycashflow.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commoditycashflow.hpp>
+#include <ql/patterns/visitor.hpp>
+#include <iomanip>
+
+namespace QuantLib {
+
+    void CommodityCashFlow::accept(AcyclicVisitor& v) {
+        auto* v1 = dynamic_cast<Visitor<CommodityCashFlow>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            CashFlow::accept(v);
+    }
+
+    std::ostream& operator<<(std::ostream& out,
+                             const CommodityCashFlows& cashFlows) {
+        if (cashFlows.empty())
+            return out << "no cashflows" << std::endl;
+        out << "cashflows" << std::endl;
+        std::string currencyCode; //= cashFlows[0]->discountedAmount().currency().code();
+        Real totalDiscounted = 0;
+        Real totalUndiscounted = 0;
+        for (const auto& i : cashFlows) {
+            //const ext::shared_ptr<CommodityCashFlow> cashFlow = *i;
+            const ext::shared_ptr<CommodityCashFlow> cashFlow = i.second;
+            totalDiscounted += cashFlow->discountedAmount().value();
+            totalUndiscounted += cashFlow->undiscountedAmount().value();
+            //out << io::iso_date(cashFlow->date()) << " " <<
+            out << io::iso_date(i.first) << " " << std::setw(16) << std::right << std::fixed
+                << std::setprecision(2) << cashFlow->discountedAmount().value() << " "
+                << currencyCode << std::setw(16) << std::right << std::fixed << std::setprecision(2)
+                << cashFlow->undiscountedAmount().value() << " " << currencyCode << std::endl;
+        }
+        out << "total      "
+            << std::setw(16) << std::right << std::fixed
+            << std::setprecision(2) << totalDiscounted << " " << currencyCode
+            << std::setw(16) << std::right << std::fixed
+            << std::setprecision(2) << totalUndiscounted << " "
+            << currencyCode << std::endl;
+        return out;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>commoditycurve.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commoditycurve.hpp>
+#include <ql/experimental/commodities/commoditypricinghelpers.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    CommodityCurve::CommodityCurve(std::string name,
+                                   CommodityType commodityType,
+                                   Currency currency,
+                                   UnitOfMeasure unitOfMeasure,
+                                   const Calendar& calendar,
+                                   const std::vector<Date>& dates,
+                                   std::vector<Real> prices,
+                                   const DayCounter& dayCounter)
+    : TermStructure(dates[0], calendar, dayCounter), name_(std::move(name)),
+      commodityType_(std::move(commodityType)), unitOfMeasure_(std::move(unitOfMeasure)),
+      currency_(std::move(currency)), dates_(dates), data_(std::move(prices)),
+      interpolator_(ForwardFlat()), basisOfCurveUomConversionFactor_(1) {
+
+        QL_REQUIRE(dates_.size()>1, "too few dates");
+        QL_REQUIRE(data_.size()==dates_.size(), "dates/prices count mismatch");
+
+        times_.resize(dates_.size());
+        times_[0]=0.0;
+        for (Size i = 1; i < dates_.size(); i++) {
+            QL_REQUIRE(dates_[i] > dates_[i-1],
+                       "invalid date (" << dates_[i] << ", vs "
+                       << dates_[i-1] << ")");
+            times_[i] = dayCounter.yearFraction(dates_[0], dates_[i]);
+        }
+
+        interpolation_ =
+            interpolator_.interpolate(times_.begin(), times_.end(),
+                                      data_.begin());
+        interpolation_.update();
+    }
+
+    CommodityCurve::CommodityCurve(std::string name,
+                                   CommodityType commodityType,
+                                   Currency currency,
+                                   UnitOfMeasure unitOfMeasure,
+                                   const Calendar& calendar,
+                                   const DayCounter& dayCounter)
+    : TermStructure(0, calendar, dayCounter), name_(std::move(name)),
+      commodityType_(std::move(commodityType)), unitOfMeasure_(std::move(unitOfMeasure)),
+      currency_(std::move(currency)), interpolator_(ForwardFlat()),
+      basisOfCurveUomConversionFactor_(1) {}
+
+    void CommodityCurve::setPrices(std::map<Date, Real>& prices) {
+        QL_REQUIRE(prices.size()>1, "too few prices");
+
+        dates_.clear();
+        data_.clear();
+        for (std::map<Date, Real>::const_iterator i = prices.begin(); i != prices.end(); ++i) {
+            dates_.push_back(i->first);
+            data_.push_back(i->second);
+        }
+
+        times_.resize(dates_.size());
+        times_[0]=0.0;
+        for (Size i = 1; i < dates_.size(); i++)
+            times_[i] = dayCounter().yearFraction(dates_[0], dates_[i]);
+
+        interpolation_ =
+            interpolator_.interpolate(times_.begin(), times_.end(),
+                                      data_.begin());
+        interpolation_.update();
+    }
+
+    void CommodityCurve::setBasisOfCurve(
+                      const ext::shared_ptr<CommodityCurve>& basisOfCurve) {
+        basisOfCurve_ = basisOfCurve;
+        basisOfCurveUomConversionFactor_ =
+            CommodityPricingHelper::calculateUomConversionFactor(
+                                                commodityType_,
+                                                basisOfCurve_->unitOfMeasure_,
+                                                unitOfMeasure_);
+    }
+
+    std::ostream& operator<<(std::ostream& out, const CommodityCurve& curve) {
+        out << "[" << curve.name_ << "] (" << curve.currency_.code()
+            << "/" << curve.unitOfMeasure_.code() << ")";
+        if (curve.basisOfCurve_ != nullptr)
+            out << "; basis to (" << (*curve.basisOfCurve_) << ")";
+        return out;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>commodityindex.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commodityindex.hpp>
+#include <ql/experimental/commodities/commoditypricinghelpers.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    CommodityIndex::CommodityIndex(const std::string& indexName,
+                                   CommodityType commodityType,
+                                   Currency currency,
+                                   UnitOfMeasure unitOfMeasure,
+                                   Calendar calendar,
+                                   Real lotQuantity,
+                                   ext::shared_ptr<CommodityCurve> forwardCurve,
+                                   ext::shared_ptr<ExchangeContracts> exchangeContracts,
+                                   int nearbyOffset)
+    : name_(indexName), commodityType_(std::move(commodityType)),
+      unitOfMeasure_(std::move(unitOfMeasure)), currency_(std::move(currency)),
+      calendar_(std::move(calendar)), lotQuantity_(lotQuantity),
+      forwardCurve_(std::move(forwardCurve)), forwardCurveUomConversionFactor_(1),
+      exchangeContracts_(std::move(exchangeContracts)), nearbyOffset_(nearbyOffset) {
+        quotes_ = IndexManager::instance().getHistory(indexName);
+        IndexManager::instance().setHistory(indexName, quotes_);
+        registerWith(Settings::instance().evaluationDate());
+        registerWith(IndexManager::instance().notifier(name()));
+
+        if (forwardCurve_ != nullptr)
+            // registerWith(forwardCurve_);
+            forwardCurveUomConversionFactor_ =
+                CommodityPricingHelper::calculateUomConversionFactor(
+                                                commodityType_,
+                                                forwardCurve_->unitOfMeasure_,
+                                                unitOfMeasure_);
+    }
+
+    std::ostream& operator<<(std::ostream& out, const CommodityIndex& index) {
+        out << "[" << index.name_ << "] ("
+            << index.currency_.code() << "/"
+            << index.unitOfMeasure_.code() << ")";
+        if (index.forwardCurve_ != nullptr)
+            out << "; forward (" << (*index.forwardCurve_) << ")";
+        return out;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>commoditypricinghelpers.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commoditypricinghelpers.hpp>
+
+namespace QuantLib {
+
+    void CommodityPricingHelper::createPricingPeriods(
+                          Date startDate, Date endDate,
+                          const Quantity& quantity,
+                          EnergyCommodity::DeliverySchedule deliverySchedule,
+                          EnergyCommodity::QuantityPeriodicity qtyPeriodicity,
+                          const PaymentTerm& paymentTerm,
+                          PricingPeriods& pricingPeriods) {
+        if (deliverySchedule == EnergyCommodity::Monthly) {
+            Quantity periodQuantity;
+            if (qtyPeriodicity == EnergyCommodity::PerMonth) {
+                periodQuantity = quantity;
+            } else {
+                QL_FAIL("Invalid period quantity/pricing period combination.");
+            }
+
+            for (Date periodStartDate=startDate; periodStartDate<endDate; ) {
+                Date periodEndDate = (periodStartDate + (1 * Months)) - 1;
+                Date paymentDate = paymentTerm.getPaymentDate(periodEndDate);
+                pricingPeriods.push_back(ext::make_shared<PricingPeriod>(
+                             periodStartDate, periodEndDate,
+                                               paymentDate, periodQuantity));
+                periodStartDate = periodEndDate + 1;
+            }
+        } else if (deliverySchedule == EnergyCommodity::Daily) {
+            QL_REQUIRE(qtyPeriodicity == EnergyCommodity::PerDay,
+                       "Invalid period quantity/pricing period combination.");
+
+            for (Date periodStartDate=startDate; periodStartDate<endDate; ) {
+                Date periodEndDate = (periodStartDate + (1 * Months)) - 1;
+
+                Quantity periodQuantity =
+                    quantity * (periodEndDate - periodStartDate);
+                Date paymentDate = paymentTerm.getPaymentDate(periodEndDate);
+                pricingPeriods.push_back(ext::make_shared<PricingPeriod>(
+                             periodStartDate, periodEndDate,
+                                               paymentDate, periodQuantity));
+                periodStartDate = periodEndDate + 1;
+            }
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>commoditysettings.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+
+#include <ql/experimental/commodities/commoditysettings.hpp>
+#include <ql/currencies/america.hpp>
+#include <ql/experimental/commodities/petroleumunitsofmeasure.hpp>
+
+namespace QuantLib {
+
+    CommoditySettings::CommoditySettings()
+    : currency_(USDCurrency()), unitOfMeasure_(BarrelUnitOfMeasure()) {}
+
+    Currency& CommoditySettings::currency() {
+        return currency_;
+    }
+
+    UnitOfMeasure& CommoditySettings::unitOfMeasure() {
+        return unitOfMeasure_;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>commoditytype.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commoditytype.hpp>
+#include <ostream>
+
+namespace QuantLib {
+
+    std::map<std::string, ext::shared_ptr<CommodityType::Data> >
+    CommodityType::commodityTypes_;
+
+    CommodityType::CommodityType(const std::string& name,
+                                 const std::string& code) {
+        std::map<std::string, ext::shared_ptr<CommodityType::Data> >::const_iterator i = commodityTypes_.find(code);
+        if (i != commodityTypes_.end())
+            data_ = i->second;
+        else {
+            data_ = ext::make_shared<CommodityType::Data>(
+                                         name, code);
+            commodityTypes_[code] = data_;
+        }
+    }
+
+    std::ostream& operator<<(std::ostream& out, const CommodityType& c) {
+        if (!c.empty())
+            return out << c.code();
+        else
+            return out << "null commodity type";
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>commodityunitcost.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commodityunitcost.hpp>
+
+namespace QuantLib {
+
+    std::ostream& operator<<(std::ostream& out,
+                             const CommodityUnitCost& unitCost) {
+        out << unitCost.amount().value() << " "
+            << unitCost.amount().currency().code() << "/"
+            << unitCost.unitOfMeasure().code();
+        return out;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>dateinterval.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/dateinterval.hpp>
+
+namespace QuantLib {
+
+    std::ostream& operator<<(std::ostream& out, const DateInterval& di) {
+        if (di.startDate_ == Date() || di.endDate_ == Date())
+            return out << "Null<DateInterval>()";
+        return out << di.startDate_ << " to " << di.endDate_;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>energybasisswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commoditysettings.hpp>
+#include <ql/experimental/commodities/energybasisswap.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    EnergyBasisSwap::EnergyBasisSwap(const Calendar& calendar,
+                                     ext::shared_ptr<CommodityIndex> spreadIndex,
+                                     ext::shared_ptr<CommodityIndex> payIndex,
+                                     ext::shared_ptr<CommodityIndex> receiveIndex,
+                                     bool spreadToPayLeg,
+                                     const Currency& payCurrency,
+                                     const Currency& receiveCurrency,
+                                     const PricingPeriods& pricingPeriods,
+                                     CommodityUnitCost basis,
+                                     const CommodityType& commodityType,
+                                     const ext::shared_ptr<SecondaryCosts>& secondaryCosts,
+                                     Handle<YieldTermStructure> payLegTermStructure,
+                                     Handle<YieldTermStructure> receiveLegTermStructure,
+                                     Handle<YieldTermStructure> discountTermStructure)
+    : EnergySwap(
+          calendar, payCurrency, receiveCurrency, pricingPeriods, commodityType, secondaryCosts),
+      spreadIndex_(std::move(spreadIndex)), payIndex_(std::move(payIndex)),
+      receiveIndex_(std::move(receiveIndex)), spreadToPayLeg_(spreadToPayLeg),
+      basis_(std::move(basis)), payLegTermStructure_(std::move(payLegTermStructure)),
+      receiveLegTermStructure_(std::move(receiveLegTermStructure)),
+      discountTermStructure_(std::move(discountTermStructure)) {
+        QL_REQUIRE(!pricingPeriods_.empty(), "no payment dates");
+        registerWith(spreadIndex_);
+        registerWith(payIndex_);
+        registerWith(receiveIndex_);
+    }
+
+    void EnergyBasisSwap::performCalculations() const {
+
+        try {
+
+            if (payIndex_->empty()) {
+                if (payIndex_->forwardCurveEmpty()) {
+                    QL_FAIL("index [" + payIndex_->name() +
+                            "] does not have any quotes or forward prices");
+                } else {
+                    addPricingError(PricingError::Warning,
+                                    "index [" + payIndex_->name() +
+                                    "] does not have any quotes; "
+                                    "using forward prices from [" +
+                                    payIndex_->forwardCurve()->name() + "]");
+                }
+            }
+            if (receiveIndex_->empty()) {
+                if (receiveIndex_->forwardCurveEmpty()) {
+                    QL_FAIL("index [" + receiveIndex_->name() +
+                            "] does not have any quotes or forward prices");
+                } else {
+                    addPricingError(PricingError::Warning,
+                                    "index [" + receiveIndex_->name() +
+                                    "] does not have any quotes; "
+                                    "using forward prices from [" +
+                                    receiveIndex_->forwardCurve()->name() +
+                                    "]");
+                }
+            }
+
+            NPV_ = 0.0;
+            additionalResults_.clear();
+            dailyPositions_.clear();
+            paymentCashFlows_.clear();
+
+            Date evaluationDate = Settings::instance().evaluationDate();
+
+            const Currency& baseCurrency =
+                CommoditySettings::instance().currency();
+            const UnitOfMeasure baseUnitOfMeasure =
+                CommoditySettings::instance().unitOfMeasure();
+
+            Real quantityUomConversionFactor =
+                calculateUomConversionFactor(
+                               pricingPeriods_[0]->quantity().commodityType(),
+                               baseUnitOfMeasure,
+                               pricingPeriods_[0]->quantity().unitOfMeasure());
+            Real payIndexUomConversionFactor =
+                calculateUomConversionFactor(payIndex_->commodityType(),
+                                             payIndex_->unitOfMeasure(),
+                                             baseUnitOfMeasure);
+            Real receiveIndexUomConversionFactor =
+                calculateUomConversionFactor(receiveIndex_->commodityType(),
+                                             receiveIndex_->unitOfMeasure(),
+                                             baseUnitOfMeasure);
+
+            Real payIndexFxConversionFactor =
+                calculateFxConversionFactor(payIndex_->currency(),
+                                            baseCurrency, evaluationDate);
+            Real receiveIndexFxConversionFactor =
+                calculateFxConversionFactor(receiveIndex_->currency(),
+                                            baseCurrency, evaluationDate);
+            Real payLegFxConversionFactor =
+                calculateFxConversionFactor(baseCurrency, payCurrency_,
+                                            evaluationDate);
+            Real receiveLegFxConversionFactor =
+                calculateFxConversionFactor(baseCurrency, receiveCurrency_,
+                                            evaluationDate);
+
+            Real basisUomConversionFactor =
+                calculateUomConversionFactor(
+                               pricingPeriods_[0]->quantity().commodityType(),
+                               basis_.unitOfMeasure(), baseUnitOfMeasure);
+            Real basisFxConversionFactor =
+                calculateFxConversionFactor(baseCurrency,
+                                            basis_.amount().currency(),
+                                            evaluationDate);
+
+            Real basisValue = basis_.amount().value() *
+                basisUomConversionFactor * basisFxConversionFactor;
+
+            Date lastPayIndexQuoteDate = payIndex_->lastQuoteDate();
+            Date lastReceiveIndexQuoteDate = receiveIndex_->lastQuoteDate();
+
+            if (lastPayIndexQuoteDate < evaluationDate - 1) {
+                std::ostringstream message;
+                message << "index [" << payIndex_->name()
+                        << "] has last quote date of "
+                        << io::iso_date(lastPayIndexQuoteDate);
+                addPricingError(PricingError::Warning, message.str());
+            }
+            if (lastReceiveIndexQuoteDate < evaluationDate - 1) {
+                std::ostringstream message;
+                message << "index [" << receiveIndex_->name()
+                        << "] has last quote date of "
+                        << io::iso_date(lastReceiveIndexQuoteDate);
+                addPricingError(PricingError::Warning, message.str());
+            }
+
+            Date lastQuoteDate = std::min(lastPayIndexQuoteDate,
+                                          lastReceiveIndexQuoteDate);
+
+            Real totalQuantityAmount = 0;
+
+            // price each period
+            for (const auto& pricingPeriod : pricingPeriods_) {
+                Integer periodDayCount = 0;
+
+                // get the index quotes
+                Date periodStartDate =
+                    calendar_.adjust(pricingPeriod->startDate());
+                for (Date stepDate = periodStartDate;
+                     stepDate <= pricingPeriod->endDate();
+                     stepDate = calendar_.advance(stepDate, 1*Days)) {
+
+                    bool unrealized = stepDate > evaluationDate;
+                    Real payQuoteValue = 0;
+                    Real receiveQuoteValue = 0;
+
+                    if (stepDate <= lastQuoteDate) {
+                        payQuoteValue = payIndex_->price(stepDate);
+                        receiveQuoteValue = receiveIndex_->price(stepDate);
+                    } else {
+                        payQuoteValue = payIndex_->forwardPrice(stepDate);
+                        receiveQuoteValue =
+                            receiveIndex_->forwardPrice(stepDate);
+                    }
+
+                    if (payQuoteValue == 0) {
+                        std::ostringstream message;
+                        message << "pay quote value for curve ["
+                                << payIndex_->name() << "] is 0 for date "
+                                << io::iso_date(stepDate);
+                        addPricingError(PricingError::Warning, message.str());
+                    }
+                    if (receiveQuoteValue == 0) {
+                        std::ostringstream message;
+                        message << "receive quote value for curve ["
+                                << receiveIndex_->name() << "] is 0 for date "
+                                << io::iso_date(stepDate);
+                        addPricingError(PricingError::Warning, message.str());
+                    }
+
+                    QL_REQUIRE(payQuoteValue != Null<Real>(),
+                               "curve [" << payIndex_->name() <<
+                               "] missing value for pricing date: "
+                               << stepDate);
+                    QL_REQUIRE(receiveQuoteValue != Null<Real>(),
+                               "curve [" << receiveIndex_->name() <<
+                               "] missing value for pricing date: "
+                               << stepDate);
+
+                    Real payLegPriceValue =
+                        payQuoteValue * payIndexUomConversionFactor *
+                        payIndexFxConversionFactor;
+                    Real receiveLegPriceValue =
+                        receiveQuoteValue * receiveIndexUomConversionFactor *
+                        receiveIndexFxConversionFactor;
+
+                    if (spreadToPayLeg_)
+                        payLegPriceValue += basisValue;
+                    else
+                        receiveLegPriceValue += basisValue;
+
+                    dailyPositions_[stepDate] =
+                        EnergyDailyPosition(stepDate, payLegPriceValue,
+                                            receiveLegPriceValue, unrealized);
+                    periodDayCount++;
+                }
+
+                Real periodQuantityAmount =
+                    pricingPeriod->quantity().amount() *
+                    quantityUomConversionFactor;
+                totalQuantityAmount += periodQuantityAmount;
+
+                Real avgDailyQuantityAmount =
+                    periodDayCount == 0 ? 0 :
+                                          periodQuantityAmount / periodDayCount;
+
+                Real payLegValue = 0;
+                Real receiveLegValue = 0;
+                for (auto dpi = dailyPositions_.find(periodStartDate);
+                     dpi != dailyPositions_.end() && dpi->first <= pricingPeriod->endDate();
+                     ++dpi) {
+                    EnergyDailyPosition& dailyPosition = dpi->second;
+                    dailyPosition.quantityAmount = avgDailyQuantityAmount;
+                    dailyPosition.riskDelta =
+                        (-dailyPosition.payLegPrice + dailyPosition.receiveLegPrice) * avgDailyQuantityAmount;
+                    payLegValue += -dailyPosition.payLegPrice * avgDailyQuantityAmount;
+                    receiveLegValue += dailyPosition.receiveLegPrice * avgDailyQuantityAmount;
+                }
+
+                Real discountFactor = 1;
+                Real payLegDiscountFactor = 1;
+                Real receiveLegDiscountFactor = 1;
+                if (pricingPeriod->paymentDate() >= evaluationDate + 2 /* settlement days*/) {
+                    discountFactor =
+                        discountTermStructure_->discount(
+                                                pricingPeriod->paymentDate());
+                    payLegDiscountFactor =
+                        payLegTermStructure_->discount(
+                                                pricingPeriod->paymentDate());
+                    receiveLegDiscountFactor =
+                        receiveLegTermStructure_->discount(
+                                                pricingPeriod->paymentDate());
+                }
+
+                Real uDelta = receiveLegValue + payLegValue;
+                Real dDelta = (receiveLegValue * receiveLegDiscountFactor) +
+                    (payLegValue * payLegDiscountFactor);
+                Real pmtFxConversionFactor =
+                    (dDelta > 0) ? payLegFxConversionFactor : receiveLegFxConversionFactor;
+                Currency pmtCurrency =
+                    (dDelta  > 0) ? receiveCurrency_ : payCurrency_;
+                Real pmtDiscountFactor =
+                    (dDelta  > 0) ? receiveLegDiscountFactor : payLegDiscountFactor;
+
+                paymentCashFlows_[pricingPeriod->paymentDate()] =
+                    ext::make_shared<CommodityCashFlow> (
+                           pricingPeriod->paymentDate(),
+                                                 Money(baseCurrency,
+                                                       uDelta * discountFactor),
+                                                 Money(baseCurrency, uDelta),
+                                                 Money(pmtCurrency,
+                                                       dDelta * pmtFxConversionFactor),
+                                                 Money(pmtCurrency,
+                                                       uDelta * pmtFxConversionFactor),
+                                                 discountFactor,
+                                                 pmtDiscountFactor,
+                                                 pricingPeriod->paymentDate() <= evaluationDate);
+
+                calculateSecondaryCostAmounts(
+                               pricingPeriods_[0]->quantity().commodityType(),
+                               totalQuantityAmount, evaluationDate);
+
+                NPV_ += dDelta;
+            }
+
+            QL_REQUIRE(!paymentCashFlows_.empty(), "no cashflows");
+
+            for (SecondaryCostAmounts::const_iterator i =
+                     secondaryCostAmounts_.begin();
+                 i != secondaryCostAmounts_.end(); ++i) {
+                Real amount = i->second.value();
+                NPV_ -= amount;
+            }
+
+            additionalResults_["dailyPositions"] = dailyPositions_;
+          
+        } catch (const QuantLib::Error& e) {
+            addPricingError(PricingError::Error, e.what());
+            throw;
+        } catch (const std::exception& e) {
+            addPricingError(PricingError::Error, e.what());
+            throw;
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="11">
+    <source>energycommodity.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/currencies/exchangeratemanager.hpp>
+#include <ql/experimental/commodities/commoditysettings.hpp>
+#include <ql/experimental/commodities/energycommodity.hpp>
+#include <ql/experimental/commodities/unitofmeasureconversionmanager.hpp>
+#include <iomanip>
+#include <utility>
+
+namespace QuantLib {
+
+    EnergyDailyPosition::EnergyDailyPosition(const Date& date,
+                                             Real payLegPrice,
+                                             Real receiveLegPrice,
+                                             bool unrealized)
+    : date(date), quantityAmount(0), payLegPrice(payLegPrice),
+      receiveLegPrice(receiveLegPrice), unrealized(unrealized) {}
+
+    std::ostream& operator<<(std::ostream& out,
+                             const EnergyDailyPositions& dailyPositions) {
+        out << std::setw(12) << std::left << "positions"
+            << std::setw(12) << std::right << "pay"
+            << std::setw(12) << std::right << "receive"
+            << std::setw(10) << std::right << "qty"
+            << std::setw(14) << std::right << "delta"
+            << std::setw(10) << std::right << "open" << std::endl;
+
+        for (const auto& i : dailyPositions) {
+            const EnergyDailyPosition& dailyPosition = i.second;
+            out << std::setw(4) << io::iso_date(i.first) << "  " << std::setw(12) << std::right
+                << std::fixed << std::setprecision(6) << dailyPosition.payLegPrice << std::setw(12)
+                << std::right << std::fixed << std::setprecision(6) << dailyPosition.receiveLegPrice
+                << std::setw(10) << std::right << std::fixed << std::setprecision(2)
+                << dailyPosition.quantityAmount << std::setw(14) << std::right << std::fixed
+                << std::setprecision(2) << dailyPosition.riskDelta << std::setw(10) << std::right
+                << std::fixed << std::setprecision(2)
+                << (dailyPosition.unrealized ? dailyPosition.quantityAmount : 0) << std::endl;
+        }
+
+        return out;
+    }
+
+
+
+
+
+    void EnergyCommodity::setupArguments(PricingEngine::arguments* args) const {
+        auto* arguments = dynamic_cast<EnergyCommodity::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+        //arguments->legs = legs_;
+        //arguments->payer = payer_;
+    }
+
+    void EnergyCommodity::fetchResults(const PricingEngine::results* r) const {
+        Instrument::fetchResults(r);
+        const auto* results = dynamic_cast<const EnergyCommodity::results*>(r);
+        QL_REQUIRE(results != nullptr, "wrong result type");
+    }
+
+    EnergyCommodity::EnergyCommodity(CommodityType commodityType,
+                                     const ext::shared_ptr<SecondaryCosts>& secondaryCosts)
+    : Commodity(secondaryCosts), commodityType_(std::move(commodityType)) {}
+
+    const CommodityType& EnergyCommodity::commodityType() const {
+        return commodityType_;
+    }
+
+
+    Real EnergyCommodity::calculateUomConversionFactor(
+                                       const CommodityType& commodityType,
+                                       const UnitOfMeasure& fromUnitOfMeasure,
+                                       const UnitOfMeasure& toUnitOfMeasure) {
+        if (toUnitOfMeasure != fromUnitOfMeasure) {
+            UnitOfMeasureConversion uomConv =
+                UnitOfMeasureConversionManager::instance().lookup(
+                           commodityType, fromUnitOfMeasure, toUnitOfMeasure);
+            return uomConv.conversionFactor();
+        }
+
+        return 1;
+    }
+
+    Real EnergyCommodity::calculateFxConversionFactor(
+                                                 const Currency& fromCurrency,
+                                                 const Currency& toCurrency,
+                                                 const Date& evaluationDate) {
+        if (fromCurrency != toCurrency) {
+            ExchangeRate exchRate = ExchangeRateManager::instance().lookup(
+                                   fromCurrency, toCurrency,
+                                   evaluationDate /*, ExchangeRate::Direct*/);
+            if (fromCurrency == exchRate.target())
+                return 1.0 / exchRate.rate();
+            return exchRate.rate();
+        }
+        return 1;
+    }
+
+    Real EnergyCommodity::calculateUnitCost(const CommodityType& commodityType,
+                                            const CommodityUnitCost& unitCost,
+                                            const Date& evaluationDate) const {
+        if (unitCost.amount().value() != 0) {
+            const Currency& baseCurrency =
+                CommoditySettings::instance().currency();
+            const UnitOfMeasure baseUnitOfMeasure =
+                CommoditySettings::instance().unitOfMeasure();
+            Real unitCostUomConversionFactor =
+                calculateUomConversionFactor(commodityType,
+                                             unitCost.unitOfMeasure(),
+                                             baseUnitOfMeasure);
+            Real unitCostFxConversionFactor =
+                calculateFxConversionFactor(unitCost.amount().currency(),
+                                            baseCurrency, evaluationDate);
+            return unitCost.amount().value() * unitCostUomConversionFactor
+                 * unitCostFxConversionFactor;
+        }
+        return 0;
+    }
+
+    void EnergyCommodity::calculateSecondaryCostAmounts(
+                                           const CommodityType& commodityType,
+                                           Real totalQuantityValue,
+                                           const Date& evaluationDate) const {
+        secondaryCostAmounts_.clear();
+        if (secondaryCosts_ != nullptr) {
+            const Currency& baseCurrency =
+                CommoditySettings::instance().currency();
+            try {
+                for (SecondaryCosts::const_iterator i = secondaryCosts_->begin();
+                     i != secondaryCosts_->end(); ++i) {
+                    if (boost::any_cast<CommodityUnitCost>(&i->second) != nullptr) {
+                        Real value =
+                            calculateUnitCost(
+                                commodityType,
+                                boost::any_cast<CommodityUnitCost>(i->second),
+                                evaluationDate) * totalQuantityValue;
+                        secondaryCostAmounts_[i->first] =
+                            Money(baseCurrency, value);
+                    } else if (boost::any_cast<Money>(&i->second) != nullptr) {
+                        const Money& amount = boost::any_cast<Money>(i->second);
+                        Real fxConversionFactor =
+                            calculateFxConversionFactor(amount.currency(),
+                                                        baseCurrency,
+                                                        evaluationDate);
+                        secondaryCostAmounts_[i->first] =
+                            Money(baseCurrency,
+                                  amount.value() * fxConversionFactor);
+                    }
+                }
+            } catch (const std::exception& e) {
+                QL_FAIL("error calculating secondary costs: " << e.what());
+            }
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="12">
+    <source>energyfuture.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commoditysettings.hpp>
+#include <ql/experimental/commodities/energyfuture.hpp>
+#include <ql/settings.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    EnergyFuture::EnergyFuture(Integer buySell,
+                               Quantity quantity,
+                               CommodityUnitCost tradePrice,
+                               ext::shared_ptr<CommodityIndex> index,
+                               const CommodityType& commodityType,
+                               const ext::shared_ptr<SecondaryCosts>& secondaryCosts)
+    : EnergyCommodity(commodityType, secondaryCosts), buySell_(buySell),
+      quantity_(std::move(quantity)), tradePrice_(std::move(tradePrice)), index_(std::move(index)) {
+        registerWith(Settings::instance().evaluationDate());
+        registerWith(index_);
+    }
+
+    bool EnergyFuture::isExpired() const {
+        return false;
+    }
+
+    void EnergyFuture::performCalculations() const {
+
+        NPV_ = 0.0;
+        additionalResults_.clear();
+
+        Date evaluationDate = Settings::instance().evaluationDate();
+        const Currency& baseCurrency =
+            CommoditySettings::instance().currency();
+        const UnitOfMeasure baseUnitOfMeasure =
+            CommoditySettings::instance().unitOfMeasure();
+
+        Real quantityUomConversionFactor =
+            calculateUomConversionFactor(
+                           quantity_.commodityType(),
+                           baseUnitOfMeasure,
+                           quantity_.unitOfMeasure()) * index_->lotQuantity();
+        Real indexUomConversionFactor =
+            calculateUomConversionFactor(index_->commodityType(),
+                                         index_->unitOfMeasure(),
+                                         baseUnitOfMeasure);
+        Real tradePriceUomConversionFactor =
+            calculateUomConversionFactor(quantity_.commodityType(),
+                                         tradePrice_.unitOfMeasure(),
+                                         baseUnitOfMeasure);
+
+        Real tradePriceFxConversionFactor =
+            calculateFxConversionFactor(tradePrice_.amount().currency(),
+                                        baseCurrency, evaluationDate);
+        Real indexPriceFxConversionFactor =
+            calculateFxConversionFactor(index_->currency(), baseCurrency,
+                                        evaluationDate);
+
+        Real quoteValue = 0;
+
+        Date lastQuoteDate = index_->lastQuoteDate();
+        if (lastQuoteDate >= evaluationDate - 1) {
+            quoteValue = index_->price(evaluationDate);
+        } else {
+            quoteValue = index_->forwardPrice(evaluationDate);
+            std::ostringstream message;
+            message << "curve [" << index_->name()
+                    << "] has last quote date of "
+                    << io::iso_date(lastQuoteDate)
+                    << " using forward price from ["
+                    << index_->forwardCurve()->name() << "]";
+            addPricingError(PricingError::Warning, message.str());
+        }
+
+        QL_REQUIRE(quoteValue != Null<Real>(),
+                   "missing quote for [" << index_->name() << "]");
+
+        Real tradePriceValue =
+            tradePrice_.amount().value() * tradePriceUomConversionFactor
+            * tradePriceFxConversionFactor;
+        Real quotePriceValue = quoteValue * indexUomConversionFactor
+            * indexPriceFxConversionFactor;
+
+        Real quantityAmount = quantity_.amount() * quantityUomConversionFactor;
+
+        Real delta = (((quotePriceValue - tradePriceValue) * quantityAmount)
+                      * index_->lotQuantity()) * buySell_;
+
+        NPV_ = delta;
+
+        calculateSecondaryCostAmounts(quantity_.commodityType(),
+                                      quantity_.amount(), evaluationDate);
+        for (SecondaryCostAmounts::const_iterator i = secondaryCostAmounts_.begin(); i != secondaryCostAmounts_.end(); ++i) {
+            Real amount = i->second.value();
+            NPV_ -= amount;
+        }
+
+        // additionalResults_["brokerCommission"] =
+        //     -(brokerCommissionValue * quantityAmount);
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="13">
+    <source>energyswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/energyswap.hpp>
+#include <ql/settings.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    EnergySwap::EnergySwap(Calendar calendar,
+                           Currency payCurrency,
+                           Currency receiveCurrency,
+                           PricingPeriods pricingPeriods,
+                           const CommodityType& commodityType,
+                           const ext::shared_ptr<SecondaryCosts>& secondaryCosts)
+    : EnergyCommodity(commodityType, secondaryCosts), calendar_(std::move(calendar)),
+      payCurrency_(std::move(payCurrency)), receiveCurrency_(std::move(receiveCurrency)),
+      pricingPeriods_(std::move(pricingPeriods)) {}
+
+    const CommodityType& EnergySwap::commodityType() const {
+        QL_REQUIRE(!pricingPeriods_.empty(), "no pricing periods");
+        return pricingPeriods_[0]->quantity().commodityType();
+    }
+
+    Quantity EnergySwap::quantity() const {
+        Real totalQuantityAmount = 0;
+        for (const auto& pricingPeriod : pricingPeriods_) {
+            totalQuantityAmount += pricingPeriod->quantity().amount();
+        }
+        return Quantity(pricingPeriods_[0]->quantity().commodityType(),
+                        pricingPeriods_[0]->quantity().unitOfMeasure(),
+                        totalQuantityAmount);
+    }
+
+    bool EnergySwap::isExpired() const {
+        return pricingPeriods_.empty()
+            || detail::simple_event(pricingPeriods_.back()->paymentDate())
+               .hasOccurred();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="14">
+    <source>energyvanillaswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/commoditysettings.hpp>
+#include <ql/experimental/commodities/energyvanillaswap.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    EnergyVanillaSwap::EnergyVanillaSwap(bool payer,
+                                         const Calendar& calendar,
+                                         Money fixedPrice,
+                                         UnitOfMeasure fixedPriceUnitOfMeasure,
+                                         ext::shared_ptr<CommodityIndex> index,
+                                         const Currency& payCurrency,
+                                         const Currency& receiveCurrency,
+                                         const PricingPeriods& pricingPeriods,
+                                         const CommodityType& commodityType,
+                                         const ext::shared_ptr<SecondaryCosts>& secondaryCosts,
+                                         Handle<YieldTermStructure> payLegTermStructure,
+                                         Handle<YieldTermStructure> receiveLegTermStructure,
+                                         Handle<YieldTermStructure> discountTermStructure)
+    : EnergySwap(
+          calendar, payCurrency, receiveCurrency, pricingPeriods, commodityType, secondaryCosts),
+      payReceive_(payer ? 1 : 0), fixedPrice_(std::move(fixedPrice)),
+      fixedPriceUnitOfMeasure_(std::move(fixedPriceUnitOfMeasure)), index_(std::move(index)),
+      payLegTermStructure_(std::move(payLegTermStructure)),
+      receiveLegTermStructure_(std::move(receiveLegTermStructure)),
+      discountTermStructure_(std::move(discountTermStructure)) {
+
+        QL_REQUIRE(!pricingPeriods_.empty(), "no pricing periods");
+        registerWith(index_);
+    }
+
+    bool EnergyVanillaSwap::isExpired() const {
+        return detail::simple_event(pricingPeriods_.back()->endDate())
+               .hasOccurred();
+    }
+
+    void EnergyVanillaSwap::performCalculations() const {
+
+        try {
+            if (index_->empty()) {
+                if (index_->forwardCurveEmpty()) {
+                    QL_FAIL("index [" << index_->name()
+                            << "] does not have any quotes");
+                } else {
+                    addPricingError(PricingError::Warning,
+                                    "index [" + index_->name() +
+                                    "] does not have any quotes; "
+                                    "using forward prices from ["
+                                    + index_->forwardCurve()->name() + "]");
+                }
+            }
+
+            NPV_ = 0.0;
+            additionalResults_.clear();
+            dailyPositions_.clear();
+            paymentCashFlows_.clear();
+
+            Date evaluationDate = Settings::instance().evaluationDate();
+
+            const Currency& baseCurrency =
+                CommoditySettings::instance().currency();
+            const UnitOfMeasure baseUnitOfMeasure =
+                CommoditySettings::instance().unitOfMeasure();
+
+            Real quantityUomConversionFactor =
+                calculateUomConversionFactor(
+                               pricingPeriods_[0]->quantity().commodityType(),
+                               baseUnitOfMeasure,
+                               pricingPeriods_[0]->quantity().unitOfMeasure());
+            Real fixedPriceUomConversionFactor =
+                calculateUomConversionFactor(
+                               pricingPeriods_[0]->quantity().commodityType(),
+                               fixedPriceUnitOfMeasure_, baseUnitOfMeasure);
+            Real indexUomConversionFactor =
+                calculateUomConversionFactor(index_->commodityType(),
+                                             index_->unitOfMeasure(),
+                                             baseUnitOfMeasure);
+
+            Real fixedPriceFxConversionFactor =
+                calculateFxConversionFactor(fixedPrice_.currency(),
+                                            baseCurrency, evaluationDate);
+            Real indexPriceFxConversionFactor =
+                calculateFxConversionFactor(index_->currency(),
+                                            baseCurrency, evaluationDate);
+            Real payLegFxConversionFactor =
+                calculateFxConversionFactor(
+                            baseCurrency,
+                            payReceive_ > 0 ? payCurrency_ : receiveCurrency_,
+                            evaluationDate);
+            Real receiveLegFxConversionFactor =
+                calculateFxConversionFactor(
+                            baseCurrency,
+                            payReceive_ > 0 ? receiveCurrency_ : payCurrency_,
+                            evaluationDate);
+
+            Date lastQuoteDate = index_->lastQuoteDate();
+            if (lastQuoteDate < evaluationDate - 1) {
+                std::ostringstream message;
+                message << "index [" << index_->name()
+                        << "] has last quote date of "
+                        << io::iso_date(lastQuoteDate);
+                addPricingError(PricingError::Warning, message.str());
+            }
+
+            Real totalQuantityAmount = 0;
+
+            // price each period
+            for (const auto& pricingPeriod : pricingPeriods_) {
+                QL_REQUIRE(pricingPeriod->quantity().amount() != 0, "quantity is zero");
+
+                Integer periodDayCount = 0;
+
+                // get the futures quotes or everything after
+                Date periodStartDate =
+                    calendar_.adjust(pricingPeriod->startDate());
+                for (Date stepDate = periodStartDate;
+                     stepDate <= pricingPeriod->endDate();
+                     stepDate = calendar_.advance(stepDate, 1*Days)) {
+
+                    bool unrealized = stepDate > evaluationDate;
+                    Real quoteValue = 0;
+
+                    if (stepDate <= lastQuoteDate) {
+                        quoteValue = index_->price(stepDate);
+                    } else {
+                        quoteValue = index_->forwardPrice(stepDate);
+                    }
+
+                    if (quoteValue == 0) {
+                        std::ostringstream message;
+                        message << "pay quote value for curve ["
+                                << index_->name() << "] is 0 for date "
+                                << io::iso_date(stepDate);
+                        addPricingError(PricingError::Warning, message.str());
+                    }
+
+                    QL_REQUIRE(quoteValue != Null<Real>(),
+                               "curve [" << index_->name() <<
+                               "] missing value for pricing date: "
+                               << stepDate);
+
+                    Real fixedLegPriceValue =
+                        fixedPrice_.value() * fixedPriceUomConversionFactor *
+                        fixedPriceFxConversionFactor;
+                    Real floatingLegPriceValue =
+                        quoteValue * indexUomConversionFactor *
+                        indexPriceFxConversionFactor;
+                    Real payLegPriceValue =
+                        payReceive_ > 0 ? fixedLegPriceValue :
+                                          floatingLegPriceValue;
+                    Real receiveLegPriceValue =
+                        payReceive_ > 0 ? floatingLegPriceValue :
+                                          fixedLegPriceValue;
+
+                    dailyPositions_[stepDate] =
+                        EnergyDailyPosition(stepDate, payLegPriceValue,
+                                            receiveLegPriceValue, unrealized);
+                    periodDayCount++;
+                }
+
+                Real periodQuantityAmount =
+                    pricingPeriod->quantity().amount() *
+                    quantityUomConversionFactor;
+                totalQuantityAmount += periodQuantityAmount;
+
+                Real avgDailyQuantityAmount =
+                    periodDayCount == 0 ? 0 :
+                                          periodQuantityAmount / periodDayCount;
+
+                Real payLegValue = 0;
+                Real receiveLegValue = 0;
+                for (auto dpi = dailyPositions_.find(periodStartDate);
+                     dpi != dailyPositions_.end() && dpi->first <= pricingPeriod->endDate();
+                     ++dpi) {
+                    EnergyDailyPosition& dailyPosition = dpi->second;
+                    dailyPosition.quantityAmount = avgDailyQuantityAmount;
+                    dailyPosition.riskDelta =
+                        (-dailyPosition.payLegPrice + dailyPosition.receiveLegPrice) * avgDailyQuantityAmount;
+                    payLegValue += -dailyPosition.payLegPrice * avgDailyQuantityAmount;
+                    receiveLegValue += dailyPosition.receiveLegPrice * avgDailyQuantityAmount;
+                }
+
+                Real discountFactor = 1;
+                Real payLegDiscountFactor = 1;
+                Real receiveLegDiscountFactor = 1;
+                if (pricingPeriod->paymentDate() >= evaluationDate + 2) {
+                    discountFactor =
+                        discountTermStructure_->discount(
+                                                pricingPeriod->paymentDate());
+                    payLegDiscountFactor =
+                        payLegTermStructure_->discount(
+                                                pricingPeriod->paymentDate());
+                    receiveLegDiscountFactor =
+                        receiveLegTermStructure_->discount(
+                                                pricingPeriod->paymentDate());
+                }
+
+                Real uDelta = receiveLegValue + payLegValue;
+                Real dDelta = (receiveLegValue * receiveLegDiscountFactor) +
+                    (payLegValue * payLegDiscountFactor);
+                Real pmtFxConversionFactor =
+                    ((dDelta * payReceive_) > 0) ? payLegFxConversionFactor :
+                                                   receiveLegFxConversionFactor;
+                Currency pmtCurrency =
+                    ((dDelta * payReceive_) > 0) ? receiveCurrency_ :
+                                                   payCurrency_;
+                Real pmtDiscountFactor =
+                    (dDelta  > 0) ? receiveLegDiscountFactor :
+                                    payLegDiscountFactor;
+
+                paymentCashFlows_[pricingPeriod->paymentDate()] =
+                    ext::make_shared<CommodityCashFlow>(
+                           pricingPeriod->paymentDate(),
+                                                 Money(baseCurrency,
+                                                       uDelta * discountFactor),
+                                                 Money(baseCurrency, uDelta),
+                                                 Money(pmtCurrency,
+                                                       dDelta * pmtFxConversionFactor),
+                                                 Money(pmtCurrency,
+                                                       uDelta * pmtFxConversionFactor),
+                                                 discountFactor,
+                                                 pmtDiscountFactor,
+                                                 pricingPeriod->paymentDate() <= evaluationDate);
+
+                calculateSecondaryCostAmounts(
+                               pricingPeriods_[0]->quantity().commodityType(),
+                               totalQuantityAmount, evaluationDate);
+
+                NPV_ += dDelta;
+            }
+
+            QL_REQUIRE(!paymentCashFlows_.empty(), "no cashflows");
+
+            for (SecondaryCostAmounts::const_iterator i =
+                     secondaryCostAmounts_.begin();
+                 i != secondaryCostAmounts_.end(); ++i) {
+                Real amount = i->second.value();
+                NPV_ -= amount;
+            }
+
+            additionalResults_["dailyPositions"] = dailyPositions_;
+
+        } catch (const QuantLib::Error& e) {
+            addPricingError(PricingError::Error, e.what());
+            throw;
+        } catch (const std::exception& e) {
+            addPricingError(PricingError::Error, e.what());
+            throw;
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="15">
+    <source>paymentterm.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/paymentterm.hpp>
+
+namespace QuantLib {
+
+    std::map<std::string, ext::shared_ptr<PaymentTerm::Data> >
+    PaymentTerm::paymentTerms_;
+
+    PaymentTerm::PaymentTerm(const std::string& name,
+                             PaymentTerm::EventType eventType,
+                             Integer offsetDays,
+                             const Calendar& calendar) {
+        std::map<std::string, ext::shared_ptr<PaymentTerm::Data> >::const_iterator i = paymentTerms_.find(name);
+        if (i != paymentTerms_.end())
+            data_ = i->second;
+        else {
+            data_ = ext::make_shared<PaymentTerm::Data>(
+                                 name, eventType,
+                                                       offsetDays, calendar);
+            paymentTerms_[name] = data_;
+        }
+    }
+
+    std::ostream& operator<<(std::ostream& out, const PaymentTerm& c) {
+        if (!c.empty())
+            return out << c.name();
+        else
+            return out << "null payment term type";
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="16">
+    <source>quantity.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/quantity.hpp>
+#include <ql/experimental/commodities/unitofmeasureconversionmanager.hpp>
+#include <ql/math/comparison.hpp>
+#include <ql/errors.hpp>
+
+namespace QuantLib {
+
+    Quantity::ConversionType Quantity::conversionType = Quantity::NoConversion;
+
+    UnitOfMeasure Quantity::baseUnitOfMeasure = UnitOfMeasure();
+
+    namespace {
+
+        void convertTo(Quantity& m, const UnitOfMeasure& target) {
+            if (m.unitOfMeasure() != target) {
+                UnitOfMeasureConversion rate =
+                    UnitOfMeasureConversionManager::instance().lookup(
+                                m.commodityType(), m.unitOfMeasure(), target);
+                m = rate.convert(m).rounded();
+            }
+        }
+
+        void convertToBase(Quantity& m) {
+            QL_REQUIRE(!Quantity::baseUnitOfMeasure.empty(),
+                       "no base unitOfMeasure set");
+            convertTo(m, Quantity::baseUnitOfMeasure);
+        }
+
+    }
+
+    Quantity& Quantity::operator+=(const Quantity& m) {
+        if (unitOfMeasure_ == m.unitOfMeasure_) {
+            amount_ += m.amount_;
+        } else if (conversionType == BaseUnitOfMeasureConversion) {
+            convertToBase(*this);
+            Quantity tmp = m;
+            convertToBase(tmp);
+            *this += tmp;
+        } else if (conversionType == AutomatedConversion) {
+            Quantity tmp = m;
+            convertTo(tmp, unitOfMeasure_);
+            *this += tmp;
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+        return *this;
+    }
+
+    Quantity& Quantity::operator-=(const Quantity& m) {
+        if (unitOfMeasure_ == m.unitOfMeasure_) {
+            amount_ -= m.amount_;
+        } else if (conversionType == BaseUnitOfMeasureConversion) {
+            convertToBase(*this);
+            Quantity tmp = m;
+            convertToBase(tmp);
+            *this -= tmp;
+        } else if (conversionType == AutomatedConversion) {
+            Quantity tmp = m;
+            convertTo(tmp, unitOfMeasure_);
+            *this -= tmp;
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+        return *this;
+    }
+
+    Real operator/(const Quantity& m1, const Quantity& m2) {
+        if (m1.unitOfMeasure() == m2.unitOfMeasure()) {
+            return m1.amount()/m2.amount();
+        } else if (Quantity::conversionType
+                   == Quantity::BaseUnitOfMeasureConversion) {
+            Quantity tmp1 = m1;
+            convertToBase(tmp1);
+            Quantity tmp2 = m2;
+            convertToBase(tmp2);
+            return tmp1/tmp2;
+        } else if (Quantity::conversionType == Quantity::AutomatedConversion) {
+            Quantity tmp = m2;
+            convertTo(tmp, m1.unitOfMeasure());
+            return m1/tmp;
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+    }
+
+    bool operator==(const Quantity& m1, const Quantity& m2) {
+        if (m1.unitOfMeasure() == m2.unitOfMeasure()) {
+            return m1.amount() == m2.amount();
+        } else if (Quantity::conversionType
+                   == Quantity::BaseUnitOfMeasureConversion) {
+            Quantity tmp1 = m1;
+            convertToBase(tmp1);
+            Quantity tmp2 = m2;
+            convertToBase(tmp2);
+            return tmp1 == tmp2;
+        } else if (Quantity::conversionType
+                   == Quantity::AutomatedConversion) {
+            Quantity tmp = m2;
+            convertTo(tmp, m1.unitOfMeasure());
+            return m1 == tmp;
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+    }
+
+    bool operator<(const Quantity& m1, const Quantity& m2) {
+        if (m1.unitOfMeasure() == m2.unitOfMeasure()) {
+            return m1.amount() < m2.amount();
+        } else if (Quantity::conversionType
+                   == Quantity::BaseUnitOfMeasureConversion) {
+            Quantity tmp1 = m1;
+            convertToBase(tmp1);
+            Quantity tmp2 = m2;
+            convertToBase(tmp2);
+            return tmp1 < tmp2;
+        } else if (Quantity::conversionType == Quantity::AutomatedConversion) {
+            Quantity tmp = m2;
+            convertTo(tmp, m1.unitOfMeasure());
+            return m1 < tmp;
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+    }
+
+    bool operator<=(const Quantity& m1, const Quantity& m2) {
+        if (m1.unitOfMeasure() == m2.unitOfMeasure()) {
+            return m1.amount() <= m2.amount();
+        } else if (Quantity::conversionType
+                   == Quantity::BaseUnitOfMeasureConversion) {
+            Quantity tmp1 = m1;
+            convertToBase(tmp1);
+            Quantity tmp2 = m2;
+            convertToBase(tmp2);
+            return tmp1 <= tmp2;
+        } else if (Quantity::conversionType == Quantity::AutomatedConversion) {
+            Quantity tmp = m2;
+            convertTo(tmp, m1.unitOfMeasure());
+            return m1 <= tmp;
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+    }
+
+    bool close(const Quantity& m1, const Quantity& m2, Size n) {
+        if (m1.unitOfMeasure() == m2.unitOfMeasure()) {
+            return close(m1.amount(),m2.amount(),n);
+        } else if (Quantity::conversionType
+                   == Quantity::BaseUnitOfMeasureConversion) {
+            Quantity tmp1 = m1;
+            convertToBase(tmp1);
+            Quantity tmp2 = m2;
+            convertToBase(tmp2);
+            return close(tmp1,tmp2,n);
+        } else if (Quantity::conversionType == Quantity::AutomatedConversion) {
+            Quantity tmp = m2;
+            convertTo(tmp, m1.unitOfMeasure());
+            return close(m1,tmp,n);
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+    }
+
+    bool close_enough(const Quantity& m1, const Quantity& m2, Size n) {
+        if (m1.unitOfMeasure() == m2.unitOfMeasure()) {
+            return close_enough(m1.amount(),m2.amount(),n);
+        } else if (Quantity::conversionType
+                   == Quantity::BaseUnitOfMeasureConversion) {
+            Quantity tmp1 = m1;
+            convertToBase(tmp1);
+            Quantity tmp2 = m2;
+            convertToBase(tmp2);
+            return close_enough(tmp1,tmp2,n);
+        } else if (Quantity::conversionType == Quantity::AutomatedConversion) {
+            Quantity tmp = m2;
+            convertTo(tmp, m1.unitOfMeasure());
+            return close_enough(m1,tmp,n);
+        } else {
+            QL_FAIL("unitOfMeasure mismatch and no conversion specified");
+        }
+    }
+
+
+    std::ostream& operator<<(std::ostream& out, const Quantity& quantity) {
+        return out << quantity.commodityType_.code() << " "
+                   << quantity.amount_ << " " << quantity.unitOfMeasure_.code();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="17">
+    <source>unitofmeasure.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/unitofmeasure.hpp>
+#include <ostream>
+#include <utility>
+
+namespace QuantLib {
+
+    std::ostream& operator<<(std::ostream& out, const UnitOfMeasure& c) {
+        if (!c.empty())
+            return out << c.code();
+        else
+            return out << "null unit of measure";
+    }
+
+    std::map<std::string,
+             ext::shared_ptr<UnitOfMeasure::Data> >
+    UnitOfMeasure::unitsOfMeasure_;
+
+    UnitOfMeasure::UnitOfMeasure(const std::string& name,
+                                 const std::string& code,
+                                 UnitOfMeasure::Type unitType) {
+        std::map<std::string,
+            ext::shared_ptr<UnitOfMeasure::Data> >::const_iterator i =
+            unitsOfMeasure_.find(name);
+        if (i != unitsOfMeasure_.end()) {
+            data_ = i->second;
+        } else {
+            data_ = ext::make_shared<UnitOfMeasure::Data>(
+                               name, code, unitType);
+            unitsOfMeasure_[name] = data_;
+        }
+    }
+
+    UnitOfMeasure::Data::Data(std::string name,
+                              std::string code,
+                              UnitOfMeasure::Type unitType,
+                              UnitOfMeasure triangulationUnitOfMeasure,
+                              const Rounding& rounding)
+    : name(std::move(name)), code(std::move(code)), unitType(unitType),
+      triangulationUnitOfMeasure(std::move(triangulationUnitOfMeasure)), rounding(rounding) {}
+}
+
+]]></document_content>
+  </document>
+  <document index="18">
+    <source>unitofmeasureconversion.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+ Copyright (C) 2009 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/unitofmeasureconversion.hpp>
+#include <ql/errors.hpp>
+
+using std::string;
+
+namespace QuantLib {
+
+    UnitOfMeasureConversion::UnitOfMeasureConversion(
+                                           const CommodityType& commodityType,
+                                           const UnitOfMeasure& source,
+                                           const UnitOfMeasure& target,
+                                           Real conversionFactor) {
+        data_ = ext::make_shared<UnitOfMeasureConversion::Data>(
+              commodityType, source, target,
+                                                conversionFactor, Direct);
+    }
+
+    UnitOfMeasureConversion::UnitOfMeasureConversion(
+                                            const UnitOfMeasureConversion& r1,
+                                            const UnitOfMeasureConversion& r2) {
+        data_ = ext::make_shared<UnitOfMeasureConversion::Data>(
+                                   r1, r2);
+    }
+
+    UnitOfMeasureConversion::Data::Data(const CommodityType& commodityType,
+                                        const UnitOfMeasure& source,
+                                        const UnitOfMeasure& target,
+                                        Real conversionFactor, Type type)
+    : commodityType(commodityType), source(source), target(target),
+      conversionFactor(conversionFactor), type(type) {
+        code = commodityType.name() + source.code() + target.code();
+    }
+
+    UnitOfMeasureConversion::Data::Data(const UnitOfMeasureConversion& r1,
+                                        const UnitOfMeasureConversion& r2) {
+        conversionFactorChain = std::make_pair(
+            ext::make_shared<UnitOfMeasureConversion>(r1),
+            ext::make_shared<UnitOfMeasureConversion>(r2));
+    }
+
+    Quantity UnitOfMeasureConversion::convert(const Quantity& quantity) const {
+        switch (data_->type) {
+          case Direct:
+            if (quantity.unitOfMeasure() == data_->source)
+                return Quantity(quantity.commodityType(),
+                                data_->target,
+                                quantity.amount()*data_->conversionFactor);
+            else if (quantity.unitOfMeasure() == data_->target)
+                return Quantity(quantity.commodityType(),
+                                data_->source,
+                                quantity.amount()/data_->conversionFactor);
+            else
+                QL_FAIL("direct conversion not applicable");
+          case Derived:
+            if (quantity.unitOfMeasure()
+                == data_->conversionFactorChain.first->source() ||
+                quantity.unitOfMeasure()
+                == data_->conversionFactorChain.first->target())
+                return data_->conversionFactorChain.second->convert(
+                       data_->conversionFactorChain.first->convert(quantity));
+            else if (quantity.unitOfMeasure()
+                     == data_->conversionFactorChain.second->source() ||
+                     quantity.unitOfMeasure()
+                     == data_->conversionFactorChain.second->target())
+                return data_->conversionFactorChain.first->convert(
+                      data_->conversionFactorChain.second->convert(quantity));
+            else
+                QL_FAIL("derived conversion factor not applicable");
+          default:
+            QL_FAIL("unknown conversion-factor type");
+        }
+    }
+
+    UnitOfMeasureConversion UnitOfMeasureConversion::chain(
+                                            const UnitOfMeasureConversion& r1,
+                                            const UnitOfMeasureConversion& r2) {
+        UnitOfMeasureConversion result(r1, r2);
+        result.data_->type = Derived;
+        if (r1.data_->source == r2.data_->source) {
+            result.data_->source = r1.data_->target;
+            result.data_->target = r2.data_->target;
+            result.data_->conversionFactor =
+                r2.data_->conversionFactor/r1.data_->conversionFactor;
+        } else if (r1.data_->source == r2.data_->target) {
+            result.data_->source = r1.data_->target;
+            result.data_->target = r2.data_->source;
+            result.data_->conversionFactor =
+                1.0/(r1.data_->conversionFactor*r2.data_->conversionFactor);
+        } else if (r1.data_->target == r2.data_->source) {
+            result.data_->source = r1.data_->source;
+            result.data_->target = r2.data_->target;
+            result.data_->conversionFactor =
+                r1.data_->conversionFactor*r2.data_->conversionFactor;
+        } else if (r1.data_->target == r2.data_->target) {
+            result.data_->source = r1.data_->source;
+            result.data_->target = r2.data_->source;
+            result.data_->conversionFactor =
+                r1.data_->conversionFactor/r2.data_->conversionFactor;
+        } else {
+            QL_FAIL("conversion factors not chainable");
+        }
+        return result;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="19">
+    <source>unitofmeasureconversionmanager.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 J. Erik Radmall
+ Copyright (C) 2009 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/commodities/unitofmeasureconversionmanager.hpp>
+#include <ql/experimental/commodities/petroleumunitsofmeasure.hpp>
+#include <ql/errors.hpp>
+#include <algorithm>
+
+using namespace std;
+
+namespace QuantLib {
+
+    namespace {
+
+        bool matches(const UnitOfMeasureConversion& c1,
+                     const UnitOfMeasureConversion& c2) {
+            return c1.commodityType() == c2.commodityType() &&
+                ((c1.source() == c2.source() && c1.target() == c2.target())
+                 || (c1.source() == c2.target() && c1.target() == c2.source()));
+        }
+
+        bool matches(const UnitOfMeasureConversion& c,
+                     const CommodityType& commodityType,
+                     const UnitOfMeasure& source,
+                     const UnitOfMeasure& target) {
+            return c.commodityType() == commodityType &&
+                ((c.source() == source && c.target() == target)
+                 || (c.source() == target && c.target() == source));
+        }
+
+        bool matches(const UnitOfMeasureConversion& c,
+                     const CommodityType& commodityType,
+                     const UnitOfMeasure& source) {
+            return c.commodityType() == commodityType &&
+                (c.source() == source || c.target() == source);
+        }
+
+    }
+
+    UnitOfMeasureConversionManager::UnitOfMeasureConversionManager() {
+        addKnownConversionFactors();
+    }
+
+    void UnitOfMeasureConversionManager::add(const UnitOfMeasureConversion& c) {
+        // not fast, but hopefully we won't have a lot of entries.
+        for (auto i = data_.begin(); i != data_.end(); ++i) {
+            if (matches(*i, c)) {
+                data_.erase(i);
+                break;
+            }
+        }
+
+        data_.push_back(c);
+    }
+
+    UnitOfMeasureConversion UnitOfMeasureConversionManager::lookup(
+                                   const CommodityType& commodityType,
+                                   const UnitOfMeasure& source,
+                                   const UnitOfMeasure& target,
+                                   UnitOfMeasureConversion::Type type) const {
+        if (type == UnitOfMeasureConversion::Direct) {
+            return directLookup(commodityType,source,target);
+        } else if (!source.triangulationUnitOfMeasure().empty()) {
+            const UnitOfMeasure& link = source.triangulationUnitOfMeasure();
+            if (link == target)
+                return directLookup(commodityType,source,link);
+            else
+                return UnitOfMeasureConversion::chain(
+                                      directLookup(commodityType,source,link),
+                                      lookup(commodityType,link,target));
+        } else if (!target.triangulationUnitOfMeasure().empty()) {
+            const UnitOfMeasure& link = target.triangulationUnitOfMeasure();
+            if (source == link)
+                return directLookup(commodityType,link,target);
+            else
+                return UnitOfMeasureConversion::chain(
+                                     lookup(commodityType,source,link),
+                                     directLookup(commodityType,link,target));
+        } else {
+            return smartLookup(commodityType,source,target);
+        }
+    }
+
+    void UnitOfMeasureConversionManager::clear() {
+        data_.clear();
+        addKnownConversionFactors();
+    }
+
+    void UnitOfMeasureConversionManager::addKnownConversionFactors() {
+        add(UnitOfMeasureConversion(NullCommodityType(),
+                                    MBUnitOfMeasure(),
+                                    BarrelUnitOfMeasure(),
+                                    1000));
+        add(UnitOfMeasureConversion(NullCommodityType(),
+                                    BarrelUnitOfMeasure(),
+                                    GallonUnitOfMeasure(),
+                                    42));
+        add(UnitOfMeasureConversion(NullCommodityType(),
+                                    GallonUnitOfMeasure(),
+                                    MBUnitOfMeasure(),
+                                    1000 * 42));
+        add(UnitOfMeasureConversion(NullCommodityType(),
+                                    LitreUnitOfMeasure(),
+                                    GallonUnitOfMeasure(),
+                                    3.78541));
+        add(UnitOfMeasureConversion(NullCommodityType(),
+                                    BarrelUnitOfMeasure(),
+                                    LitreUnitOfMeasure(),
+                                    158.987));
+        add(UnitOfMeasureConversion(NullCommodityType(),
+                                    KilolitreUnitOfMeasure(),
+                                    BarrelUnitOfMeasure(),
+                                    6.28981));
+        add(UnitOfMeasureConversion(NullCommodityType(),
+                                    TokyoKilolitreUnitOfMeasure(),
+                                    BarrelUnitOfMeasure(),
+                                    6.28981));
+    }
+
+    UnitOfMeasureConversion UnitOfMeasureConversionManager::directLookup(
+                                           const CommodityType& commodityType,
+                                           const UnitOfMeasure& source,
+                                           const UnitOfMeasure& target) const {
+
+        for (const auto& i : data_) {
+            if (matches(i, commodityType, source, target)) {
+                return i;
+            }
+        }
+
+        // Here, the code used to look for conversions with null
+        // commodity type as a fall-back.  However, this would only
+        // affect direct lookups and not other matches being tried in
+        // the smart-lookup loop.  To implement the complete fall-back
+        // strategy, we should either duplicate the loop (as we would
+        // duplicate it here---smelly) or change the 'matches'
+        // functions so that a null commodity type matches. However,
+        // in the second case we would also have to take care that
+        // conversions with a null type be at the end of the list so
+        // that they don't supersede specific types. We'll have to
+        // think a bit about this, so no fall-back for the time being.
+
+        QL_FAIL("no direct conversion available from "
+                << commodityType.code() << " " << source.code()
+                << " to " << target.code());
+    }
+
+    UnitOfMeasureConversion UnitOfMeasureConversionManager::smartLookup(
+                              const CommodityType& commodityType,
+                              const UnitOfMeasure& source,
+                              const UnitOfMeasure& target,
+                              list<string> forbidden) const {
+
+        try {
+            return directLookup(commodityType,source,target);
+        } catch (Error&) {
+            ; // no direct conversion available; turn to smart lookup.
+        }
+
+        // The source unit is forbidden to subsequent lookups in order
+        // to avoid cycles.
+        forbidden.push_back(source.code());
+
+        for (const auto& i : data_) {
+            // we look for conversion data which involve our source unit...
+            if (matches(i, commodityType, source)) {
+                const UnitOfMeasure& other = source == i.source() ? i.target() : i.source();
+                if (find(forbidden.begin(),forbidden.end(),
+                         other.code()) == forbidden.end()) {
+                    // if we can get to the target from here...
+                    try {
+                        UnitOfMeasureConversion tail =
+                            smartLookup(commodityType,other,target);
+                        // ..we're done.
+                        return UnitOfMeasureConversion::chain(i, tail);
+                    } catch (Error&) {
+                        // otherwise, we just discard this conversion.
+                        ;
+                    }
+                }
+            }
+        }
+
+        // if the loop completed, we have no way to return the
+        // requested conversion.
+        QL_FAIL("no conversion available for "
+                << commodityType.code() << " from "
+                << source.code() << " to " << target.code());
+    }
+
+}
+
+]]></document_content>
+  </document>
+</documents>

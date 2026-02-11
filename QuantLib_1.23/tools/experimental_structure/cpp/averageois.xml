@@ -1,0 +1,669 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>arithmeticaverageois.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Stefano Fondi
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/cashflows/overnightindexedcoupon.hpp>
+#include <ql/experimental/averageois/arithmeticaverageois.hpp>
+#include <ql/experimental/averageois/averageoiscouponpricer.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    ArithmeticAverageOIS::ArithmeticAverageOIS(Type type,
+                                               Real nominal,
+                                               const Schedule& fixedLegSchedule,
+                                               Rate fixedRate,
+                                               DayCounter fixedDC,
+                                               ext::shared_ptr<OvernightIndex> overnightIndex,
+                                               const Schedule& overnightLegSchedule,
+                                               Spread spread,
+                                               Real meanReversionSpeed,
+                                               Real volatility,
+                                               bool byApprox)
+    : Swap(2), type_(type), nominals_(std::vector<Real>(1, nominal)),
+      fixedLegPaymentFrequency_(fixedLegSchedule.tenor().frequency()),
+      overnightLegPaymentFrequency_(overnightLegSchedule.tenor().frequency()),
+      fixedRate_(fixedRate), fixedDC_(std::move(fixedDC)),
+      overnightIndex_(std::move(overnightIndex)), spread_(spread), byApprox_(byApprox),
+      mrs_(meanReversionSpeed), vol_(volatility) {
+
+        initialize(fixedLegSchedule, overnightLegSchedule);
+    }
+
+    ArithmeticAverageOIS::ArithmeticAverageOIS(Type type,
+                                               std::vector<Real> nominals,
+                                               const Schedule& fixedLegSchedule,
+                                               Rate fixedRate,
+                                               DayCounter fixedDC,
+                                               ext::shared_ptr<OvernightIndex> overnightIndex,
+                                               const Schedule& overnightLegSchedule,
+                                               Spread spread,
+                                               Real meanReversionSpeed,
+                                               Real volatility,
+                                               bool byApprox)
+    : Swap(2), type_(type), nominals_(std::move(nominals)),
+      fixedLegPaymentFrequency_(fixedLegSchedule.tenor().frequency()),
+      overnightLegPaymentFrequency_(overnightLegSchedule.tenor().frequency()),
+      fixedRate_(fixedRate), fixedDC_(std::move(fixedDC)),
+      overnightIndex_(std::move(overnightIndex)), spread_(spread), byApprox_(byApprox),
+      mrs_(meanReversionSpeed), vol_(volatility) {
+
+        initialize(fixedLegSchedule, overnightLegSchedule);
+    }
+
+    void ArithmeticAverageOIS::initialize(const Schedule& fixedLegSchedule,
+                                          const Schedule& overnightLegSchedule) {
+        if (fixedDC_==DayCounter())
+            fixedDC_ = overnightIndex_->dayCounter();
+        legs_[0] = FixedRateLeg(fixedLegSchedule)
+            .withNotionals(nominals_)
+            .withCouponRates(fixedRate_, fixedDC_);
+
+        legs_[1] = OvernightLeg(overnightLegSchedule, overnightIndex_)
+            .withNotionals(nominals_)
+            .withSpreads(spread_);
+
+        ext::shared_ptr<FloatingRateCouponPricer> arithmeticPricer(
+                new ArithmeticAveragedOvernightIndexedCouponPricer(mrs_, vol_, byApprox_));
+
+        for (auto& i : legs_[1]) {
+            ext::shared_ptr<OvernightIndexedCoupon> c =
+                ext::dynamic_pointer_cast<OvernightIndexedCoupon>(i);
+            c->setPricer(arithmeticPricer);
+        }
+
+        for (Size j=0; j<2; ++j) {
+            for (auto& i : legs_[j])
+                registerWith(i);
+        }
+
+        switch (type_) {
+          case Payer:
+            payer_[0] = -1.0;
+            payer_[1] = +1.0;
+            break;
+          case Receiver:
+            payer_[0] = +1.0;
+            payer_[1] = -1.0;
+            break;
+          default:
+            QL_FAIL("Unknown overnight-swap type");
+        }
+    }
+
+    Real ArithmeticAverageOIS::fairRate() const {
+        static Spread basisPoint = 1.0e-4;
+        calculate();
+        return fixedRate_ - NPV_/(fixedLegBPS()/basisPoint);
+    }
+
+    Spread ArithmeticAverageOIS::fairSpread() const {
+        static Spread basisPoint = 1.0e-4;
+        calculate();
+        return spread_ - NPV_/(overnightLegBPS()/basisPoint);
+    }
+
+    Real ArithmeticAverageOIS::fixedLegBPS() const {
+        calculate();
+        QL_REQUIRE(legBPS_[0] != Null<Real>(), "result not available");
+        return legBPS_[0];
+    }
+
+    Real ArithmeticAverageOIS::overnightLegBPS() const {
+        calculate();
+        QL_REQUIRE(legBPS_[1] != Null<Real>(), "result not available");
+        return legBPS_[1];
+    }
+
+    Real ArithmeticAverageOIS::fixedLegNPV() const {
+        calculate();
+        QL_REQUIRE(legNPV_[0] != Null<Real>(), "result not available");
+        return legNPV_[0];
+    }
+
+    Real ArithmeticAverageOIS::overnightLegNPV() const {
+        calculate();
+        QL_REQUIRE(legNPV_[1] != Null<Real>(), "result not available");
+        return legNPV_[1];
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>arithmeticoisratehelper.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Stefano Fondi
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/averageois/arithmeticoisratehelper.hpp>
+#include <ql/experimental/averageois/makearithmeticaverageois.hpp>
+#include <ql/pricingengines/swap/discountingswapengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+        void no_deletion(YieldTermStructure*) {}
+    }
+
+    ArithmeticOISRateHelper::ArithmeticOISRateHelper(Natural settlementDays,
+                                                     const Period& tenor, // swap maturity
+                                                     Frequency fixedLegPaymentFrequency,
+                                                     const Handle<Quote>& fixedRate,
+                                                     ext::shared_ptr<OvernightIndex> overnightIndex,
+                                                     Frequency overnightLegPaymentFrequency,
+                                                     Handle<Quote> spread,
+                                                     Real meanReversionSpeed,
+                                                     Real volatility,
+                                                     bool byApprox,
+                                                     Handle<YieldTermStructure> discount)
+    : RelativeDateRateHelper(fixedRate), settlementDays_(settlementDays), tenor_(tenor),
+      overnightIndex_(std::move(overnightIndex)), discountHandle_(std::move(discount)),
+      fixedLegPaymentFrequency_(fixedLegPaymentFrequency),
+      overnightLegPaymentFrequency_(overnightLegPaymentFrequency), spread_(std::move(spread)),
+      mrs_(meanReversionSpeed), vol_(volatility), byApprox_(byApprox) {
+        registerWith(overnightIndex_);
+        registerWith(discountHandle_);
+        registerWith(spread_);
+        initializeDates();
+    }
+
+    void ArithmeticOISRateHelper::initializeDates() {
+
+        // dummy OvernightIndex with curve/swap arguments
+        // review here
+        ext::shared_ptr<IborIndex> clonedIborIndex =
+            overnightIndex_->clone(termStructureHandle_);
+        ext::shared_ptr<OvernightIndex> clonedOvernightIndex =
+            ext::dynamic_pointer_cast<OvernightIndex>(clonedIborIndex);
+
+       swap_ = MakeArithmeticAverageOIS(tenor_, clonedOvernightIndex, 0.0)
+                .withDiscountingTermStructure(discountRelinkableHandle_)
+                .withSettlementDays(settlementDays_)
+                .withFixedLegPaymentFrequency(fixedLegPaymentFrequency_)
+                .withOvernightLegPaymentFrequency(overnightLegPaymentFrequency_)
+                .withArithmeticAverage(mrs_, vol_, byApprox_);
+        
+        earliestDate_ = swap_->startDate();
+        latestDate_ = swap_->maturityDate();
+    }
+
+    void ArithmeticOISRateHelper::setTermStructure(YieldTermStructure* t) {
+        // do not set the relinkable handle as an observer -
+        // force recalculation when needed
+        bool observer = false;
+
+        ext::shared_ptr<YieldTermStructure> temp(t, no_deletion);
+        termStructureHandle_.linkTo(temp, observer);
+
+        if (discountHandle_.empty())
+            discountRelinkableHandle_.linkTo(temp, observer);
+        else
+            discountRelinkableHandle_.linkTo(*discountHandle_, observer);
+
+        RelativeDateRateHelper::setTermStructure(t);
+    }
+
+    Real ArithmeticOISRateHelper::impliedQuote() const {
+        QL_REQUIRE(termStructure_ != nullptr, "term structure not set");
+        // we didn't register as observers - force calculation
+        swap_->recalculate();
+        //return swap_->fairRate();
+        // weak implementation... to be improved
+        static const Spread basisPoint = 1.0e-4;
+        Real floatingLegNPV = swap_->overnightLegNPV();
+        Spread spread = spread_.empty() ? 0.0 : spread_->value();
+        Real spreadNPV = swap_->overnightLegBPS() / basisPoint*spread;
+        Real totNPV = -(floatingLegNPV + spreadNPV);
+        Real result = totNPV / (swap_->fixedLegBPS() / basisPoint);
+        return result;
+    }
+
+    void ArithmeticOISRateHelper::accept(AcyclicVisitor& v) {
+        auto* v1 = dynamic_cast<Visitor<ArithmeticOISRateHelper>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            RateHelper::accept(v);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>averageoiscouponpricer.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Stefano Fondi
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/averageois/averageoiscouponpricer.hpp>
+#include <cmath>
+
+using std::vector;
+using std::exp;
+using std::pow;
+using std::log;
+
+namespace QuantLib {
+
+    void ArithmeticAveragedOvernightIndexedCouponPricer::initialize(
+                                            const FloatingRateCoupon& coupon) {
+        coupon_ = dynamic_cast<const OvernightIndexedCoupon*>(&coupon);
+        QL_ENSURE(coupon_, "wrong coupon type");
+    }
+
+    Rate ArithmeticAveragedOvernightIndexedCouponPricer::swapletRate() const {
+
+        ext::shared_ptr<OvernightIndex> index =
+            ext::dynamic_pointer_cast<OvernightIndex>(coupon_->index());
+
+        const vector<Date>& fixingDates = coupon_->fixingDates();
+        const vector<Time>& dt = coupon_->dt();
+
+        Size n = dt.size(),
+            i = 0;
+
+        Real accumulatedRate = 0.0;
+
+        // already fixed part
+        Date today = Settings::instance().evaluationDate();
+        while (i < n && fixingDates[i] < today) {
+            // rate must have been fixed
+            Rate pastFixing = IndexManager::instance().getHistory(
+                index->name())[fixingDates[i]];
+            QL_REQUIRE(pastFixing != Null<Real>(),
+                "Missing " << index->name() <<
+                " fixing for " << fixingDates[i]);
+            accumulatedRate += pastFixing*dt[i];
+            ++i;
+        }
+
+        // today is a border case
+        if (i < n && fixingDates[i] == today) {
+            // might have been fixed
+            try {
+                Rate pastFixing = IndexManager::instance().getHistory(
+                    index->name())[fixingDates[i]];
+                if (pastFixing != Null<Real>()) {
+                    accumulatedRate += pastFixing*dt[i];
+                    ++i;
+                }
+                else {
+                    ;   // fall through and forecast
+                }
+            }
+            catch (Error&) {
+                ;       // fall through and forecast
+            }
+        }
+
+        /* forward part using telescopic property in order
+        to avoid the evaluation of multiple forward fixings
+        (approximation proposed by Katsumi Takada)*/
+        if (byApprox_ && i < n) {
+            Handle<YieldTermStructure> curve =
+                index->forwardingTermStructure();
+            QL_REQUIRE(!curve.empty(),
+                "null term structure set to this instance of " <<
+                index->name());
+
+            const vector<Date>& dates = coupon_->valueDates();
+            DiscountFactor startDiscount = curve->discount(dates[i]);
+            DiscountFactor endDiscount = curve->discount(dates[n]);
+
+            accumulatedRate += log(startDiscount / endDiscount) - 
+                convAdj1(curve->timeFromReference(dates[i]),
+                         curve->timeFromReference(dates[n])) -
+                convAdj2(curve->timeFromReference(dates[i]),
+                         curve->timeFromReference(dates[n]));
+        }
+        // otherwise
+        else if (i < n){
+            Handle<YieldTermStructure> curve =
+                index->forwardingTermStructure();
+            QL_REQUIRE(!curve.empty(),
+                "null term structure set to this instance of " <<
+                index->name());
+
+            const vector<Date>& dates = coupon_->valueDates();
+            Time te = curve->timeFromReference(dates[n]);
+            while (i < n) {
+                // forcast fixing
+                Rate forecastFixing = index->fixing(fixingDates[i]);
+                Time ti1 = curve->timeFromReference(dates[i]);
+                Time ti2 = curve->timeFromReference(dates[i + 1]);
+                /*convexity adjustment due to payment dalay of each
+                overnight fixing, supposing an Hull-White short rate model*/
+                Real convAdj = exp( 0.5*pow(vol_, 2.0) / pow(mrs_, 3.0)*
+                    (exp(2 * mrs_*ti1) - 1)*
+                    (exp(-mrs_*ti2) - exp(-mrs_*te))*
+                    (exp(-mrs_*ti2) - exp(-mrs_*ti1)) );
+                accumulatedRate += convAdj*(1 + forecastFixing*dt[i]) - 1;
+                ++i;
+            }
+        }
+
+        Rate rate = accumulatedRate / coupon_->accrualPeriod();
+        return coupon_->gearing() * rate + coupon_->spread();
+    }
+
+    Real ArithmeticAveragedOvernightIndexedCouponPricer::convAdj1(
+                                                    Time ts, Time te) const {
+        return vol_ * vol_ / (4.0 * pow(mrs_, 3.0)) *
+            (1.0 - exp(-2.0*mrs_*ts)) *
+            pow((1.0 - exp(-mrs_*(te - ts))), 2.0);
+    }
+
+    Real ArithmeticAveragedOvernightIndexedCouponPricer::convAdj2(
+                                                    Time ts, Time te) const {
+        return vol_ * vol_ / (2.0 * pow(mrs_, 2.0)) * ((te - ts) -
+            pow(1.0 - exp(-mrs_*(te - ts)), 2.0) / mrs_ -
+            (1.0 - exp(-2.0*mrs_*(te - ts))) / (2.0 * mrs_));
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>makearithmeticaverageois.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Stefano Fondi
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/averageois/makearithmeticaverageois.hpp>
+#include <ql/pricingengines/swap/discountingswapengine.hpp>
+#include <ql/indexes/iborindex.hpp>
+#include <ql/time/schedule.hpp>
+
+namespace QuantLib {
+
+    MakeArithmeticAverageOIS::MakeArithmeticAverageOIS(
+                     const Period& swapTenor,
+                     const ext::shared_ptr<OvernightIndex>& overnightIndex,
+                     Rate fixedRate,
+                     const Period& forwardStart)
+    : swapTenor_(swapTenor), overnightIndex_(overnightIndex),
+      fixedRate_(fixedRate), forwardStart_(forwardStart),
+      settlementDays_(2),
+      calendar_(overnightIndex->fixingCalendar()),
+      fixedLegPaymentFrequency_(Annual),
+      overnightLegPaymentFrequency_(Annual),
+      rule_(DateGeneration::Backward),
+      // any value here for endOfMonth_ would not be actually used
+      isDefaultEOM_(true),
+      byApprox_(false),
+      mrs_(0.03),
+      vol_(0.00),
+      type_(Swap::Payer), nominal_(1.0),
+      overnightSpread_(0.0),
+      fixedDayCount_(overnightIndex->dayCounter()) {}
+
+    MakeArithmeticAverageOIS::operator ArithmeticAverageOIS() const {
+        ext::shared_ptr<ArithmeticAverageOIS> ois = *this;
+        return *ois;
+    }
+
+    MakeArithmeticAverageOIS::operator ext::shared_ptr<ArithmeticAverageOIS>() const {
+
+        Date startDate;
+        if (effectiveDate_ != Date())
+            startDate = effectiveDate_;
+        else {
+            Date refDate = Settings::instance().evaluationDate();
+            // if the evaluation date is not a business day
+            // then move to the next business day
+            refDate = calendar_.adjust(refDate);
+            Date spotDate = calendar_.advance(refDate,
+                                              settlementDays_*Days);
+            startDate = spotDate+forwardStart_;
+            if (forwardStart_.length()<0)
+                startDate = calendar_.adjust(startDate, Preceding);
+            else
+                startDate = calendar_.adjust(startDate, Following);
+        }
+
+        // OIS end of month default
+        bool usedEndOfMonth = 
+            isDefaultEOM_ ? calendar_.isEndOfMonth(startDate) : endOfMonth_;
+
+        Date endDate = terminationDate_;
+        if (endDate == Date()) {
+            if (usedEndOfMonth)
+                endDate = calendar_.advance(startDate,
+                                            swapTenor_,
+                                            ModifiedFollowing,
+                                            usedEndOfMonth);
+            else
+                endDate = startDate + swapTenor_;
+        }
+
+        Schedule fixedLegSchedule(startDate, endDate,
+                          Period(fixedLegPaymentFrequency_),
+                          calendar_,
+                          ModifiedFollowing,
+                          ModifiedFollowing,
+                          rule_,
+                          usedEndOfMonth);
+
+        Schedule overnightLegSchedule(startDate, endDate,
+                          Period(overnightLegPaymentFrequency_),
+                          calendar_,
+                          ModifiedFollowing,
+                          ModifiedFollowing,
+                          rule_,
+                          usedEndOfMonth);
+
+        Rate usedFixedRate = fixedRate_;
+        if (fixedRate_ == Null<Rate>()) {
+            ArithmeticAverageOIS temp(type_, nominal_,
+                                      fixedLegSchedule,
+                                      0.0, // fixed rate
+                                      fixedDayCount_,
+                                      overnightIndex_,
+                                      overnightLegSchedule,
+                                      overnightSpread_,
+                                      mrs_, vol_, byApprox_);
+            if (engine_ == nullptr) {
+                Handle<YieldTermStructure> disc =
+                                    overnightIndex_->forwardingTermStructure();
+                QL_REQUIRE(!disc.empty(),
+                           "null term structure set to this instance of " <<
+                           overnightIndex_->name());
+                bool includeSettlementDateFlows = false;
+                ext::shared_ptr<PricingEngine> engine(new
+                    DiscountingSwapEngine(disc, includeSettlementDateFlows));
+                temp.setPricingEngine(engine);
+            } else
+                temp.setPricingEngine(engine_);
+
+            usedFixedRate = temp.fairRate();
+        }
+
+        ext::shared_ptr<ArithmeticAverageOIS> ois(new
+            ArithmeticAverageOIS(type_, nominal_,
+                                 fixedLegSchedule,
+                                 usedFixedRate, fixedDayCount_,
+                                 overnightIndex_,
+                                 overnightLegSchedule,
+                                 overnightSpread_,
+                                 mrs_, vol_, byApprox_));
+
+        if (engine_ == nullptr) {
+            Handle<YieldTermStructure> disc =
+                                overnightIndex_->forwardingTermStructure();
+            bool includeSettlementDateFlows = false;
+            ext::shared_ptr<PricingEngine> engine(new
+                DiscountingSwapEngine(disc, includeSettlementDateFlows));
+            ois->setPricingEngine(engine);
+        } else
+            ois->setPricingEngine(engine_);
+
+        return ois;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::receiveFixed(bool flag) {
+        type_ = flag ? Swap::Receiver : Swap::Payer;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withType(Swap::Type type) {
+        type_ = type;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withNominal(Real n) {
+        nominal_ = n;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withSettlementDays(Natural settlementDays) {
+        settlementDays_ = settlementDays;
+        effectiveDate_ = Date();
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withEffectiveDate(const Date& effectiveDate) {
+        effectiveDate_ = effectiveDate;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withTerminationDate(const Date& terminationDate) {
+        terminationDate_ = terminationDate;
+        swapTenor_ = Period();
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withFixedLegPaymentFrequency(Frequency f) {
+        fixedLegPaymentFrequency_ = f;
+        if (fixedLegPaymentFrequency_ == Once)
+            rule_ = DateGeneration::Zero;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withOvernightLegPaymentFrequency(Frequency f) {
+        overnightLegPaymentFrequency_ = f;
+        if (overnightLegPaymentFrequency_ == Once)
+            rule_ = DateGeneration::Zero;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withRule(DateGeneration::Rule r) {
+        rule_ = r;
+        if (r==DateGeneration::Zero) {
+            fixedLegPaymentFrequency_ = Once;
+            overnightLegPaymentFrequency_ = Once;
+        }
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withDiscountingTermStructure(
+                                        const Handle<YieldTermStructure>& d) {
+        bool includeSettlementDateFlows = false;
+        engine_ = ext::shared_ptr<PricingEngine>(new
+            DiscountingSwapEngine(d, includeSettlementDateFlows));
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withPricingEngine(
+                             const ext::shared_ptr<PricingEngine>& engine) {
+        engine_ = engine;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withFixedLegDayCount(const DayCounter& dc) {
+        fixedDayCount_ = dc;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withEndOfMonth(bool flag) {
+        endOfMonth_ = flag;
+        isDefaultEOM_ = false;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withOvernightLegSpread(Spread sp) {
+        overnightSpread_ = sp;
+        return *this;
+    }
+
+    MakeArithmeticAverageOIS& MakeArithmeticAverageOIS::withArithmeticAverage(
+                                            Real meanReversionSpeed,
+                                            Real volatility,
+                                            bool byApprox) {
+        mrs_ = meanReversionSpeed;
+        vol_ = volatility;
+        byApprox_ = byApprox;
+        return *this;
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

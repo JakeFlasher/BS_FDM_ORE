@@ -1,0 +1,3125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>dynprogvppintrinsicvalueengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file dynprogvppintrinsicvalueengine.cpp
+*/
+
+#include <ql/experimental/finitedifferences/dynprogvppintrinsicvalueengine.hpp>
+#include <ql/experimental/finitedifferences/fdmvppstepconditionfactory.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/uniform1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+
+namespace QuantLib {
+    namespace {
+        class SparkSpreadPrice : public FdmInnerValueCalculator {
+          public:
+            SparkSpreadPrice(Real heatRate,
+                             const std::vector<Real>& fuelPrices,
+                             const std::vector<Real>& powerPrices)
+            : heatRate_(heatRate),
+              fuelPrices_(fuelPrices),
+              powerPrices_(powerPrices) {}
+
+            Real innerValue(const FdmLinearOpIterator&, Time t) override {
+                Size i = (Size) t;
+                QL_REQUIRE(i < powerPrices_.size(), "invalid time");
+                return powerPrices_[i] - heatRate_*fuelPrices_[i];
+            }
+            Real avgInnerValue(const FdmLinearOpIterator& iter, Time t) override {
+                return innerValue(iter, t);
+            }
+
+          private:
+            const Real heatRate_;
+            const std::vector<Real>& fuelPrices_;
+            const std::vector<Real>& powerPrices_;
+        };
+
+
+        class FuelPrice : public FdmInnerValueCalculator {
+          public:
+            explicit FuelPrice(const std::vector<Real>& fuelPrices)
+            : fuelPrices_(fuelPrices) {}
+
+            Real innerValue(const FdmLinearOpIterator&, Time t) override {
+                Size i = (Size) t;
+                QL_REQUIRE(i < fuelPrices_.size(), "invalid time");
+                return fuelPrices_[(Size) t];
+            }
+            Real avgInnerValue(const FdmLinearOpIterator& iter, Time t) override {
+                return innerValue(iter, t);
+            }
+
+          private:
+            const std::vector<Real>& fuelPrices_;
+        };
+    }
+
+    DynProgVPPIntrinsicValueEngine::DynProgVPPIntrinsicValueEngine(
+        std::vector<Real> fuelPrices,
+        std::vector<Real> powerPrices,
+        Real fuelCostAddon,
+        ext::shared_ptr<YieldTermStructure> rTS)
+    : fuelPrices_(std::move(fuelPrices)), powerPrices_(std::move(powerPrices)),
+      fuelCostAddon_(fuelCostAddon), rTS_(std::move(rTS)) {}
+
+    void DynProgVPPIntrinsicValueEngine::calculate() const {
+        const ext::shared_ptr<FdmInnerValueCalculator> fuelPrice(
+            new FuelPrice(fuelPrices_));
+        const ext::shared_ptr<FdmInnerValueCalculator> sparkSpreadPrice(
+            new SparkSpreadPrice(arguments_.heatRate,fuelPrices_,powerPrices_));
+
+        const FdmVPPStepConditionFactory stepConditionFactory(arguments_);
+
+        const ext::shared_ptr<FdmMesher> mesher(
+            new FdmMesherComposite(stepConditionFactory.stateMesher()));
+
+        const FdmVPPStepConditionMesher mesh = { 0, mesher };
+
+        const ext::shared_ptr<FdmVPPStepCondition> stepCondition(
+            stepConditionFactory.build(mesh, fuelCostAddon_,
+                                       fuelPrice, sparkSpreadPrice));
+
+        Array state(mesher->layout()->dim()[0], 0.0);
+        for (Size j=powerPrices_.size(); j > 0; --j) {
+            stepCondition->applyTo(state, (Time) j-1);
+        }
+
+        results_.value = stepCondition->maxValue(state);
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>fdextoujumpvanillaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdoujumpvanillaengine.cpp
+    \brief Finite Differences Ornstein Uhlenbeck plus exponential jumps engine 
+           for simple swing options
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/finitedifferences/fdextoujumpvanillaengine.hpp>
+#include <ql/experimental/finitedifferences/fdmextoujumpmodelinnervalue.hpp>
+#include <ql/experimental/finitedifferences/fdmextoujumpsolver.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/methods/finitedifferences/meshers/exponentialjump1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmsimpleprocess1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmamericanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmbermudanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdExtOUJumpVanillaEngine::FdExtOUJumpVanillaEngine(
+        ext::shared_ptr<ExtOUWithJumpsProcess> process,
+        ext::shared_ptr<YieldTermStructure> rTS,
+        Size tGrid,
+        Size xGrid,
+        Size yGrid,
+        ext::shared_ptr<Shape> shape,
+        const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)), rTS_(std::move(rTS)), shape_(std::move(shape)), tGrid_(tGrid),
+      xGrid_(xGrid), yGrid_(yGrid), schemeDesc_(schemeDesc) {}
+
+    void FdExtOUJumpVanillaEngine::calculate() const {
+        // 1. Mesher
+        const Time maturity 
+            = rTS_->dayCounter().yearFraction(rTS_->referenceDate(),
+                                              arguments_.exercise->lastDate());
+        const ext::shared_ptr<StochasticProcess1D> ouProcess(
+            process_->getExtendedOrnsteinUhlenbeckProcess());
+        const ext::shared_ptr<Fdm1dMesher> xMesher(
+            new FdmSimpleProcess1dMesher(xGrid_, ouProcess,maturity));
+
+        const ext::shared_ptr<Fdm1dMesher> yMesher(
+            new ExponentialJump1dMesher(yGrid_, 
+                                        process_->beta(), 
+                                        process_->jumpIntensity(),
+                                        process_->eta()));
+
+        const ext::shared_ptr<FdmMesher> mesher(
+            new FdmMesherComposite(xMesher, yMesher));
+
+        // 2. Calculator
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator(
+            new FdmExtOUJumpModelInnerValue(arguments_.payoff, mesher, shape_));
+
+        // 3. Step conditions
+        const ext::shared_ptr<FdmStepConditionComposite> conditions =
+            FdmStepConditionComposite::vanillaComposite(
+                                DividendSchedule(), arguments_.exercise, 
+                                mesher, calculator, 
+                                rTS_->referenceDate(), rTS_->dayCounter());
+
+        // 4. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+        
+        // 5. set-up solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions,
+                                    calculator, maturity, tGrid_, 0 };
+
+        const ext::shared_ptr<FdmExtOUJumpSolver> solver(
+            new FdmExtOUJumpSolver(Handle<ExtOUWithJumpsProcess>(process_), 
+                                   rTS_, solverDesc, schemeDesc_));
+      
+        const Real x = process_->initialValues()[0];
+        const Real y = process_->initialValues()[1];
+        results_.value = solver->valueAt(x, y);      
+    }
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>fdhestondoublebarrierengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/finitedifferences/fdhestondoublebarrierengine.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmhestonvariancemesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdirichletboundary.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdividendhandler.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/pricingengines/barrier/fdhestonrebateengine.hpp>
+#include <ql/pricingengines/vanilla/fdhestonvanillaengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdHestonDoubleBarrierEngine::FdHestonDoubleBarrierEngine(
+        const ext::shared_ptr<HestonModel>& model,
+        Size tGrid,
+        Size xGrid,
+        Size vGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        ext::shared_ptr<LocalVolTermStructure> leverageFct,
+        const Real mixingFactor)
+    : GenericModelEngine<HestonModel, DoubleBarrierOption::arguments, DoubleBarrierOption::results>(
+          model),
+      tGrid_(tGrid), xGrid_(xGrid), vGrid_(vGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), leverageFct_(std::move(leverageFct)), mixingFactor_(mixingFactor) {}
+
+    void FdHestonDoubleBarrierEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.barrierType == DoubleBarrier::KnockOut,
+                "only Knock-Out double barrier options are supported");
+
+        // 1. Mesher
+        const ext::shared_ptr<HestonProcess>& process = model_->process();
+        const Time maturity = process->time(arguments_.exercise->lastDate());
+
+        // 1.1 The variance mesher
+        const Size tGridMin = 5;
+        const Size tGridAvgSteps = std::max(tGridMin, tGrid_/50);
+
+        const ext::shared_ptr<FdmHestonLocalVolatilityVarianceMesher> vMesher
+            = ext::make_shared<FdmHestonLocalVolatilityVarianceMesher>(
+                  vGrid_, process, leverageFct_, maturity, tGridAvgSteps, 0.0001, mixingFactor_);
+
+        // 1.2 The equity mesher
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+
+        Real xMin = std::log(arguments_.barrier_lo);
+        Real xMax = std::log(arguments_.barrier_hi);
+
+        const ext::shared_ptr<Fdm1dMesher> equityMesher(
+            new FdmBlackScholesMesher(
+                xGrid_,
+                FdmBlackScholesMesher::processHelper(
+                    process->s0(), process->dividendYield(),
+                    process->riskFreeRate(), vMesher->volaEstimate()),
+                maturity, payoff->strike(), xMin, xMax));
+
+        const ext::shared_ptr<FdmMesher> mesher (
+            new FdmMesherComposite(equityMesher, vMesher));
+
+        // 2. Calculator
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator(
+                                new FdmLogInnerValue(payoff, mesher, 0));
+
+        // 3. Step conditions
+        std::list<ext::shared_ptr<StepCondition<Array> > > stepConditions;
+        std::list<std::vector<Time> > stoppingTimes;
+
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "only european style option are supported");
+
+        ext::shared_ptr<FdmStepConditionComposite> conditions(
+                new FdmStepConditionComposite(stoppingTimes, stepConditions));
+
+        // 4. Boundary conditions
+        FdmBoundaryConditionSet boundaries;
+        boundaries.push_back(FdmBoundaryConditionSet::value_type(
+            new FdmDirichletBoundary(mesher, arguments_.rebate, 0,
+                                     FdmDirichletBoundary::Lower)));
+
+        boundaries.push_back(FdmBoundaryConditionSet::value_type(
+            new FdmDirichletBoundary(mesher, arguments_.rebate, 0,
+                                     FdmDirichletBoundary::Upper)));
+
+        // 5. Solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions,
+                                     calculator, maturity,
+                                     tGrid_, dampingSteps_ };
+
+        ext::shared_ptr<FdmHestonSolver> solver(new FdmHestonSolver(
+                    Handle<HestonProcess>(process), solverDesc, schemeDesc_,
+                    Handle<FdmQuantoHelper>(), leverageFct_, mixingFactor_));
+
+        const Real spot = process->s0()->value();
+        results_.value = solver->valueAt(spot, process->v0());
+        results_.delta = solver->deltaAt(spot, process->v0());
+        results_.gamma = solver->gammaAt(spot, process->v0());
+        results_.theta = solver->thetaAt(spot, process->v0());
+    }
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>fdklugeextouspreadengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/finitedifferences/fdklugeextouspreadengine.hpp>
+#include <ql/experimental/finitedifferences/fdmklugeextousolver.hpp>
+#include <ql/experimental/finitedifferences/fdmspreadpayoffinnervalue.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/experimental/processes/klugeextouprocess.hpp>
+#include <ql/methods/finitedifferences/meshers/exponentialjump1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmsimpleprocess1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmamericanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmbermudanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdKlugeExtOUSpreadEngine::FdKlugeExtOUSpreadEngine(
+        ext::shared_ptr<KlugeExtOUProcess> klugeOUProcess,
+        ext::shared_ptr<YieldTermStructure> rTS,
+        Size tGrid,
+        Size xGrid,
+        Size yGrid,
+        Size uGrid,
+        ext::shared_ptr<GasShape> gasShape,
+        ext::shared_ptr<PowerShape> powerShape,
+        const FdmSchemeDesc& schemeDesc)
+    : klugeOUProcess_(std::move(klugeOUProcess)), rTS_(std::move(rTS)), tGrid_(tGrid),
+      xGrid_(xGrid), yGrid_(yGrid), uGrid_(uGrid), gasShape_(std::move(gasShape)),
+      powerShape_(std::move(powerShape)), schemeDesc_(schemeDesc) {}
+
+    void FdKlugeExtOUSpreadEngine::calculate() const {
+        // 1. Mesher
+        const Time maturity
+            = rTS_->dayCounter().yearFraction(rTS_->referenceDate(),
+                                              arguments_.exercise->lastDate());
+        const ext::shared_ptr<ExtOUWithJumpsProcess> klugeProcess
+                                          = klugeOUProcess_->getKlugeProcess();
+        const ext::shared_ptr<StochasticProcess1D> ouProcess
+                        = klugeProcess->getExtendedOrnsteinUhlenbeckProcess();
+        const ext::shared_ptr<Fdm1dMesher> xMesher(
+            new FdmSimpleProcess1dMesher(xGrid_, ouProcess,maturity));
+
+        const ext::shared_ptr<Fdm1dMesher> yMesher(
+            new ExponentialJump1dMesher(yGrid_,
+                                        klugeProcess->beta(),
+                                        klugeProcess->jumpIntensity(),
+                                        klugeProcess->eta()));
+
+        const ext::shared_ptr<Fdm1dMesher> uMesher(
+            new FdmSimpleProcess1dMesher(uGrid_,
+                                         klugeOUProcess_->getExtOUProcess(),
+                                         maturity));
+
+        const ext::shared_ptr<FdmMesher> mesher(
+            new FdmMesherComposite(xMesher, yMesher, uMesher));
+
+        // 2. Calculator
+        ext::shared_ptr<BasketPayoff> basketPayoff =
+            ext::dynamic_pointer_cast<BasketPayoff>(arguments_.payoff);
+        QL_REQUIRE(basketPayoff," basket payoff expected");
+
+        const ext::shared_ptr<Payoff> zeroStrikeCall(
+            new PlainVanillaPayoff(Option::Call, 0.0));
+
+        const ext::shared_ptr<FdmInnerValueCalculator> gasPrice(
+            new FdmExpExtOUInnerValueCalculator(zeroStrikeCall,
+                                                mesher, gasShape_, 2));
+
+        const ext::shared_ptr<FdmInnerValueCalculator> powerPrice(
+            new FdmExtOUJumpModelInnerValue(zeroStrikeCall,mesher,powerShape_));
+
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator(
+            new FdmSpreadPayoffInnerValue(basketPayoff, powerPrice, gasPrice));
+
+        // 3. Step conditions
+        const ext::shared_ptr<FdmStepConditionComposite> conditions =
+            FdmStepConditionComposite::vanillaComposite(
+                                DividendSchedule(), arguments_.exercise,
+                                mesher, calculator,
+                                rTS_->referenceDate(), rTS_->dayCounter());
+
+        // 4. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+
+        // 5. set-up solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions,
+                                     calculator, maturity, tGrid_, 0 };
+
+        const ext::shared_ptr<FdmKlugeExtOUSolver<3> > solver(
+            new FdmKlugeExtOUSolver<3>(
+                Handle<KlugeExtOUProcess>(klugeOUProcess_),
+                rTS_, solverDesc, schemeDesc_));
+
+        std::vector<Real> x(3);
+        x[0] = klugeOUProcess_->initialValues()[0];
+        x[1] = klugeOUProcess_->initialValues()[1];
+        x[2] = klugeOUProcess_->initialValues()[2];
+
+        results_.value = solver->valueAt(x);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>fdmblackscholesfwdop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012, 2013 Klaus Spanderen
+ Copyright (C) 2014 Johannes Göttker-Schnetmann
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <ql/experimental/finitedifferences/fdmblackscholesfwdop.hpp>
+
+namespace QuantLib {
+
+    FdmBlackScholesFwdOp::FdmBlackScholesFwdOp(
+        const ext::shared_ptr<FdmMesher>& mesher,
+        const ext::shared_ptr<GeneralizedBlackScholesProcess> & bsProcess,
+        Real strike,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        Size direction)
+    : mesher_(mesher),
+      rTS_   (bsProcess->riskFreeRate().currentLink()),
+      qTS_   (bsProcess->dividendYield().currentLink()),
+      volTS_ (bsProcess->blackVolatility().currentLink()),
+      localVol_((localVol) ? bsProcess->localVolatility().currentLink()
+                           : ext::shared_ptr<LocalVolTermStructure>()),
+      x_ ((localVol) ? Array(Exp(mesher->locations(direction))) : Array()),
+      dxMap_ (FirstDerivativeOp(direction, mesher)),
+      dxxMap_(SecondDerivativeOp(direction, mesher)),
+      mapT_  (direction, mesher),
+      strike_(strike),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite),
+      direction_(direction) {
+    }
+
+    void FdmBlackScholesFwdOp::setTime(Time t1, Time t2) {
+        const Rate r = rTS_->forwardRate(t1, t2, Continuous).rate();
+        const Rate q = qTS_->forwardRate(t1, t2, Continuous).rate();
+
+        if (localVol_ != nullptr) {
+            const ext::shared_ptr<FdmLinearOpLayout> layout=mesher_->layout();
+            const FdmLinearOpIterator endIter = layout->end();
+
+            Array v(layout->size());
+            for (FdmLinearOpIterator iter = layout->begin();
+                iter != endIter; ++iter) {
+                const Size i = iter.index();
+
+                if (illegalLocalVolOverwrite_ < 0.0) {
+                    v[i] = square<Real>()(
+                        localVol_->localVol(0.5*(t1+t2), x_[i], true));
+                }
+                else {
+                    try {
+                        v[i] = square<Real>()(
+                            localVol_->localVol(0.5*(t1+t2), x_[i], true));
+                    } catch (Error&) {
+                        v[i] = square<Real>()(illegalLocalVolOverwrite_);
+                    }
+                }
+            }
+            mapT_.axpyb(Array(1, 1.0), dxMap_.multR(- r + q + 0.5*v),
+                        dxxMap_.multR(0.5*v), Array(1, 0.0));
+        } else {
+            const Real v
+                = volTS_->blackForwardVariance(t1, t2, strike_)/(t2-t1);
+            mapT_.axpyb(Array(1, - r + q + 0.5*v), dxMap_,
+                        dxxMap_.mult(0.5*Array(mesher_->layout()->size(), v)),
+                        Array(1, 0.0));
+        }
+    }
+
+    Size FdmBlackScholesFwdOp::size() const { return 1U; }
+
+    Disposable<Array> FdmBlackScholesFwdOp::apply(const Array& u) const {
+        return mapT_.apply(u);
+    }
+
+    Disposable<Array> FdmBlackScholesFwdOp::apply_direction(
+        Size direction, const Array& r) const {
+        if (direction == direction_)
+            return mapT_.apply(r);
+        else {
+            Array retVal(r.size(), 0.0);
+            return retVal;
+        }
+    }
+
+    Disposable<Array> FdmBlackScholesFwdOp::apply_mixed(const Array& r) const {
+        Array retVal(r.size(), 0.0);
+        return retVal;
+    }
+
+    Disposable<Array> FdmBlackScholesFwdOp::solve_splitting(
+        Size direction, const Array& r, Real dt) const {
+        if (direction == direction_)
+            return mapT_.solve_splitting(r, dt, 1.0);
+        else {
+            Array retVal(r);
+            return retVal;
+        }
+    }
+
+    Disposable<Array> FdmBlackScholesFwdOp::preconditioner(
+        const Array& r, Real dt) const {
+        return solve_splitting(direction_, r, dt);
+    }
+
+    Disposable<std::vector<SparseMatrix> >
+    FdmBlackScholesFwdOp::toMatrixDecomp() const {
+        std::vector<SparseMatrix> retVal(1, mapT_.toMatrix());
+        return retVal;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>fdmdupire1dop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/finitedifferences/fdmdupire1dop.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
+
+namespace QuantLib {
+
+FdmDupire1dOp::FdmDupire1dOp(const ext::shared_ptr<FdmMesher> &mesher,
+                             const Array &localVolatility)
+    : mesher_(mesher), localVolatility_(localVolatility),
+      mapT_(SecondDerivativeOp(0, mesher)
+                .mult(0.5 * localVolatility * localVolatility)) {}
+
+void FdmDupire1dOp::setTime(Time t1, Time t2) {}
+
+Size FdmDupire1dOp::size() const { return 1; }
+
+Disposable<Array> FdmDupire1dOp::apply(const Array &u) const {
+    return mapT_.apply(u);
+}
+
+Disposable<Array> FdmDupire1dOp::apply_direction(Size direction,
+                                                 const Array &r) const {
+    if (direction == 0)
+        return mapT_.apply(r);
+    QL_FAIL("direction too large");
+}
+
+Disposable<Array> FdmDupire1dOp::apply_mixed(const Array &r) const {
+    Array s(r);
+    return s;
+}
+
+Disposable<Array> FdmDupire1dOp::solve_splitting(Size direction, const Array &r,
+                                                 Real a) const {
+
+    if (direction == 0) {
+        return mapT_.solve_splitting(r, a, 1.0);
+    }
+    QL_FAIL("direction too large");
+}
+
+Disposable<Array> FdmDupire1dOp::preconditioner(const Array &r, Real dt) const {
+
+    return solve_splitting(0, r, dt);
+}
+
+Disposable<std::vector<SparseMatrix> > FdmDupire1dOp::toMatrixDecomp() const {
+    std::vector<SparseMatrix> retVal(1);
+    retVal[0] = mapT_.toMatrix();
+    return retVal;
+}
+
+}
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>fdmextendedornsteinuhlenbeckop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmextendedornsteinuhlenbeckop.cpp
+*/
+
+#include <ql/experimental/finitedifferences/fdmextendedornsteinuhlenbeckop.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/math/interpolations/linearinterpolation.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmExtendedOrnsteinUhlenbeckOp::FdmExtendedOrnsteinUhlenbeckOp(
+        const ext::shared_ptr<FdmMesher>& mesher,
+        ext::shared_ptr<ExtendedOrnsteinUhlenbeckProcess> process,
+        ext::shared_ptr<YieldTermStructure> rTS,
+        FdmBoundaryConditionSet bcSet,
+        Size direction)
+    : mesher_(mesher), process_(std::move(process)), rTS_(std::move(rTS)), bcSet_(std::move(bcSet)),
+      direction_(direction), x_(mesher->locations(direction)), dxMap_(direction, mesher),
+      dxxMap_(SecondDerivativeOp(direction, mesher)
+                  .mult(0.5 * square<Real>()(process_->volatility()) *
+                        Array(mesher->layout()->size(), 1.))),
+      mapX_(direction, mesher) {}
+
+    Size FdmExtendedOrnsteinUhlenbeckOp::size() const {
+        return mesher_->layout()->dim().size();;
+    }
+
+    void FdmExtendedOrnsteinUhlenbeckOp::setTime(Time t1, Time t2) {
+        const Rate r = rTS_->forwardRate(t1, t2, Continuous).rate();
+
+        const ext::shared_ptr<FdmLinearOpLayout> layout=mesher_->layout();
+        const FdmLinearOpIterator endIter = layout->end();
+
+        Array drift(layout->size());
+        for (FdmLinearOpIterator iter = layout->begin();
+             iter!=endIter; ++iter) {
+            const Size i = iter.index();
+            drift[i] = process_->drift(0.5*(t1+t2), x_[i]);
+        }
+        mapX_.axpyb(drift, dxMap_, dxxMap_, Array(1, -r));
+    }
+
+    Disposable<Array> FdmExtendedOrnsteinUhlenbeckOp::apply(
+                                                    const Array& r) const {
+        return mapX_.apply(r);
+    }
+
+    Disposable<Array> FdmExtendedOrnsteinUhlenbeckOp::apply_mixed(
+                                                    const Array& r) const {
+        Array retVal(r.size(), 0.0);
+        return retVal;
+    }
+
+    Disposable<Array> FdmExtendedOrnsteinUhlenbeckOp::apply_direction(
+                                    Size direction, const Array& r) const {
+        if (direction == direction_) {
+            return mapX_.apply(r);
+        }
+        else {
+            Array retVal(r.size(), 0.0);
+            return retVal;
+        }
+    }
+
+    Disposable<Array> FdmExtendedOrnsteinUhlenbeckOp::solve_splitting(
+                            Size direction, const Array& r, Real a) const {
+        if (direction == direction_) {
+            return mapX_.solve_splitting(r, a, 1.0);
+        }
+        else {
+            Array retVal(r);
+            return retVal;
+        }
+    }
+
+    Disposable<Array> FdmExtendedOrnsteinUhlenbeckOp::preconditioner(
+                                            const Array& r, Real dt) const {
+        return solve_splitting(direction_, r, dt);
+    }
+
+    Disposable<std::vector<SparseMatrix> >
+    FdmExtendedOrnsteinUhlenbeckOp::toMatrixDecomp() const {
+        std::vector<SparseMatrix> retVal(1, mapX_.toMatrix());
+        return retVal;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>fdmextoujumpop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+ 
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmexpoujumpop.cpp
+    \brief Ornstein Uhlenbeck process plus jumps (Kluge Model)
+*/
+
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/math/interpolations/linearinterpolation.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/finitedifferences/fdmextoujumpop.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <ql/experimental/finitedifferences/fdmextendedornsteinuhlenbeckop.hpp>
+
+#if defined(QL_PATCH_MSVC)
+#pragma warning(push)
+#pragma warning(disable:4180)
+#endif
+
+#if defined(__GNUC__) && (((__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)) || (__GNUC__ > 4))
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-local-typedefs"
+#endif
+
+#include <boost/numeric/ublas/vector.hpp>
+#include <boost/numeric/ublas/operation.hpp>
+
+#if defined(QL_PATCH_MSVC)
+#pragma warning(pop)
+#endif
+
+#if defined(__GNUC__) && (((__GNUC__ == 4) && (__GNUC_MINOR__ >= 8)) || (__GNUC__ > 4))
+#pragma GCC diagnostic pop
+#endif
+
+namespace QuantLib {
+
+    FdmExtOUJumpOp::FdmExtOUJumpOp(
+        const ext::shared_ptr<FdmMesher>& mesher,
+        const ext::shared_ptr<ExtOUWithJumpsProcess>& process,
+        const ext::shared_ptr<YieldTermStructure>& rTS,
+        const FdmBoundaryConditionSet& bcSet,
+        Size integroIntegrationOrder)
+    : mesher_ (mesher),
+      process_(process),
+      rTS_    (rTS),
+      bcSet_  (bcSet),
+      gaussLaguerreIntegration_(integroIntegrationOrder),
+      x_      (mesher->locations(0)),
+      ouOp_   (new FdmExtendedOrnsteinUhlenbeckOp(
+                   mesher,
+                   process->getExtendedOrnsteinUhlenbeckProcess(), rTS, bcSet)),
+      dyMap_  (FirstDerivativeOp(1, mesher)
+                .mult(-process->beta()*mesher->locations(1)))
+    {
+        const Real eta     = process_->eta();
+        const Real lambda  = process_->jumpIntensity();
+
+        const Array yInt   = gaussLaguerreIntegration_.x();
+        const Array weights= gaussLaguerreIntegration_.weights();
+
+        integroPart_ = SparseMatrix(mesher_->layout()->size(),
+                                    mesher_->layout()->size());
+
+        const ext::shared_ptr<FdmLinearOpLayout> layout = mesher_->layout();
+        const FdmLinearOpIterator endIter = layout->end();
+
+        Array yLoc(mesher_->layout()->dim()[1]);
+        for (FdmLinearOpIterator iter = layout->begin(); iter != endIter;
+            ++iter) {
+            yLoc[iter.coordinates()[1]] = mesher_->location(iter, 1);
+        }
+
+        for (FdmLinearOpIterator iter = layout->begin(); iter != endIter;
+            ++iter) {
+
+            const Size diag = iter.index();
+            integroPart_(diag, diag) -= lambda;
+
+            const Real y = mesher_->location(iter, 1);
+            const Integer yIndex = iter.coordinates()[1];
+
+            for (Size i=0; i < yInt.size(); ++i) {
+                const Real weight = std::exp(-yInt[i])*weights[i];
+
+                const Real ys = y + yInt[i]/eta;
+                const Integer l = (ys > yLoc.back()) ? yLoc.size()-2
+                    : std::upper_bound(yLoc.begin(),
+                                       yLoc.end()-1, ys) - yLoc.begin()-1;
+
+                const Real s = (ys-yLoc[l])/(yLoc[l+1]-yLoc[l]);
+                integroPart_(diag, layout->neighbourhood(iter, 1, l-yIndex))
+                    += weight*lambda*(1-s);
+                integroPart_(diag, layout->neighbourhood(iter, 1, l+1-yIndex))
+                    += weight*lambda*s;
+            }
+        }
+    }
+
+    Size FdmExtOUJumpOp::size() const {
+        return mesher_->layout()->dim().size();;
+    }
+
+    void FdmExtOUJumpOp::setTime(Time t1, Time t2) {
+        ouOp_->setTime(t1, t2);
+    }
+
+    Disposable<Array> FdmExtOUJumpOp::apply(const Array& r) const {
+        return ouOp_->apply(r) + dyMap_.apply(r) + integro(r);
+    }
+
+    Disposable<Array> FdmExtOUJumpOp::apply_mixed(const Array& r) const {
+        return  integro(r);
+    }
+
+    Disposable<Array> FdmExtOUJumpOp::apply_direction(Size direction,
+                                                      const Array& r) const {
+        if (direction == 0)
+            return ouOp_->apply_direction(direction, r);
+        else if (direction == 1)
+            return dyMap_.apply(r);
+        else {
+            Array retVal(r.size(), 0.0);
+            return retVal;
+        }
+    }
+
+    Disposable<Array>
+        FdmExtOUJumpOp::solve_splitting(Size direction,
+                                        const Array& r, Real a) const {
+        if (direction == 0) {
+            return ouOp_->solve_splitting(direction, r, a);
+        }
+        else if (direction == 1) {
+            return dyMap_.solve_splitting(r, a, 1.0);
+        }
+        else {
+            Array retVal(r);
+            return retVal;
+        }
+    }
+
+    Disposable<Array>
+    FdmExtOUJumpOp::preconditioner(const Array& r, Real dt) const {
+        return ouOp_->solve_splitting(0, r, dt);
+    }
+
+    Disposable<Array> FdmExtOUJumpOp::integro(const Array& r) const {
+        return prod(integroPart_, r);
+    }
+
+    Disposable<std::vector<SparseMatrix> >
+    FdmExtOUJumpOp::toMatrixDecomp() const {
+        QL_REQUIRE(bcSet_.empty(), "boundary conditions are not supported");
+
+        std::vector<SparseMatrix> retVal(1, ouOp_->toMatrixDecomp().front());
+        retVal.push_back(dyMap_.toMatrix());
+        retVal.push_back(integroPart_);
+
+        return retVal;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>fdmextoujumpsolver.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmextoujumpsolver.cpp
+*/
+
+#include <ql/experimental/finitedifferences/fdmextoujumpop.hpp>
+#include <ql/experimental/finitedifferences/fdmextoujumpsolver.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/methods/finitedifferences/solvers/fdm2dimsolver.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmExtOUJumpSolver::FdmExtOUJumpSolver(Handle<ExtOUWithJumpsProcess> process,
+                                           ext::shared_ptr<YieldTermStructure> rTS,
+                                           FdmSolverDesc solverDesc,
+                                           const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)), rTS_(std::move(rTS)), solverDesc_(std::move(solverDesc)),
+      schemeDesc_(schemeDesc) {
+
+        registerWith(process_);
+    }
+
+    void FdmExtOUJumpSolver::performCalculations() const {
+        ext::shared_ptr<FdmLinearOpComposite>op(
+            new FdmExtOUJumpOp(solverDesc_.mesher, process_.currentLink(),
+                               rTS_, solverDesc_.bcSet, 32));
+        
+        solver_ = ext::make_shared<Fdm2DimSolver>(
+                              solverDesc_, schemeDesc_, op);
+    }
+    
+    Real FdmExtOUJumpSolver::valueAt(Real x, Real y) const {
+        calculate();
+        return solver_->interpolateAt(x, y);
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>fdmhestonfwdop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012, 2013 Klaus Spanderen
+ Copyright (C) 2014 Johannes Göttker-Schnetmann
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmhestonfwdop.cpp
+*/
+
+#include <ql/experimental/finitedifferences/fdmhestonfwdop.hpp>
+#include <ql/experimental/finitedifferences/modtriplebandlinearop.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/firstderivativeop.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <ql/methods/finitedifferences/operators/secondordermixedderivativeop.hpp>
+#include <ql/processes/hestonprocess.hpp>
+#include <boost/unordered/unordered_map.hpp>
+#include <cmath>
+#include <utility>
+
+using std::exp;
+
+namespace QuantLib {
+
+    FdmHestonFwdOp::FdmHestonFwdOp(const ext::shared_ptr<FdmMesher>& mesher,
+                                   const ext::shared_ptr<HestonProcess>& process,
+                                   FdmSquareRootFwdOp::TransformationType type,
+                                   ext::shared_ptr<LocalVolTermStructure> leverageFct,
+                                   const Real mixingFactor)
+    : type_(type), kappa_(process->kappa()), theta_(process->theta()), sigma_(process->sigma()),
+      rho_(process->rho()), v0_(process->v0()), mixedSigma_(mixingFactor * sigma_),
+      rTS_(process->riskFreeRate().currentLink()), qTS_(process->dividendYield().currentLink()),
+      varianceValues_(0.5 * mesher->locations(1)),
+      dxMap_(ext::make_shared<FirstDerivativeOp>(0, mesher)),
+      dxxMap_(ext::make_shared<ModTripleBandLinearOp>(TripleBandLinearOp(
+          type == FdmSquareRootFwdOp::Log ?
+              SecondDerivativeOp(0, mesher).mult(0.5 * Exp(mesher->locations(1))) :
+              SecondDerivativeOp(0, mesher).mult(0.5 * mesher->locations(1))))),
+      boundary_(ext::make_shared<ModTripleBandLinearOp>(TripleBandLinearOp(
+          SecondDerivativeOp(0, mesher).mult(Array(mesher->locations(0).size(), 0.0))))),
+      mapX_(ext::make_shared<TripleBandLinearOp>(0, mesher)),
+      mapY_(ext::make_shared<FdmSquareRootFwdOp>(mesher, kappa_, theta_, mixedSigma_, 1, type)),
+      correlation_(ext::make_shared<NinePointLinearOp>(
+          type == FdmSquareRootFwdOp::Log ?
+              SecondOrderMixedDerivativeOp(0, 1, mesher)
+                  .mult(Array(mesher->layout()->size(), rho_ * mixedSigma_)) :
+              SecondOrderMixedDerivativeOp(0, 1, mesher)
+                  .mult(rho_ * mixedSigma_ * mesher->locations(1)))),
+      leverageFct_(std::move(leverageFct)), mesher_(mesher) {
+        const ext::shared_ptr<FdmLinearOpLayout> layout = mesher->layout();
+        // zero flux boundary condition
+        const Size n = layout->dim()[1];
+        const Real lowerBoundaryFactor = mapY_->lowerBoundaryFactor(type);
+        const Real upperBoundaryFactor = mapY_->upperBoundaryFactor(type);
+
+        const Real logFacLow = type == FdmSquareRootFwdOp::Log ? exp(mapY_->v(0)) : 1.0;
+        const Real logFacUpp = type == FdmSquareRootFwdOp::Log ? exp(mapY_->v(n+1)) : 1.0;
+
+        const Real alpha = -2*rho_/mixedSigma_*lowerBoundaryFactor*logFacLow;
+        const Real beta  = -2*rho_/mixedSigma_*upperBoundaryFactor*logFacUpp;
+
+        ModTripleBandLinearOp fDx(FirstDerivativeOp(0, mesher));
+
+        const FdmLinearOpIterator endIter = layout->end();
+        for (FdmLinearOpIterator iter = layout->begin(); iter != endIter; ++iter) {
+            if (iter.coordinates()[1] == 0) {
+                const Size idx = iter.index();
+                if (!leverageFct_) {
+                    dxxMap_->upper(idx) += alpha*fDx.upper(idx);
+                    dxxMap_->diag(idx) += alpha*fDx.diag(idx);
+                    dxxMap_->lower(idx) += alpha*fDx.lower(idx);
+                }
+                boundary_->upper(idx)= alpha*fDx.upper(idx);
+                boundary_->diag(idx) = alpha*fDx.diag(idx);
+                boundary_->lower(idx) = alpha*fDx.lower(idx);
+            }
+            else if (iter.coordinates()[1] == n-1) {
+                const Size idx = iter.index();
+
+                if (!leverageFct_) {
+                    dxxMap_->upper(idx)+= beta*fDx.upper(idx);
+                    dxxMap_->diag(idx) += beta*fDx.diag(idx);
+                    dxxMap_->lower(idx) += beta*fDx.lower(idx);
+                }
+                boundary_->upper(idx)= beta*fDx.upper(idx);
+                boundary_->diag(idx) = beta*fDx.diag(idx);
+                boundary_->lower(idx) = beta*fDx.lower(idx);
+            }
+        }
+    }
+
+    Size FdmHestonFwdOp::size() const {
+        return 2;
+    }
+
+    void FdmHestonFwdOp::setTime(Time t1, Time t2){
+        const Rate r = rTS_->forwardRate(t1, t2, Continuous).rate();
+        const Rate q = qTS_->forwardRate(t1, t2, Continuous).rate();
+        if (leverageFct_ != nullptr) {
+            L_ = getLeverageFctSlice(t1, t2);
+            Array Lsquare = L_*L_;
+            if (type_ == FdmSquareRootFwdOp::Plain) {
+                mapX_->axpyb( Array(1, -r + q), *dxMap_,
+                    dxxMap_->multR(Lsquare).add(boundary_->multR(L_))
+                    .add(dxMap_->multR(rho_*mixedSigma_*L_))
+                    .add(dxMap_->mult(varianceValues_).multR(Lsquare)),
+                              Array());
+            } else if (type_ == FdmSquareRootFwdOp::Power) {
+                mapX_->axpyb( Array(1, -r + q), *dxMap_,
+                    dxxMap_->multR(Lsquare).add(boundary_->multR(L_))
+                    .add(dxMap_->multR(rho_*2.0*kappa_*theta_/(mixedSigma_)*L_))
+                    .add(dxMap_->mult(varianceValues_).multR(Lsquare)), Array());
+            } else if (type_ == FdmSquareRootFwdOp::Log) {
+                mapX_->axpyb( Array(1, -r + q), *dxMap_,
+                    dxxMap_->multR(Lsquare).add(boundary_->multR(L_))
+                    .add(dxMap_->mult(0.5*Exp(2.0*varianceValues_)).multR(Lsquare)),
+                              Array());
+            }
+        } else {
+            if (type_ == FdmSquareRootFwdOp::Plain) {
+                mapX_->axpyb( - r + q + rho_*mixedSigma_ + varianceValues_, *dxMap_,
+                        *dxxMap_, Array());
+            } else if (type_ == FdmSquareRootFwdOp::Power) {
+                mapX_->axpyb( - r + q + rho_*2.0*kappa_*theta_/(mixedSigma_) + varianceValues_,
+                              *dxMap_, *dxxMap_, Array());
+            } else if (type_ == FdmSquareRootFwdOp::Log) {
+                mapX_->axpyb( - r + q + 0.5*Exp(2.0*varianceValues_), *dxMap_,
+                        *dxxMap_, Array());
+            }
+        }
+    }
+
+    Disposable<Array> FdmHestonFwdOp::apply(const Array& u) const {
+        if (leverageFct_ != nullptr) {
+            return mapX_->apply(u)
+                    + mapY_->apply(u)
+                    + correlation_->apply(L_*u);
+        } else {
+            return mapX_->apply(u)
+                    + mapY_->apply(u)
+                    + correlation_->apply(u);
+        }
+    }
+
+    Disposable<Array> FdmHestonFwdOp::apply_mixed(const Array& u) const{
+        if (leverageFct_ != nullptr) {
+            return correlation_->apply(L_*u);
+        } else {
+            return correlation_->apply(u);
+        }
+    }
+
+    Disposable<Array> FdmHestonFwdOp::apply_direction(
+        Size direction, const Array& u) const {
+
+        if (direction == 0)
+            return mapX_->apply(u) ;
+        else if (direction == 1)
+            return mapY_->apply(u) ;
+        else
+            QL_FAIL("direction too large");
+    }
+
+    Disposable<Array> FdmHestonFwdOp::solve_splitting(
+        Size direction, const Array& u, Real s) const{
+        if (direction == 0) {
+            return mapX_->solve_splitting(u, s, 1.0);
+        }
+        else if (direction == 1) {
+            return mapY_->solve_splitting(1, u, s);
+        }
+        else
+            QL_FAIL("direction too large");
+    }
+
+    Disposable<Array> FdmHestonFwdOp::preconditioner(
+        const Array& u, Real dt) const{
+        return solve_splitting(1, u, dt);
+    }
+
+    Disposable<Array> FdmHestonFwdOp::getLeverageFctSlice(Time t1, Time t2)
+    const {
+        const ext::shared_ptr<FdmLinearOpLayout> layout=mesher_->layout();
+        Array v(layout->size(), 1.0);
+
+        if (!leverageFct_)
+            return v;
+
+        const Real t = 0.5*(t1+t2);
+        const Time time = std::min(leverageFct_->maxTime(), t);
+                                   //std::max(leverageFct_->minTime(), t));
+
+        const FdmLinearOpIterator endIter = layout->end();
+        for (FdmLinearOpIterator iter = layout->begin();
+             iter!=endIter; ++iter) {
+            const Size nx = iter.coordinates()[0];
+
+            if (iter.coordinates()[1] == 0) {
+                const Real x = std::exp(mesher_->location(iter, 0));
+                const Real spot = std::min(leverageFct_->maxStrike(),
+                                           std::max(leverageFct_->minStrike(), x));
+                v[nx] = std::max(0.01, leverageFct_->localVol(time, spot, true));
+            }
+            else {
+                v[iter.index()] = v[nx];
+            }
+        }
+        return v;
+    }
+
+    Disposable<std::vector<SparseMatrix> > FdmHestonFwdOp::toMatrixDecomp()
+        const {
+
+        std::vector<SparseMatrix> retVal(3);
+
+        retVal[0] = mapX_->toMatrix();
+        retVal[1] = mapY_->toMatrix();
+        retVal[2] = correlation_->toMatrix();
+
+        return retVal;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="11">
+    <source>fdmhestongreensfct.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmhestongreenfct.cpp
+    \brief Heston Fokker-Planck Green's function
+*/
+
+#include <ql/experimental/finitedifferences/fdmhestongreensfct.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopiterator.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/utilities/squarerootprocessrndcalculator.hpp>
+#include <ql/processes/hestonprocess.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmHestonGreensFct::FdmHestonGreensFct(ext::shared_ptr<FdmMesher> mesher,
+                                           ext::shared_ptr<HestonProcess> process,
+                                           FdmSquareRootFwdOp::TransformationType trafoType_,
+                                           const Real l0)
+    : l0_(l0), mesher_(std::move(mesher)), process_(std::move(process)), trafoType_(trafoType_) {}
+
+    Disposable<Array> FdmHestonGreensFct::get(Time t, Algorithm algorithm)
+    const {
+        const Rate r = process_->riskFreeRate()->forwardRate(0, t, Continuous);
+        const Rate q = process_->dividendYield()->forwardRate(0,t, Continuous);
+
+        const Real s0    = process_->s0()->value();
+        const Real v0    = process_->v0();
+        const Real x0    = std::log(s0) + (r-q-0.5*v0*l0_*l0_)*t;
+
+          const Real rho   = process_->rho();
+        const Real theta = process_->theta();
+        const Real kappa = process_->kappa();
+        const Real sigma = process_->sigma();
+
+        const ext::shared_ptr<FdmLinearOpLayout> layout = mesher_->layout();
+        const FdmLinearOpIterator endIter = layout->end();
+
+        Array p(mesher_->layout()->size());
+        for (FdmLinearOpIterator iter = layout->begin(); iter != endIter;
+            ++iter) {
+            const Real x = mesher_->location(iter, 0);
+            const Real v = (trafoType_ != FdmSquareRootFwdOp::Log)
+                ? mesher_->location(iter, 1)
+                : std::exp(mesher_->location(iter, 1));
+
+            Real retVal;
+            switch (algorithm) {
+              case ZeroCorrelation:
+              {
+                const Real sd_x = l0_*std::sqrt(v0*t);
+                  const Real p_x = M_1_SQRTPI*M_SQRT1_2/sd_x
+                          * std::exp(-0.5*square<Real>()((x - x0)/sd_x));
+                  const Real p_v = SquareRootProcessRNDCalculator(
+                      v0, kappa, theta, sigma).pdf(v, t);
+
+                  retVal = p_v*p_x;
+              }
+              break;
+              case SemiAnalytical:
+                retVal = process_->pdf(x, v, t, 1e-4);
+              break;
+              case Gaussian:
+              {
+                const Real sd_x = l0_*std::sqrt(v0*t);
+                const Real sd_v = sigma*std::sqrt(v0*t);
+                const Real z0 = v0 + kappa*(theta - v0)*t;
+                retVal = 1.0/(M_TWOPI*sd_x*sd_v*std::sqrt(1-rho*rho))
+                    *std::exp(-(  square<Real>()((x-x0)/sd_x)
+                                + square<Real>()((v-z0)/sd_v)
+                                - 2*rho*(x-x0)*(v-z0)/(sd_x*sd_v))
+                              /(2*(1-rho*rho)) );
+              }
+              break;
+              default:
+                QL_FAIL("unknown algorithm");
+            }
+
+            switch (trafoType_) {
+              case FdmSquareRootFwdOp::Log:
+                retVal*=v;
+                break;
+              case FdmSquareRootFwdOp::Plain:
+                break;
+              case FdmSquareRootFwdOp::Power:
+                retVal*=std::pow(v, 1.0 - 2*kappa*theta/(sigma*sigma));
+                break;
+              default:
+                QL_FAIL("unknown transformation type");
+            }
+
+            p[iter.index()] = retVal;
+        }
+
+        return p;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="12">
+    <source>fdmklugeextouop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmexpoujumpop.cpp
+    \brief Kluge process (power) plus Ornstein Uhlenbeck process (gas)
+*/
+
+
+#include <ql/quotes/simplequote.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/termstructures/yield/flatforward.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/experimental/processes/klugeextouprocess.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/finitedifferences/fdmextoujumpop.hpp>
+#include <ql/experimental/finitedifferences/fdmklugeextouop.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/experimental/finitedifferences/fdmextendedornsteinuhlenbeckop.hpp>
+#include <ql/methods/finitedifferences/operators/secondordermixedderivativeop.hpp>
+
+namespace QuantLib {
+
+    FdmKlugeExtOUOp::FdmKlugeExtOUOp(
+        const ext::shared_ptr<FdmMesher>& mesher,
+        const ext::shared_ptr<KlugeExtOUProcess>& klugeOUProcess,
+        const ext::shared_ptr<YieldTermStructure>& rTS,
+        const FdmBoundaryConditionSet& bcSet,
+        Size integroIntegrationOrder)
+    : mesher_ (mesher),
+      kluge_  (klugeOUProcess->getKlugeProcess()),
+      extOU_  (klugeOUProcess->getExtOUProcess()),
+      rTS_    (rTS),
+      bcSet_  (bcSet),
+      klugeOp_(new FdmExtOUJumpOp(mesher, kluge_, rTS, bcSet,
+                                  integroIntegrationOrder)),
+      ouOp_   (new FdmExtendedOrnsteinUhlenbeckOp(
+                  mesher, extOU_,
+                  ext::shared_ptr<YieldTermStructure>(
+                      new FlatForward(rTS->referenceDate(),
+                              Handle<Quote>(ext::shared_ptr<Quote>(
+                                      new SimpleQuote(0.0))),
+                                      rTS->dayCounter())),
+                  bcSet, 2)),
+      corrMap_(SecondOrderMixedDerivativeOp(0, 2, mesher).mult(
+          Array(mesher->layout()->size(),
+                 klugeOUProcess->rho()*extOU_->volatility()
+                *kluge_->getExtendedOrnsteinUhlenbeckProcess()
+                       ->volatility())))
+    { }
+
+    Size FdmKlugeExtOUOp::size() const {
+        return mesher_->layout()->dim().size();
+    }
+
+    void FdmKlugeExtOUOp::setTime(Time t1, Time t2) {
+        ouOp_->setTime(t1, t2);
+        klugeOp_->setTime(t1, t2);
+    }
+
+    Disposable<Array> FdmKlugeExtOUOp::apply(const Array& r) const {
+        return ouOp_->apply(r) + klugeOp_->apply(r) + corrMap_.apply(r);
+    }
+
+    Disposable<Array> FdmKlugeExtOUOp::apply_mixed(const Array& r) const {
+        return  corrMap_.apply(r) + klugeOp_->apply_mixed(r);
+    }
+
+    Disposable<Array> FdmKlugeExtOUOp::apply_direction(Size direction,
+                                                       const Array& r) const {
+        return klugeOp_->apply_direction(direction, r)
+                + ouOp_->apply_direction(direction, r);
+    }
+
+    Disposable<Array>
+        FdmKlugeExtOUOp::solve_splitting(Size direction,
+                                        const Array& r, Real a) const {
+        if (direction == 0 || direction == 1) {
+            return klugeOp_->solve_splitting(direction, r, a);
+        }
+        else if (direction == 2) {
+            return ouOp_->solve_splitting(direction, r, a);
+        }
+        else {
+            Array retVal(r);
+            return retVal;
+        }
+    }
+
+    Disposable<Array>
+        FdmKlugeExtOUOp::preconditioner(const Array& r, Real dt) const {
+        return klugeOp_->solve_splitting(0, r, dt);
+    }
+
+    Disposable<std::vector<SparseMatrix> >
+    FdmKlugeExtOUOp::toMatrixDecomp() const {
+        const std::vector<SparseMatrix> klugeDecomp
+            = klugeOp_->toMatrixDecomp();
+
+        std::vector<SparseMatrix> retVal(4);
+        retVal[0] = klugeDecomp[0];
+        retVal[1] = klugeDecomp[1];
+        retVal[2] = ouOp_->toMatrixDecomp().front();
+        retVal[3] = corrMap_.toMatrix() + klugeDecomp[2];
+
+        return retVal;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="13">
+    <source>fdmsquarerootfwdop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012, 2013 Klaus Spanderen
+ Copyright (C) 2014 Johannes Göttker-Schnetmann
+
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmsquarerootfwdop.cpp
+    \brief Fokker-Planck forward operator for an square root process
+*/
+
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/firstderivativeop.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+
+#include <ql/experimental/finitedifferences/fdmsquarerootfwdop.hpp>
+#include <ql/experimental/finitedifferences/modtriplebandlinearop.hpp>
+
+#include <boost/math/special_functions/gamma.hpp>
+#include <boost/math/distributions/non_central_chi_squared.hpp>
+
+namespace QuantLib {
+
+    FdmSquareRootFwdOp::FdmSquareRootFwdOp(
+        const ext::shared_ptr<FdmMesher>& mesher,
+        Real kappa, Real theta, Real sigma,
+        Size direction, TransformationType transform)
+    : direction_(direction),
+      kappa_(kappa),
+      theta_(theta),
+      sigma_(sigma),
+      transform_(transform),
+      mapX_(transform == Plain ?
+          new ModTripleBandLinearOp(FirstDerivativeOp(direction_, mesher)
+              .mult(kappa*(mesher->locations(direction_)-theta) + sigma*sigma)
+              .add(SecondDerivativeOp(direction_, mesher)
+                   .mult(0.5*sigma*sigma*mesher->locations(direction_)))
+                .add(Array(mesher->layout()->size(), kappa)))
+
+        : transform == Power ? new ModTripleBandLinearOp(
+            SecondDerivativeOp(direction_, mesher)
+               .mult(0.5*sigma*sigma*mesher->locations(direction_))
+               .add(FirstDerivativeOp(direction_, mesher)
+                     .mult(kappa*(mesher->locations(direction_)+theta)))
+               .add(Array(mesher->layout()->size(),
+                          2*kappa*kappa*theta/(sigma*sigma))))
+
+            : new ModTripleBandLinearOp(FirstDerivativeOp(direction_, mesher)
+                    .mult(Exp(-mesher->locations(direction))
+                        *( -0.5*sigma*sigma - kappa*theta) + kappa)
+                    .add(SecondDerivativeOp(direction_, mesher)
+                    .mult(0.5*sigma*sigma*Exp(-mesher->locations(direction))))
+                    .add(kappa*theta*Exp(-mesher->locations(direction))))
+            ),
+      v_  (mesher->layout()->dim()[direction_]) {
+
+        const FdmLinearOpIterator endIter = mesher->layout()->end();
+        for (FdmLinearOpIterator iter = mesher->layout()->begin();
+            iter != endIter; ++iter) {
+            const Real v = mesher->location(iter, direction_);
+            v_[iter.coordinates()[direction_]] = v;
+        }
+
+        // zero flux boundary condition
+        setLowerBC(mesher);
+        setUpperBC(mesher);
+    }
+
+    void FdmSquareRootFwdOp::setLowerBC(
+        const ext::shared_ptr<FdmMesher>& mesher) {
+        const Size n = 1;
+        Real alpha, beta, gamma;
+
+        getCoeff(alpha, beta, gamma, n);
+        const Real f = lowerBoundaryFactor(transform_);
+
+        const Real b = -(h(n-1)+h(n))/zeta(n);
+        const Real c =  h(n-1)/zetap(n);
+
+        const FdmLinearOpIterator endIter = mesher->layout()->end();
+        for (FdmLinearOpIterator iter = mesher->layout()->begin();
+            iter != endIter; ++iter) {
+            if (iter.coordinates()[direction_] == 0) {
+                const Size idx = iter.index();
+                mapX_->diag(idx)  = beta  + f*b; //*v(n-1);
+                mapX_->upper(idx) = gamma + f*c; //*v(n-1);
+            }
+        }
+    }
+
+    void FdmSquareRootFwdOp::setUpperBC(
+        const ext::shared_ptr<FdmMesher>& mesher) {
+        const Size n = v_.size();
+        Real alpha, beta, gamma;
+
+        getCoeff(alpha, beta, gamma, n);
+        const Real f = upperBoundaryFactor(transform_);
+
+        const Real b = (h(n)+h(n-1))/zeta(n);
+        const Real c = -h(n)/zetam(n);
+
+        const FdmLinearOpIterator endIter = mesher->layout()->end();
+        for (FdmLinearOpIterator iter = mesher->layout()->begin();
+            iter != endIter; ++iter) {
+            if (iter.coordinates()[direction_] == n-1) {
+                const Size idx = iter.index();
+                mapX_->diag(idx) = beta   + f*b; //*v(n+1);
+                mapX_->lower(idx) = alpha + f*c; //*v(n+1);
+            }
+        }
+    }
+
+    Real FdmSquareRootFwdOp::lowerBoundaryFactor(TransformationType transform) const {
+        if (transform == Plain) {
+            return f0Plain();
+        }
+        else if (transform == Power) {
+            return f0Power();
+        }
+        else if (transform == Log) {
+            return f0Log();
+        }
+        else
+            QL_FAIL("unknown transform");
+    }
+
+    Real FdmSquareRootFwdOp::upperBoundaryFactor(TransformationType transform) const {
+        if (transform == Plain) {
+            return f1Plain();
+        }
+        else if (transform == Power) {
+            return f1Power();
+        }
+        else if (transform == Log) {
+            return f1Log();
+        }
+        else
+            QL_FAIL("unknown transform");
+    }
+
+    Real FdmSquareRootFwdOp::f0Plain() const {
+        const Size n = 1;
+        const Real a = -(2*h(n-1)+h(n))/zetam(n);
+        const Real alpha = sigma_*sigma_*v(n)/zetam(n) - mu(n)*h(n)/zetam(n);
+        const Real nu = a*v(n-1) + (2*kappa_*(v(n-1)-theta_) + sigma_*sigma_)
+                                        /(sigma_*sigma_);
+
+        return alpha/nu*v(n-1);
+    }
+
+    Real FdmSquareRootFwdOp::f1Plain() const {
+        const Size n = v_.size();
+        const Real a =  (2*h(n)+h(n-1))/zetap(n);
+        const Real gamma = sigma_*sigma_*v(n)/zetap(n) + mu(n)*h(n-1)/zetap(n);
+        const Real nu = a*v(n+1) + (2*kappa_*(v(n+1)-theta_) + sigma_*sigma_)
+                        /(sigma_*sigma_);
+
+        return gamma/nu*v(n+1);
+    }
+
+    Real FdmSquareRootFwdOp::f0Power() const {
+        const Size n = 1;
+        const Real mu = kappa_*(v(n)+theta_);
+        const Real a = -(2*h(n-1)+h(n))/zetam(n);
+        const Real alpha = sigma_*sigma_*v(n)/zetam(n) - mu*h(n)/zetam(n);
+        const Real nu  = a*v(n-1) +2*(kappa_*v(n-1)/(sigma_*sigma_));
+
+        return alpha/nu*v(n-1);
+    }
+
+    Real FdmSquareRootFwdOp::f1Power() const {
+        const Size n = v_.size();
+        const Real mu = kappa_*(v(n)+theta_);
+        const Real a =  (2*h(n)+h(n-1))/zetap(n);
+        const Real gamma = sigma_*sigma_*v(n)/zetap(n) + mu*h(n-1)/zetap(n);
+        const Real nu = a*v(n+1) +2*(kappa_*v(n+1)/(sigma_*sigma_));
+
+        return gamma/nu*v(n+1); 
+    }
+
+    Real FdmSquareRootFwdOp::f0Log() const {
+        const Size n = 1;
+        const Real mu = ((-kappa_*theta_-sigma_*sigma_/2.0)*exp(-v(1))+kappa_);
+        const Real a = -(2*h(n-1)+h(n))/zetam(n);
+        const Real alpha = sigma_*sigma_*exp(-v(n))/zetam(n) - mu*h(n)/zetam(n);
+        const Real nu = a*exp(-v(n-1)) + 2*kappa_*(1-theta_*exp(-v(n-1)))
+                        /(sigma_*sigma_);
+
+        return alpha/nu*exp(-v(n-1));
+    }
+
+    Real FdmSquareRootFwdOp::f1Log() const {
+        const Size n = v_.size();
+        const Real mu = ((-kappa_*theta_-sigma_*sigma_/2.0)*exp(-v(n))+kappa_);
+        const Real a =  (2*h(n)+h(n-1))/zetap(n);
+        const Real gamma = sigma_*sigma_*exp(-v(n))/zetap(n) + mu*h(n-1)/zetap(n);
+        const Real nu = a*exp(-v(n+1)) + 2*kappa_*(1-theta_*exp(-v(n+1)))
+                        /(sigma_*sigma_);
+
+        return gamma/nu*exp(-v(n+1));
+    }
+
+    Real FdmSquareRootFwdOp::v(Size i) const {
+        if (i > 0 && i <= v_.size()) {
+            return v_[i-1];
+        }
+        else if (i == 0) {
+            if (transform_ == Log) {
+                return 2*v_[0] - v_[1];
+//              log(std::max(0.5*exp(v_[0]), exp(v_[0] - 0.01 * (v_[1] - v_[0]))));
+            } else {
+                return std::max(0.5*v_[0], v_[0] - 0.01 * (v_[1] - v_[0]));
+            }
+        }
+        else if (i == v_.size()+1) {
+            return v_.back() + (v_.back() - *(v_.end()-2));
+        }
+        else {
+            QL_FAIL("unknown index");
+        }
+    }
+
+    Real FdmSquareRootFwdOp::h(Size i) const {
+        return v(i+1) - v(i);
+    }
+    Real FdmSquareRootFwdOp::mu(Size i) const {
+        return kappa_*(v(i) - theta_) + sigma_*sigma_;
+    }
+    Real FdmSquareRootFwdOp::zetam(Size i) const {
+        return h(i-1)*(h(i-1)+h(i));
+    }
+    Real FdmSquareRootFwdOp::zeta(Size i) const {
+        return h(i-1)*h(i);
+    }
+    Real FdmSquareRootFwdOp::zetap(Size i) const {
+        return h(i)*(h(i-1)+h(i));
+    }
+
+    Size FdmSquareRootFwdOp::size() const {
+        return 1;
+    }
+    void FdmSquareRootFwdOp::setTime(Time, Time) {
+    }
+
+    void FdmSquareRootFwdOp::getCoeff(Real& alpha, Real& beta,
+                                               Real& gamma, Size n) const {
+        if (transform_ == Plain) {
+            getCoeffPlain(alpha, beta, gamma, n);
+        }
+        else if (transform_ == Power) {
+            getCoeffPower(alpha, beta, gamma, n);
+        }
+        else if (transform_ == Log) {
+            getCoeffLog(alpha, beta, gamma, n);
+        } 
+    }
+
+    void FdmSquareRootFwdOp::getCoeffPlain(Real& alpha, Real& beta,
+                                               Real& gamma, Size n) const {
+        alpha =   sigma_*sigma_*v(n)/zetam(n) - mu(n)*h(n)/zetam(n);
+        beta  = - sigma_*sigma_*v(n)/zeta(n)
+                    + mu(n)*(h(n)-h(n-1))/zeta(n) + kappa_;
+        gamma =   sigma_*sigma_*v(n)/zetap(n) + mu(n)*h(n-1)/zetap(n);
+
+    }
+
+    void FdmSquareRootFwdOp::getCoeffLog(Real& alpha, Real& beta,
+                                               Real& gamma, Size n) const {
+        const Real mu = ((-kappa_*theta_-sigma_*sigma_/2.0)*exp(-v(n))+kappa_);
+        alpha =   sigma_*sigma_*exp(-v(n))/zetam(n) - mu*h(n)/zetam(n);
+        beta  = - sigma_*sigma_*exp(-v(n))/zeta(n)
+                          + mu*(h(n)-h(n-1))/zeta(n) + kappa_*theta_*exp(-v(n));
+        gamma =   sigma_*sigma_*exp(-v(n))/zetap(n) + mu*h(n-1)/zetap(n);
+    }
+
+    void FdmSquareRootFwdOp::getCoeffPower(Real& alpha, Real& beta,
+                                               Real& gamma, Size n) const {
+        const Real mu = kappa_*(theta_+v(n));
+        alpha = (sigma_*sigma_*v(n) - mu*h(n))/zetam(n);
+        beta = (-sigma_*sigma_*v(n) + mu*(h(n)-h(n-1)))/zeta(n)
+                                + 2*kappa_*kappa_*theta_/(sigma_*sigma_);
+        gamma=  (sigma_*sigma_*v(n) + mu*h(n-1))/zetap(n);
+    }
+
+    Disposable<Array> FdmSquareRootFwdOp::apply(const Array& p) const {
+        return mapX_->apply(p);
+    }
+
+    Disposable<Array> FdmSquareRootFwdOp::apply_mixed(const Array& r) const {
+        Array retVal(r.size(), 0.0);
+        return retVal;
+    }
+    Disposable<Array> FdmSquareRootFwdOp::apply_direction(
+        Size direction, const Array& r) const {
+        if (direction == direction_) {
+            return mapX_->apply(r);
+        }
+        else {
+            Array retVal(r.size(), 0.0);
+            return retVal;
+        }
+    }
+    Disposable<Array> FdmSquareRootFwdOp::solve_splitting(
+        Size direction, const Array& r, Real dt) const {
+        if (direction == direction_) {
+            return mapX_->solve_splitting(r, dt, 1.0);
+        }
+        else {
+            Array retVal(r);
+            return retVal;
+        }
+    }
+
+    Disposable<Array> FdmSquareRootFwdOp::preconditioner(
+        const Array& r, Real dt) const {
+        return solve_splitting(direction_, r, dt);
+    }
+
+    Disposable<std::vector<SparseMatrix> >
+    FdmSquareRootFwdOp::toMatrixDecomp() const {
+        std::vector<SparseMatrix> retVal(1, mapX_->toMatrix());
+        return retVal;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="14">
+    <source>fdmvppstartlimitstepcondition.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011, 2012 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmvppstartlimitstepcondition.cpp
+*/
+
+#include <ql/math/array.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/experimental/finitedifferences/fdmvppstartlimitstepcondition.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopiterator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+
+
+namespace QuantLib {
+
+    FdmVPPStartLimitStepCondition::FdmVPPStartLimitStepCondition(
+        const FdmVPPStepConditionParams& params,
+        Size nStarts,
+        const FdmVPPStepConditionMesher& mesh,
+        const ext::shared_ptr<FdmInnerValueCalculator>& gasPrice,
+        const ext::shared_ptr<FdmInnerValueCalculator>& sparkSpreadPrice)
+    : FdmVPPStepCondition(params,
+                          nStates(params.tMinUp, params.tMinDown, nStarts),
+                          mesh, gasPrice, sparkSpreadPrice),
+      nStarts_(nStarts) {
+        QL_REQUIRE(tMinUp_ > 0,   "minimum up time must be greater than one");
+        QL_REQUIRE(tMinDown_ > 0, "minimum down time must be greater than one");
+    }
+
+    Disposable<Array> FdmVPPStartLimitStepCondition::changeState(
+        const Real gasPrice, const Array& state, Time) const {
+        const Real startUpCost
+                = startUpFixCost_ + (gasPrice + fuelCostAddon_)*startUpFuel_;
+
+        Array retVal(state.size());
+        const Size sss = 2*tMinUp_ + tMinDown_;
+
+        for (Size i=0; i < nStates_; ++i) {
+            const Size j = i % sss;
+
+            if (j < tMinUp_-1) {
+                retVal[i] = std::max(state[i+1], state[tMinUp_+i+1]);
+            }
+            else if (j == tMinUp_-1) {
+                retVal[i] = std::max(state[i+tMinUp_+1],
+                                     std::max(state[i], state[i+tMinUp_]));
+            }
+            else if (j < 2*tMinUp_) {
+                retVal[i] = retVal[i-tMinUp_];
+            }
+            else if (j <  2*tMinUp_+tMinDown_-1) {
+                retVal[i] = state[i+1];
+            }
+            else if (nStarts_ == Null<Size>()) {
+                retVal[i] = std::max(state[i],
+                    std::max(state.front(), state[tMinUp_]) - startUpCost);
+
+            }
+            else if (i >= sss) {
+                retVal[i] = std::max(state[i],
+                    std::max(state[i+1-2*sss], state[i+1-2*sss+tMinUp_])
+                            - startUpCost);
+            }
+            else {
+                retVal[i] = state[i];
+            }
+        }
+
+        return retVal;
+    }
+
+    Size FdmVPPStartLimitStepCondition::nStates(Size tMinUp, Size tMinDown,
+                                                Size nStarts) {
+        return (2*tMinUp+tMinDown)*((nStarts == Null<Size>())? 1 : nStarts+1);
+    }
+
+    Real FdmVPPStartLimitStepCondition::maxValue(const Array& states) const {
+        return *std::max_element(states.begin(), states.end());
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="15">
+    <source>fdmvppstepcondition.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011, 2012 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmvppstepcondition.cpp
+*/
+
+#include <ql/experimental/finitedifferences/fdmvppstepcondition.hpp>
+#include <ql/math/array.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopiterator.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <utility>
+
+namespace QuantLib {
+    FdmVPPStepCondition::FdmVPPStepCondition(
+        const FdmVPPStepConditionParams& params,
+        Size nStates,
+        const FdmVPPStepConditionMesher& mesh,
+        ext::shared_ptr<FdmInnerValueCalculator> gasPrice,
+        ext::shared_ptr<FdmInnerValueCalculator> sparkSpreadPrice)
+    : heatRate_(params.heatRate), pMin_(params.pMin), pMax_(params.pMax), tMinUp_(params.tMinUp),
+      tMinDown_(params.tMinDown), startUpFuel_(params.startUpFuel),
+      startUpFixCost_(params.startUpFixCost), fuelCostAddon_(params.fuelCostAddon),
+      stateDirection_(mesh.stateDirection), nStates_(nStates), mesher_(mesh.mesher),
+      gasPrice_(std::move(gasPrice)), sparkSpreadPrice_(std::move(sparkSpreadPrice)),
+      stateEvolveFcts_(nStates_) {
+
+        QL_REQUIRE(nStates_ == mesher_->layout()->dim()[stateDirection_],
+                   "mesher does not fit to vpp arguments");
+
+        for (Size i=0; i < nStates_; ++i) {
+            const Size j = i % (2*tMinUp_ + tMinDown_);
+
+            if (j < tMinUp_) {
+                stateEvolveFcts_[i] = [&](Real x){ return evolveAtPMin(x); };
+            }
+            else if (j < 2*tMinUp_){
+                stateEvolveFcts_[i] = [&](Real x) { return evolveAtPMax(x); };
+            }
+        }
+    }
+
+
+    Size FdmVPPStepCondition::nStates() const {
+        return nStates_;
+    }
+
+
+    void FdmVPPStepCondition::applyTo(Array& a, Time t) const {
+        ext::shared_ptr<FdmLinearOpLayout> layout = mesher_->layout();
+
+        const Size nStates = layout->dim()[stateDirection_];
+        const FdmLinearOpIterator endIter = layout->end();
+
+        for (FdmLinearOpIterator iter=layout->begin();iter != endIter; ++iter) {
+            a[iter.index()] += evolve(iter, t);
+        }
+
+        for (FdmLinearOpIterator iter=layout->begin();iter != endIter; ++iter) {
+            if (iter.coordinates()[stateDirection_] == 0U) {
+
+                Array x(nStates);
+                for (Size i=0; i < nStates; ++i) {
+                    x[i] = a[layout->neighbourhood(iter, stateDirection_, i)];
+                }
+
+                const Real gasPrice = gasPrice_->innerValue(iter, t);
+                x = changeState(gasPrice, x, t);
+                for (Size i=0; i < nStates; ++i) {
+                    a[layout->neighbourhood(iter, stateDirection_, i)] = x[i];
+                }
+            }
+        }
+    }
+
+    Real FdmVPPStepCondition::evolve(
+        const FdmLinearOpIterator& iter, Time t) const {
+
+        const Size state = iter.coordinates()[stateDirection_];
+
+        if (!(stateEvolveFcts_[state])) {
+            return 0.0;
+        }
+        else {
+            const Real sparkSpread = sparkSpreadPrice_->innerValue(iter, t);
+            return stateEvolveFcts_[state](sparkSpread);
+        }
+    }
+
+
+    Real FdmVPPStepCondition::evolveAtPMin(Real sparkSpread) const {
+        return pMin_*(sparkSpread - heatRate_*fuelCostAddon_);
+    }
+
+    Real FdmVPPStepCondition::evolveAtPMax(Real sparkSpread) const {
+        return pMax_*(sparkSpread - heatRate_*fuelCostAddon_);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="16">
+    <source>fdmvppstepconditionfactory.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmvppstepconditionfactory.cpp
+*/
+
+#include <ql/experimental/finitedifferences/fdmvppstartlimitstepcondition.hpp>
+#include <ql/experimental/finitedifferences/fdmvppstepconditionfactory.hpp>
+#include <ql/methods/finitedifferences/meshers/uniform1dmesher.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmVPPStepConditionFactory::FdmVPPStepConditionFactory(VanillaVPPOption::arguments args)
+    : args_(std::move(args)) {
+        QL_REQUIRE(!(   args_.nStarts       != Null<Size>()
+                     && args_.nRunningHours != Null<Size>()),
+                   "start and running hour limt together is not supported");
+
+        if (   args_.nRunningHours == Null<Size>()
+            && args_.nStarts == Null<Size>()) {
+            type_ = Vanilla;
+        }
+        else if (args_.nRunningHours == Null<Size>()) {
+            type_ = StartLimit;
+        }
+        else {
+            type_ = RunningHourLimit;
+        }
+    }
+
+    ext::shared_ptr<Fdm1dMesher>
+    FdmVPPStepConditionFactory::stateMesher() const {
+        Size nStates;
+        switch (type_) {
+          case Vanilla:
+            nStates = 2*args_.tMinUp + args_.tMinDown;
+            break;
+          case StartLimit:
+            nStates = FdmVPPStartLimitStepCondition::nStates(
+                       args_.tMinUp,args_.tMinDown, args_.nStarts);
+            break;
+          default:
+            QL_FAIL("vpp type is not supported");
+        }
+
+        return ext::shared_ptr<Fdm1dMesher>(
+            new Uniform1dMesher(0.0, 1.0, nStates));
+    }
+
+    ext::shared_ptr<FdmVPPStepCondition> FdmVPPStepConditionFactory::build(
+        const FdmVPPStepConditionMesher& mesh,
+        Real fuelCostAddon,
+        const ext::shared_ptr<FdmInnerValueCalculator>& fuel,
+        const ext::shared_ptr<FdmInnerValueCalculator>& spark) const {
+
+        const FdmVPPStepConditionParams params = {
+            args_.heatRate, args_.pMin, args_.pMax,
+            args_.tMinUp, args_.tMinDown,
+            args_.startUpFuel, args_.startUpFixCost,
+            fuelCostAddon
+        };
+
+        switch (type_) {
+          case Vanilla:
+          case StartLimit:
+              return ext::shared_ptr<FdmVPPStepCondition>(
+                  new FdmVPPStartLimitStepCondition(params, args_.nStarts,
+                          mesh, fuel, spark));
+              break;
+          default:
+            QL_FAIL("vpp type is not supported");
+        }
+    }
+}
+]]></document_content>
+  </document>
+  <document index="17">
+    <source>fdmzabrop.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/finitedifferences/fdmzabrop.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <ql/methods/finitedifferences/operators/secondordermixedderivativeop.hpp>
+
+namespace QuantLib {
+
+FdmZabrUnderlyingPart::FdmZabrUnderlyingPart(
+    const ext::shared_ptr<FdmMesher> &mesher, const Real beta, const Real nu,
+    const Real rho, const Real gamma)
+    : volatilityValues_(mesher->locations(1)),
+      forwardValues_(mesher->locations(0)),
+      mapT_(SecondDerivativeOp(0, mesher)
+                .mult(0.5 * volatilityValues_ * volatilityValues_ *
+                      Pow(forwardValues_, 2.0 * beta))),
+      mesher_(mesher) {}
+
+void FdmZabrUnderlyingPart::setTime(Time t1, Time t2) {}
+
+const TripleBandLinearOp &FdmZabrUnderlyingPart::getMap() const {
+    return mapT_;
+}
+
+FdmZabrVolatilityPart::FdmZabrVolatilityPart(
+    const ext::shared_ptr<FdmMesher> &mesher, const Real beta, const Real nu,
+    const Real rho, const Real gamma)
+    : volatilityValues_(mesher->locations(1)),
+      forwardValues_(mesher->locations(0)),
+      mapT_(SecondDerivativeOp(1, mesher).mult(
+          0.5 * nu * nu * Pow(volatilityValues_, 2.0 * gamma))),
+      mesher_(mesher) {}
+
+void FdmZabrVolatilityPart::setTime(Time t1, Time t2) {}
+
+const TripleBandLinearOp &FdmZabrVolatilityPart::getMap() const {
+    return mapT_;
+}
+
+FdmZabrOp::FdmZabrOp(const ext::shared_ptr<FdmMesher> &mesher,
+                     const Real beta, const Real nu, const Real rho,
+                     const Real gamma)
+    : volatilityValues_(mesher->locations(1)),
+      forwardValues_(mesher->locations(0)),
+      dxyMap_(SecondOrderMixedDerivativeOp(0, 1, mesher)
+                  .mult(nu * rho * Pow(Abs(volatilityValues_), gamma + 1.0) *
+                        Pow(forwardValues_, beta))),
+      dxMap_(FdmZabrUnderlyingPart(mesher, beta, nu, rho, gamma)),
+      dyMap_(FdmZabrVolatilityPart(mesher, beta, nu, rho, gamma)) {}
+
+void FdmZabrOp::setTime(Time t1, Time t2) {
+    dxMap_.setTime(t1, t2);
+    dyMap_.setTime(t1, t2);
+}
+
+Size FdmZabrOp::size() const { return 2; }
+
+Disposable<Array> FdmZabrOp::apply(const Array &u) const {
+    return dyMap_.getMap().apply(u) + dxMap_.getMap().apply(u) +
+           dxyMap_.apply(u);
+}
+
+Disposable<Array> FdmZabrOp::apply_direction(Size direction,
+                                             const Array &r) const {
+    if (direction == 0)
+        return dxMap_.getMap().apply(r);
+    else if (direction == 1)
+        return dyMap_.getMap().apply(r);
+    else
+        QL_FAIL("direction too large");
+}
+
+Disposable<Array> FdmZabrOp::apply_mixed(const Array &r) const {
+    return dxyMap_.apply(r);
+}
+
+Disposable<Array> FdmZabrOp::solve_splitting(Size direction, const Array &r,
+                                             Real a) const {
+
+    if (direction == 0) {
+        return dxMap_.getMap().solve_splitting(r, a, 1.0);
+    } else if (direction == 1) {
+        return dyMap_.getMap().solve_splitting(r, a, 1.0);
+    } else
+        QL_FAIL("direction too large");
+}
+
+Disposable<Array> FdmZabrOp::preconditioner(const Array &r, Real dt) const {
+
+    return solve_splitting(0, r, dt);
+}
+
+Disposable<std::vector<SparseMatrix> > FdmZabrOp::toMatrixDecomp() const {
+    std::vector<SparseMatrix> retVal(3);
+    retVal[0] = dxMap_.getMap().toMatrix();
+    retVal[1] = dyMap_.getMap().toMatrix();
+    retVal[2] = dxyMap_.toMatrix();
+    return retVal;
+}
+
+}
+]]></document_content>
+  </document>
+  <document index="18">
+    <source>fdornsteinuhlenbeckvanillaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2016 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/finitedifferences/fdornsteinuhlenbeckvanillaengine.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmsimpleprocess1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/fdmornsteinuhlenbeckop.hpp>
+#include <ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/processes/ornsteinuhlenbeckprocess.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+        class FdmOUInnerValue : public FdmInnerValueCalculator {
+          public:
+            FdmOUInnerValue(ext::shared_ptr<Payoff> payoff,
+                            ext::shared_ptr<FdmMesher> mesher,
+                            Size direction)
+            : payoff_(std::move(payoff)), mesher_(std::move(mesher)), direction_(direction) {}
+
+
+            Real innerValue(const FdmLinearOpIterator& iter, Time t) override {
+                const Real s = mesher_->location(iter, direction_);
+                return (*payoff_)(s);
+            }
+
+            Real avgInnerValue(const FdmLinearOpIterator& iter, Time t) override {
+                return innerValue(iter, t);
+            }
+
+          private:
+            const ext::shared_ptr<Payoff> payoff_;
+            const ext::shared_ptr<FdmMesher> mesher_;
+            const Size direction_;
+        };
+    }
+
+    FdOrnsteinUhlenbeckVanillaEngine::FdOrnsteinUhlenbeckVanillaEngine(
+        ext::shared_ptr<OrnsteinUhlenbeckProcess> process,
+        const ext::shared_ptr<YieldTermStructure>& rTS,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        Real epsilon,
+        const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)), rTS_(rTS), tGrid_(tGrid), xGrid_(xGrid),
+      dampingSteps_(dampingSteps), epsilon_(epsilon), schemeDesc_(schemeDesc) {
+        registerWith(process_);
+        registerWith(rTS);
+    }
+
+    void FdOrnsteinUhlenbeckVanillaEngine::calculate() const {
+
+        // 1. Mesher
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+
+        const DayCounter dc = rTS_->dayCounter();
+        const Date referenceDate = rTS_->referenceDate();
+
+        const Time maturity = dc.yearFraction(
+            referenceDate, arguments_.exercise->lastDate());
+
+        const ext::shared_ptr<Fdm1dMesher> equityMesher(
+            new FdmSimpleProcess1dMesher(
+                xGrid_, process_, maturity, 1, epsilon_));
+
+        const ext::shared_ptr<FdmMesher> mesher (
+            new FdmMesherComposite(equityMesher));
+
+        // 2. Calculator
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator(
+            new FdmOUInnerValue(payoff, mesher, 0));
+
+        // 3. Step conditions
+        const ext::shared_ptr<FdmStepConditionComposite> conditions =
+            FdmStepConditionComposite::vanillaComposite(
+                                    arguments_.cashFlow, arguments_.exercise,
+                                    mesher, calculator,
+                                    referenceDate, dc);
+
+        // 4. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+
+        // 5. Solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions, calculator,
+                                     maturity, tGrid_, dampingSteps_ };
+
+        const ext::shared_ptr<FdmOrnsteinUhlenbeckOp> op(
+            new FdmOrnsteinUhlenbeckOp(mesher, process_, rTS_, 0));
+
+        const ext::shared_ptr<Fdm1DimSolver> solver(
+                new Fdm1DimSolver(solverDesc, schemeDesc_, op));
+
+        const Real spot = process_->x0();
+
+        results_.value = solver->interpolateAt(spot);
+        results_.delta = solver->derivativeX(spot);
+        results_.gamma = solver->derivativeXX(spot);
+        results_.theta = solver->thetaAt(spot);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="19">
+    <source>fdsimpleextoujumpswingengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdsimpleextoujumpswingengine.cpp
+    \brief Finite Differences engine for simple swing options
+*/
+
+
+#include <ql/experimental/finitedifferences/fdmextoujumpmodelinnervalue.hpp>
+#include <ql/experimental/finitedifferences/fdmsimple3dextoujumpsolver.hpp>
+#include <ql/experimental/finitedifferences/fdsimpleextoujumpswingengine.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/methods/finitedifferences/meshers/exponentialjump1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmsimpleprocess1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/uniform1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdm3dimsolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmsimpleswingcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdSimpleExtOUJumpSwingEngine::FdSimpleExtOUJumpSwingEngine(
+        ext::shared_ptr<ExtOUWithJumpsProcess> process,
+        ext::shared_ptr<YieldTermStructure> rTS,
+        Size tGrid,
+        Size xGrid,
+        Size yGrid,
+        ext::shared_ptr<Shape> shape,
+        const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)), rTS_(std::move(rTS)), shape_(std::move(shape)), tGrid_(tGrid),
+      xGrid_(xGrid), yGrid_(yGrid), schemeDesc_(schemeDesc) {}
+
+    void FdSimpleExtOUJumpSwingEngine::calculate() const {
+
+        // 1. Exercise
+        ext::shared_ptr<SwingExercise> swingExercise(
+            ext::dynamic_pointer_cast<SwingExercise>(arguments_.exercise));
+
+        QL_REQUIRE(swingExercise, "Swing exercise supported only");
+
+        // 2. Mesher
+        const std::vector<Time> exerciseTimes
+            = swingExercise->exerciseTimes(rTS_->dayCounter(),
+                                           rTS_->referenceDate());
+
+        const Time maturity = exerciseTimes.back();
+        const ext::shared_ptr<StochasticProcess1D> ouProcess(
+                              process_->getExtendedOrnsteinUhlenbeckProcess());
+        const ext::shared_ptr<Fdm1dMesher> xMesher(
+                     new FdmSimpleProcess1dMesher(xGrid_, ouProcess,maturity));
+
+        const ext::shared_ptr<Fdm1dMesher> yMesher(
+                        new ExponentialJump1dMesher(yGrid_,
+                                                    process_->beta(),
+                                                    process_->jumpIntensity(),
+                                                    process_->eta()));
+        const ext::shared_ptr<Fdm1dMesher> exerciseMesher(
+                       new Uniform1dMesher(
+                           0, static_cast<Real>(arguments_.maxExerciseRights),
+                           arguments_.maxExerciseRights+1));
+
+        const ext::shared_ptr<FdmMesher> mesher(
+            new FdmMesherComposite(xMesher, yMesher, exerciseMesher));
+
+        // 3. Calculator
+        ext::shared_ptr<FdmInnerValueCalculator> calculator(
+                                                    new FdmZeroInnerValue());
+        // 4. Step conditions
+        std::list<ext::shared_ptr<StepCondition<Array> > > stepConditions;
+        std::list<std::vector<Time> > stoppingTimes;
+
+        // 4.1 Bermudan step conditions
+        stoppingTimes.push_back(exerciseTimes);
+
+        ext::shared_ptr<FdmInnerValueCalculator> exerciseCalculator(
+            new FdmExtOUJumpModelInnerValue(arguments_.payoff, mesher, shape_));
+
+        stepConditions.push_back(ext::shared_ptr<StepCondition<Array> >(
+            new FdmSimpleSwingCondition(
+                exerciseTimes, mesher, exerciseCalculator,
+                2, arguments_.minExerciseRights)));
+
+        ext::shared_ptr<FdmStepConditionComposite> conditions(
+                new FdmStepConditionComposite(stoppingTimes, stepConditions));
+
+
+        // 5. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+
+        // 6. set-up solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions,
+                                     calculator, maturity, tGrid_, 0 };
+
+        const ext::shared_ptr<FdmSimple3dExtOUJumpSolver> solver(
+            new FdmSimple3dExtOUJumpSolver(
+                                    Handle<ExtOUWithJumpsProcess>(process_),
+                                    rTS_, solverDesc, schemeDesc_));
+
+        const Real x = process_->initialValues()[0];
+        const Real y = process_->initialValues()[1];
+
+        results_.value = solver->valueAt(x, y, 0.0);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="20">
+    <source>fdsimpleextoustorageengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+ Copyright (C) 2014 Ralph Schreyer
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdsimpleextoustorageengine.cpp
+    \brief Finite Differences extended OU engine for simple storage options
+*/
+
+#include <ql/experimental/finitedifferences/fdmexpextouinnervaluecalculator.hpp>
+#include <ql/experimental/finitedifferences/fdmsimple2dextousolver.hpp>
+#include <ql/experimental/finitedifferences/fdsimpleextoustorageengine.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/math/comparison.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmsimpleprocess1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/predefined1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/uniform1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmsimplestoragecondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/pricingengines/vanilla/fdsimplebsswingengine.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+        class FdmStorageValue : public FdmInnerValueCalculator {
+          public:
+            explicit FdmStorageValue(ext::shared_ptr<FdmMesher> mesher)
+            : mesher_(std::move(mesher)) {}
+
+            Real innerValue(const FdmLinearOpIterator& iter, Time) override {
+                const Real s = std::exp(mesher_->location(iter, 0));
+                const Real v = mesher_->location(iter, 1);
+                return s*v;
+            }
+            Real avgInnerValue(const FdmLinearOpIterator& iter, Time t) override {
+                return innerValue(iter, t);
+            }
+
+          private:
+            const ext::shared_ptr<FdmMesher> mesher_;
+
+        };
+
+        class LessButNotCloseEnough {
+          public:
+            bool operator()(Real a, Real b) const {
+                return !(close_enough(a, b, 100) || b < a);
+            }
+        };
+    }
+
+    FdSimpleExtOUStorageEngine::FdSimpleExtOUStorageEngine(
+        ext::shared_ptr<ExtendedOrnsteinUhlenbeckProcess> process,
+        ext::shared_ptr<YieldTermStructure> rTS,
+        Size tGrid,
+        Size xGrid,
+        Size yGrid,
+        ext::shared_ptr<Shape> shape,
+        const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)), rTS_(std::move(rTS)), tGrid_(tGrid), xGrid_(xGrid),
+      yGrid_(yGrid), shape_(std::move(shape)), schemeDesc_(schemeDesc) {}
+
+    void FdSimpleExtOUStorageEngine::calculate() const {
+
+        // 1. Exercise
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::Bermudan,
+                   "Bermudan exercise supported only");
+
+        // 2. Mesher
+        const Time maturity
+            = rTS_->dayCounter().yearFraction(rTS_->referenceDate(),
+                                              arguments_.exercise->lastDate());
+
+        const ext::shared_ptr<Fdm1dMesher> xMesher(
+                     new FdmSimpleProcess1dMesher(xGrid_, process_, maturity));
+
+        ext::shared_ptr<Fdm1dMesher> storageMesher;
+
+        if(yGrid_ == Null<Size>()){
+            //elevator mesher
+            std::vector<Real> storageValues(1, arguments_.capacity);
+            storageValues.reserve(
+                Size(arguments_.capacity/arguments_.changeRate)+1);
+
+            for (Real level=0; level <= arguments_.capacity;
+                    level+=arguments_.changeRate) {
+                    storageValues.push_back(level);
+                    storageValues.push_back(arguments_.capacity - level);
+            }
+
+            const std::set<Real, LessButNotCloseEnough>    orderedValues(
+                storageValues.begin(), storageValues.end());
+            storageValues.assign(orderedValues.begin(), orderedValues.end());
+
+            storageMesher =    ext::shared_ptr<Fdm1dMesher>(
+                new Predefined1dMesher(storageValues));
+        }
+        else {
+            // uniform mesher
+            storageMesher = ext::shared_ptr<Fdm1dMesher>(
+                new Uniform1dMesher(0, arguments_.capacity, yGrid_));
+        }
+
+        const ext::shared_ptr<FdmMesher> mesher (
+            new FdmMesherComposite(xMesher, storageMesher));
+
+        // 3. Calculator
+        ext::shared_ptr<FdmInnerValueCalculator> storageCalculator(
+                                                  new FdmStorageValue(mesher));
+
+        // 4. Step conditions
+        std::list<ext::shared_ptr<StepCondition<Array> > > stepConditions;
+        std::list<std::vector<Time> > stoppingTimes;
+
+        // 4.1 Bermudan step conditions
+        std::vector<Time> exerciseTimes;
+        for (auto i : arguments_.exercise->dates()) {
+            const Time t = rTS_->dayCounter().yearFraction(rTS_->referenceDate(), i);
+
+            QL_REQUIRE(t >= 0, "exercise dates must not contain past date");
+            exerciseTimes.push_back(t);
+        }
+        stoppingTimes.push_back(exerciseTimes);
+
+        ext::shared_ptr<Payoff> payoff(
+                                    new PlainVanillaPayoff(Option::Call, 0.0));
+
+        ext::shared_ptr<FdmInnerValueCalculator> underlyingCalculator(
+            new FdmExpExtOUInnerValueCalculator(payoff, mesher, shape_));
+
+        stepConditions.push_back(ext::shared_ptr<StepCondition<Array> >(
+            new FdmSimpleStorageCondition(exerciseTimes,
+                                          mesher, underlyingCalculator,
+                                          arguments_.changeRate)));
+
+        ext::shared_ptr<FdmStepConditionComposite> conditions(
+                new FdmStepConditionComposite(stoppingTimes, stepConditions));
+
+        // 5. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+
+        // 6. Solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions,
+                                     storageCalculator, maturity, tGrid_, 0 };
+
+        ext::shared_ptr<FdmSimple2dExtOUSolver> solver(
+                new FdmSimple2dExtOUSolver(
+                           Handle<ExtendedOrnsteinUhlenbeckProcess>(process_),
+                           rTS_, solverDesc, schemeDesc_));
+
+        const Real x = process_->x0();
+        const Real y = arguments_.load;
+
+        results_.value = solver->valueAt(x, y);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="21">
+    <source>fdsimpleklugeextouvppengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdsimpleklugeouvppengine.cpp
+    \brief Finite Differences engine for simple vpp options
+*/
+
+
+#include <ql/experimental/finitedifferences/fdmexpextouinnervaluecalculator.hpp>
+#include <ql/experimental/finitedifferences/fdmklugeextousolver.hpp>
+#include <ql/experimental/finitedifferences/fdmvppstepconditionfactory.hpp>
+#include <ql/experimental/finitedifferences/fdsimpleklugeextouvppengine.hpp>
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/experimental/processes/klugeextouprocess.hpp>
+#include <ql/instruments/basketoption.hpp>
+#include <ql/instruments/vanillaswingoption.hpp>
+#include <ql/methods/finitedifferences/meshers/exponentialjump1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdm1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmsimpleprocess1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/uniform1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <list>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+        class FdmSparkSpreadInnerValue : public FdmInnerValueCalculator {
+
+          public:
+            FdmSparkSpreadInnerValue(ext::shared_ptr<BasketPayoff> basketPayoff,
+                                     ext::shared_ptr<FdmInnerValueCalculator> fuelPrice,
+                                     ext::shared_ptr<FdmInnerValueCalculator> powerPrice)
+            : basketPayoff_(std::move(basketPayoff)), fuelPrice_(std::move(fuelPrice)),
+              powerPrice_(std::move(powerPrice)) {}
+
+            Real innerValue(const FdmLinearOpIterator& iter, Time t) override {
+                Array s(2);
+                s[0] = powerPrice_->innerValue(iter, t);
+                s[1] = fuelPrice_->innerValue(iter, t);
+
+                return (*basketPayoff_)(s);
+            }
+            Real avgInnerValue(const FdmLinearOpIterator& iter, Time t) override {
+                return innerValue(iter, t);
+            }
+
+          private:
+            const ext::shared_ptr<BasketPayoff> basketPayoff_;
+            const ext::shared_ptr<FdmInnerValueCalculator> fuelPrice_;
+            const ext::shared_ptr<FdmInnerValueCalculator> powerPrice_;
+        };
+    }
+
+
+    FdSimpleKlugeExtOUVPPEngine::FdSimpleKlugeExtOUVPPEngine(
+        ext::shared_ptr<KlugeExtOUProcess> process,
+        ext::shared_ptr<YieldTermStructure> rTS,
+        ext::shared_ptr<Shape> fuelShape,
+        ext::shared_ptr<Shape> powerShape,
+        Real fuelCostAddon,
+        Size tGrid,
+        Size xGrid,
+        Size yGrid,
+        Size gGrid,
+        const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)), rTS_(std::move(rTS)), fuelCostAddon_(fuelCostAddon),
+      fuelShape_(std::move(fuelShape)), powerShape_(std::move(powerShape)), tGrid_(tGrid),
+      xGrid_(xGrid), yGrid_(yGrid), gGrid_(gGrid), schemeDesc_(schemeDesc) {}
+
+    void FdSimpleKlugeExtOUVPPEngine::calculate() const {
+
+        ext::shared_ptr<SwingExercise> swingExercise(
+            ext::dynamic_pointer_cast<SwingExercise>(arguments_.exercise));
+
+        QL_REQUIRE(swingExercise, "Swing exercise supported only");
+
+        const FdmVPPStepConditionFactory stepConditionFactory(arguments_);
+
+        // 1. Exercise definition
+        const std::vector<Time> exerciseTimes
+            = swingExercise->exerciseTimes(rTS_->dayCounter(),
+                                           rTS_->referenceDate());
+
+        // 2. mesher set-up
+        const Time maturity = exerciseTimes.back();
+        const ext::shared_ptr<ExtOUWithJumpsProcess> klugeProcess
+            = process_->getKlugeProcess();
+
+        const ext::shared_ptr<StochasticProcess1D> klugeOUProcess
+            = klugeProcess->getExtendedOrnsteinUhlenbeckProcess();
+
+        const ext::shared_ptr<Fdm1dMesher> xMesher(
+            new FdmSimpleProcess1dMesher(xGrid_, klugeOUProcess, maturity));
+
+        const ext::shared_ptr<Fdm1dMesher> yMesher(
+            new ExponentialJump1dMesher(yGrid_,
+                                        klugeProcess->beta(),
+                                        klugeProcess->jumpIntensity(),
+                                        klugeProcess->eta(), 1e-3));
+
+        const ext::shared_ptr<Fdm1dMesher> gMesher(
+            new FdmSimpleProcess1dMesher(gGrid_,
+                                         process_->getExtOUProcess(),maturity));
+
+        const ext::shared_ptr<Fdm1dMesher> exerciseMesher(
+            stepConditionFactory.stateMesher());
+
+        const ext::shared_ptr<FdmMesher> mesher (
+            new FdmMesherComposite(xMesher, yMesher, gMesher, exerciseMesher));
+
+        // 3. Calculator
+        const ext::shared_ptr<FdmInnerValueCalculator> zeroInnerValue(
+            new FdmZeroInnerValue());
+
+        const ext::shared_ptr<Payoff> zeroStrikeCall(
+            new PlainVanillaPayoff(Option::Call, 0.0));
+
+        const ext::shared_ptr<FdmInnerValueCalculator> fuelPrice(
+            new FdmExpExtOUInnerValueCalculator(zeroStrikeCall,
+                                                mesher, fuelShape_, 2));
+
+        const ext::shared_ptr<FdmInnerValueCalculator> powerPrice(
+            new FdmExtOUJumpModelInnerValue(zeroStrikeCall,mesher,powerShape_));
+
+        const ext::shared_ptr<FdmInnerValueCalculator> sparkSpread(
+            new FdmSparkSpreadInnerValue(
+                ext::dynamic_pointer_cast<BasketPayoff>(arguments_.payoff),
+                fuelPrice, powerPrice));
+
+        // 4. Step conditions
+        std::list<std::vector<Time> > stoppingTimes;
+        std::list<ext::shared_ptr<StepCondition<Array> > > stepConditions;
+
+        // 4.1 Bermudan step conditions
+        stoppingTimes.push_back(exerciseTimes);
+        const FdmVPPStepConditionMesher mesh = {3U, mesher};
+
+        const ext::shared_ptr<FdmVPPStepCondition> stepCondition(
+            stepConditionFactory.build(mesh, fuelCostAddon_,
+                                       fuelPrice, sparkSpread));
+
+        stepConditions.push_back(stepCondition);
+
+        const ext::shared_ptr<FdmStepConditionComposite> conditions(
+            new FdmStepConditionComposite(stoppingTimes, stepConditions));
+
+        // 5. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+
+        // 6. set-up solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions,
+                                     zeroInnerValue, maturity, tGrid_, 0 };
+
+        const ext::shared_ptr<FdmKlugeExtOUSolver<4> > solver(
+            new FdmKlugeExtOUSolver<4>(Handle<KlugeExtOUProcess>(process_),
+                                       rTS_, solverDesc, schemeDesc_));
+
+        std::vector<Real> x(4);
+        x[0] = process_->initialValues()[0];
+        x[1] = process_->initialValues()[1];
+        x[2] = process_->initialValues()[2];
+        
+        const Real tol = 1e-8;
+        const Real maxExerciseValue = exerciseMesher->locations().back();
+        const Real minExerciseValue = exerciseMesher->locations().front();
+
+        Array results(exerciseMesher->size());
+        for (Size i=0; i < results.size(); ++i) {
+
+            x[3] = std::max(minExerciseValue + tol,
+                            std::min(exerciseMesher->location(i),
+                                     maxExerciseValue - tol));
+            results[i] = solver->valueAt(x);
+        }
+        results_.value = stepCondition->maxValue(results);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="22">
+    <source>glued1dmesher.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file glued1dmesher.cpp
+    \brief One-dimensional grid mesher combining two existing ones
+*/
+
+#include <ql/experimental/finitedifferences/glued1dmesher.hpp>
+#include <ql/errors.hpp>
+#include <ql/math/comparison.hpp>
+#include <ql/utilities/null.hpp>
+
+namespace QuantLib {
+
+    Glued1dMesher::Glued1dMesher(
+        const Fdm1dMesher& leftMesher,
+        const Fdm1dMesher& rightMesher)
+    : Fdm1dMesher(leftMesher.locations().size()+rightMesher.locations().size()
+                  - ( close(leftMesher.locations().back(),
+                      rightMesher.locations().front()) ? 1 :0) ),
+      commonPoint_( close(leftMesher.locations().back(),
+                    rightMesher.locations().front()) ) {
+
+        QL_REQUIRE(leftMesher.locations().back()
+                    <= rightMesher.locations().front(),
+            "left meshers rightmost point (" <<
+            leftMesher.locations().back() <<
+            ") may not be greater than right meshers leftmost point (" <<
+            rightMesher.locations().front() << ")");
+
+        std::copy(leftMesher.locations().begin(),leftMesher.locations().end(),
+                  locations_.begin());
+        std::copy(rightMesher.locations().begin() + (commonPoint_ ? 1 : 0),
+                  rightMesher.locations().end(),
+                  locations_.begin()+leftMesher.locations().size());
+
+        for (Size i=0; i < locations_.size()-1; ++i) {
+            dplus_[i] = dminus_[i+1] = locations_[i+1] - locations_[i];
+        }
+        dplus_.back() = dminus_.front() = Null<Real>();
+    }
+}
+]]></document_content>
+  </document>
+  <document index="23">
+    <source>vanillavppoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file vanillavppoption.cpp
+*/
+
+
+#include <ql/event.hpp>
+#include <ql/instruments/basketoption.hpp>
+#include <ql/instruments/vanillaswingoption.hpp>
+#include <ql/experimental/finitedifferences/vanillavppoption.hpp>
+
+namespace QuantLib {
+    namespace {
+
+        class IdenticalPayoff : public Payoff {
+          public:
+            std::string name() const override { return "IdenticalPayoff"; }
+            std::string description() const override { return name(); }
+            Real operator()(Real price) const override { return price; }
+        };
+    }
+
+    VanillaVPPOption::VanillaVPPOption(
+        Real heatRate,
+        Real pMin, Real pMax,
+        Size tMinUp, Size tMinDown,
+        Real startUpFuel, Real startUpFixCost,
+        const ext::shared_ptr<SwingExercise>& exercise,
+        Size nStarts, Size nRunningHours)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(), exercise),
+      heatRate_(heatRate),
+      pMin_(pMin), pMax_(pMax),
+      tMinUp_(tMinUp), tMinDown_(tMinDown),
+      startUpFuel_(startUpFuel),
+      startUpFixCost_(startUpFixCost),
+      nStarts_(nStarts),
+      nRunningHours_(nRunningHours) {
+        Array weigths(2);
+        weigths[0] = 1.0; weigths[1] = -heatRate;
+
+        payoff_ = ext::shared_ptr<Payoff>(new AverageBasketPayoff(
+            ext::shared_ptr<Payoff>(new IdenticalPayoff()), weigths));
+    }
+
+    void VanillaVPPOption::arguments::validate() const {
+        QL_REQUIRE(exercise, "no exercise given");
+        QL_REQUIRE(nStarts == Null<Size>() || nRunningHours == Null<Size>(),
+                "either a start limit or fuel limit is supported");
+    }
+
+    void VanillaVPPOption::setupArguments(
+                                PricingEngine::arguments* args) const {
+
+        MultiAssetOption::setupArguments(args);
+
+        auto* arguments = dynamic_cast<VanillaVPPOption::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->heatRate       = heatRate_;
+        arguments->pMin           = pMin_;
+        arguments->pMax           = pMax_;
+        arguments->tMinUp         = tMinUp_;
+        arguments->tMinDown       = tMinDown_;
+        arguments->startUpFuel    = startUpFuel_;
+        arguments->startUpFixCost = startUpFixCost_;
+        arguments->nStarts        = nStarts_;
+        arguments->nRunningHours  = nRunningHours_;
+    }
+
+    bool VanillaVPPOption::isExpired() const {
+        return detail::simple_event(exercise_->lastDate()).hasOccurred();
+    }
+}
+
+]]></document_content>
+  </document>
+</documents>

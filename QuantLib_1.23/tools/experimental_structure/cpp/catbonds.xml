@@ -1,0 +1,520 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>catbond.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012, 2013 Grzegorz Andruszkiewicz
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/catbonds/catbond.hpp>
+#include <ql/settings.hpp>
+#include <ql/experimental/credit/loss.hpp>
+#include <ql/time/daycounters/actualactual.hpp>
+#include <ql/cashflows/cashflowvectors.hpp>
+#include <ql/cashflows/iborcoupon.hpp>
+#include <ql/cashflows/couponpricer.hpp>
+#include <ql/cashflows/simplecashflow.hpp>
+#include <ql/time/daycounters/actualactual.hpp>
+
+using namespace std;
+
+namespace QuantLib {
+
+    void CatBond::arguments::validate() const {
+        Bond::arguments::validate();
+        QL_REQUIRE(notionalRisk, "null notionalRisk");
+    }
+
+    void CatBond::setupArguments(PricingEngine::arguments* args) const {
+
+        auto* arguments = dynamic_cast<CatBond::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong arguments type");
+
+        Bond::setupArguments(args);
+
+        arguments->notionalRisk = notionalRisk_;
+        arguments->startDate = issueDate();
+    }
+    
+    void CatBond::fetchResults(const PricingEngine::results* r) const {
+        Bond::fetchResults(r);
+
+        const auto* results = dynamic_cast<const CatBond::results*>(r);
+        QL_ENSURE(results != nullptr, "wrong result type");
+
+        lossProbability_ = results->lossProbability;
+        expectedLoss_ = results->expectedLoss;
+        exhaustionProbability_ = results->exhaustionProbability;
+    }
+
+    FloatingCatBond::FloatingCatBond(Natural settlementDays,
+                                     Real faceAmount,
+                                     const Schedule& schedule,
+                                     const ext::shared_ptr<IborIndex>& iborIndex,
+                                     const DayCounter& paymentDayCounter,
+                                     const ext::shared_ptr<NotionalRisk>& notionalRisk,
+                                     BusinessDayConvention paymentConvention,
+                                     Natural fixingDays,
+                                     const std::vector<Real>& gearings,
+                                     const std::vector<Spread>& spreads,
+                                     const std::vector<Rate>& caps,
+                                     const std::vector<Rate>& floors,
+                                     bool inArrears,
+                                     Real redemption,
+                                     const Date& issueDate)
+    : CatBond(settlementDays, schedule.calendar(), issueDate, notionalRisk) {
+
+        maturityDate_ = schedule.endDate();
+
+        cashflows_ = IborLeg(schedule, iborIndex)
+            .withNotionals(faceAmount)
+            .withPaymentDayCounter(paymentDayCounter)
+            .withPaymentAdjustment(paymentConvention)
+            .withFixingDays(fixingDays)
+            .withGearings(gearings)
+            .withSpreads(spreads)
+            .withCaps(caps)
+            .withFloors(floors)
+            .inArrears(inArrears);
+
+        addRedemptionsToCashflows(std::vector<Real>(1, redemption));
+
+        QL_ENSURE(!cashflows().empty(), "bond with no cashflows!");
+        QL_ENSURE(redemptions_.size() == 1, "multiple redemptions created");
+
+        registerWith(iborIndex);
+    }
+
+    FloatingCatBond::FloatingCatBond(Natural settlementDays,
+                                     Real faceAmount,
+                                     const Date& startDate,
+                                     const Date& maturityDate,
+                                     Frequency couponFrequency,
+                                     const Calendar& calendar,
+                                     const ext::shared_ptr<IborIndex>& iborIndex,
+                                     const DayCounter& accrualDayCounter,
+                                     const ext::shared_ptr<NotionalRisk>& notionalRisk,
+                                     BusinessDayConvention accrualConvention,
+                                     BusinessDayConvention paymentConvention,
+                                     Natural fixingDays,
+                                     const std::vector<Real>& gearings,
+                                     const std::vector<Spread>& spreads,
+                                     const std::vector<Rate>& caps,
+                                     const std::vector<Rate>& floors,
+                                     bool inArrears,
+                                     Real redemption,
+                                     const Date& issueDate,
+                                     const Date& stubDate,
+                                     DateGeneration::Rule rule,
+                                     bool endOfMonth)
+    : CatBond(settlementDays, calendar, issueDate, notionalRisk) {
+
+        maturityDate_ = maturityDate;
+
+        Date firstDate, nextToLastDate;
+        switch (rule) {
+          case DateGeneration::Backward:
+            firstDate = Date();
+            nextToLastDate = stubDate;
+            break;
+          case DateGeneration::Forward:
+            firstDate = stubDate;
+            nextToLastDate = Date();
+            break;
+          case DateGeneration::Zero:
+          case DateGeneration::ThirdWednesday:
+          case DateGeneration::Twentieth:
+          case DateGeneration::TwentiethIMM:
+            QL_FAIL("stub date (" << stubDate << ") not allowed with " <<
+                    rule << " DateGeneration::Rule");
+          default:
+            QL_FAIL("unknown DateGeneration::Rule (" << Integer(rule) << ")");
+        }
+
+        Schedule schedule(startDate, maturityDate_, Period(couponFrequency),
+                          calendar_, accrualConvention, accrualConvention,
+                          rule, endOfMonth,
+                          firstDate, nextToLastDate);
+
+        cashflows_ = IborLeg(schedule, iborIndex)
+            .withNotionals(faceAmount)
+            .withPaymentDayCounter(accrualDayCounter)
+            .withPaymentAdjustment(paymentConvention)
+            .withFixingDays(fixingDays)
+            .withGearings(gearings)
+            .withSpreads(spreads)
+            .withCaps(caps)
+            .withFloors(floors)
+            .inArrears(inArrears);
+
+        addRedemptionsToCashflows(std::vector<Real>(1, redemption));
+
+        QL_ENSURE(!cashflows().empty(), "bond with no cashflows!");
+        QL_ENSURE(redemptions_.size() == 1, "multiple redemptions created");
+
+        registerWith(iborIndex);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>catrisk.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012, 2013 Grzegorz Andruszkiewicz
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/catbonds/catrisk.hpp>
+#include <ql/time/daycounters/actualactual.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+        Integer round(Real r) {
+            return (r > 0.0) ? Integer(std::floor(r + 0.5)) : Integer(std::ceil(r - 0.5));
+        }
+    }
+
+    EventSetSimulation::EventSetSimulation(
+        ext::shared_ptr<std::vector<std::pair<Date, Real> > > events,
+        Date eventsStart,
+        Date eventsEnd,
+        Date start,
+        Date end)
+    : CatSimulation(start, end), events_(std::move(events)), eventsStart_(eventsStart),
+      eventsEnd_(eventsEnd), i_(0) {
+        years_ = end_.year()-start_.year();
+        if(eventsStart_.month()<start_.month() 
+                            || (eventsStart_.month()==start_.month() 
+                                && eventsStart_.dayOfMonth()<=start_.dayOfMonth())) {
+            periodStart_ = Date(start_.dayOfMonth(), start_.month(), eventsStart_.year());
+        } else {
+            periodStart_ = Date(start_.dayOfMonth(), start_.month(), eventsStart_.year()+1);
+        }
+        periodEnd_ = Date(end_.dayOfMonth(), end_.month(), periodStart_.year()+years_);
+        while(i_<events_->size() && (*events_)[i_].first<periodStart_) ++i_; //i points to the first element after the start of the relevant period.
+    }
+
+    bool EventSetSimulation::nextPath(std::vector< std::pair< Date, Real > >& path) {
+        path.resize(0);
+        if(periodEnd_>eventsEnd_) //Ran out of event data 
+            return false;
+
+        while(i_<events_->size() && (*events_)[i_].first<periodStart_) {
+            ++i_; //skip the elements between the previous period and this period
+        }
+        while(i_<events_->size()  && (*events_)[i_].first<=periodEnd_){
+            std::pair<Date, Real> e(events_->at(i_).first+(start_.year() - periodStart_.year())*Years, events_->at(i_).second);
+            path.push_back(e);
+            ++i_; //i points to the first element after the start of the relevant period.
+        }
+        if(start_+years_*Years<end_) {
+            periodStart_+=(years_+1)*Years;
+            periodEnd_+=(years_+1)*Years;
+        } else {
+            periodStart_+=years_*Years;
+            periodEnd_+=years_*Years;
+        }
+        return true;
+    }
+
+    EventSet::EventSet(ext::shared_ptr<std::vector<std::pair<Date, Real> > > events,
+                       Date eventsStart,
+                       Date eventsEnd)
+    : events_(std::move(events)), eventsStart_(eventsStart), eventsEnd_(eventsEnd) {}
+
+    ext::shared_ptr<CatSimulation> EventSet::newSimulation(const Date& start, const Date& end) const{
+        return ext::make_shared<EventSetSimulation>(events_, eventsStart_, eventsEnd_, start, end);
+    }
+
+    BetaRiskSimulation::BetaRiskSimulation(Date start, Date end, Real maxLoss, Real lambda, Real alpha, Real beta) 
+              : CatSimulation(start, end), 
+                maxLoss_(maxLoss), 
+                exponential_(rng_, boost::exponential_distribution<>(lambda)),
+                gammaAlpha_(rng_, boost::gamma_distribution<>(alpha)),
+                gammaBeta_(rng_, boost::gamma_distribution<>(beta))
+    {
+        DayCounter dayCounter = ActualActual(ActualActual::ISDA);
+        dayCount_ = dayCounter.dayCount(start, end);
+        yearFraction_ = dayCounter.yearFraction(start, end);
+    }
+
+    Real BetaRiskSimulation::generateBeta()
+    {
+        Real X = gammaAlpha_();
+        Real Y = gammaBeta_();
+        return X*maxLoss_/(X+Y);
+    }
+
+    bool BetaRiskSimulation::nextPath(std::vector<std::pair<Date, Real> > &path)
+    {        
+        path.resize(0);
+        Real eventFraction = exponential_();       
+        while(eventFraction<=yearFraction_)
+        {
+            Integer days = round(eventFraction*dayCount_/yearFraction_);
+            Date eventDate = start_ + days*Days;
+            if(eventDate<=end_)
+            {
+                path.emplace_back(eventDate, generateBeta());
+            }
+            else break;
+            eventFraction = exponential_();
+        }
+        return true;
+    }
+
+    BetaRisk::BetaRisk(Real maxLoss, 
+                 Real years, 
+                 Real mean, 
+                 Real stdDev) 
+    : maxLoss_(maxLoss), lambda_(1.0/years) {
+        QL_REQUIRE(mean<maxLoss, "Mean "<<mean<<"of the loss distribution must be less than the maximum loss "<<maxLoss);
+        Real normalizedMean = mean/maxLoss;
+        Real normalizedVar = stdDev*stdDev/(maxLoss*maxLoss);
+        QL_REQUIRE(normalizedVar<normalizedMean*(1.0-normalizedMean), "Standard deviation of "<<stdDev<<" is impossible to achieve in gamma distribution with mean "<<mean);
+        Real nu = normalizedMean*(1.0-normalizedMean)/normalizedVar - 1.0;
+        alpha_=normalizedMean*nu;
+        beta_=(1.0-normalizedMean)*nu;
+    }
+
+    ext::shared_ptr<CatSimulation> BetaRisk::newSimulation(const Date& start, const Date& end) const {
+        return ext::make_shared<BetaRiskSimulation>(start, end, maxLoss_, lambda_, alpha_, beta_);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>montecarlocatbondengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012, 2013 Grzegorz Andruszkiewicz
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/cashflows.hpp>
+#include <ql/experimental/catbonds/montecarlocatbondengine.hpp>
+#include <algorithm>
+#include <utility>
+
+namespace QuantLib {
+
+    MonteCarloCatBondEngine::MonteCarloCatBondEngine(
+        ext::shared_ptr<CatRisk> catRisk,
+        Handle<YieldTermStructure> discountCurve,
+        const boost::optional<bool>& includeSettlementDateFlows)
+    : catRisk_(std::move(catRisk)), discountCurve_(std::move(discountCurve)),
+      includeSettlementDateFlows_(includeSettlementDateFlows) {
+        registerWith(discountCurve_);
+    }
+
+    void MonteCarloCatBondEngine::calculate() const {
+        QL_REQUIRE(!discountCurve_.empty(),
+                   "discounting term structure handle is empty");
+
+        results_.valuationDate = (*discountCurve_)->referenceDate();
+
+        bool includeRefDateFlows = includeSettlementDateFlows_ ? // NOLINT(readability-implicit-bool-conversion)
+                                       *includeSettlementDateFlows_ :
+                                       Settings::instance().includeReferenceDateEvents();
+
+        Real lossProbability;
+        Real exhaustionProbability;
+        Real expectedLoss;
+
+        results_.value = npv(includeRefDateFlows,
+                             results_.valuationDate,
+                             results_.valuationDate,
+                             lossProbability,
+                             exhaustionProbability,
+                             expectedLoss);
+
+        results_.lossProbability = lossProbability;
+        results_.exhaustionProbability = exhaustionProbability;
+        results_.expectedLoss = expectedLoss;
+
+        // a bond's cashflow on settlement date is never taken into
+        // account, so we might have to play it safe and recalculate
+        if (!includeRefDateFlows
+                     && results_.valuationDate == arguments_.settlementDate) {
+            // same parameters as above, we can avoid another call
+            results_.settlementValue = results_.value;
+        } else {
+            // no such luck
+            results_.settlementValue =
+                npv(includeRefDateFlows, arguments_.settlementDate, arguments_.settlementDate, lossProbability, exhaustionProbability, expectedLoss);
+        }
+    }
+
+    Real MonteCarloCatBondEngine::npv(bool includeSettlementDateFlows, Date settlementDate, Date npvDate, Real& lossProbability, Real &exhaustionProbability, Real& expectedLoss) const
+    {
+        const size_t MAX_PATHS = 10000; //TODO
+        lossProbability =  0.0;
+        exhaustionProbability = 0.0;
+        expectedLoss = 0.0;
+        if (arguments_.cashflows.empty())
+            return 0.0;
+
+        if (settlementDate == Date())
+            settlementDate = Settings::instance().evaluationDate();
+
+        if (npvDate == Date())
+            npvDate = settlementDate;
+
+        Real totalNPV = 0.0;
+        Date effectiveDate = std::max(arguments_.startDate, settlementDate);
+        Date maturityDate = (*arguments_.cashflows.rbegin())->date();
+        ext::shared_ptr<CatSimulation> catSimulation = catRisk_->newSimulation(effectiveDate, maturityDate);
+        std::vector<std::pair<Date, Real> > eventsPath;
+        NotionalPath notionalPath;
+        Real riskFreeNPV = pathNpv(includeSettlementDateFlows, settlementDate, notionalPath);
+        size_t pathCount=0;
+        while(catSimulation->nextPath(eventsPath) && pathCount<MAX_PATHS)
+        {
+            arguments_.notionalRisk->updatePath(eventsPath, notionalPath);
+            if(notionalPath.loss()>0) { //optimization, most paths will not include any loss
+                totalNPV += pathNpv(includeSettlementDateFlows, settlementDate, notionalPath);
+                lossProbability+=1;
+                if (notionalPath.loss()==1) 
+                    exhaustionProbability+=1;
+                expectedLoss+=notionalPath.loss();
+            } else {
+                totalNPV += riskFreeNPV;
+            }
+            pathCount++;
+        }
+        lossProbability/=pathCount;
+        exhaustionProbability/=pathCount;
+        expectedLoss/=pathCount;
+        return totalNPV/(pathCount*discountCurve_->discount(npvDate));
+    }
+
+    Real MonteCarloCatBondEngine::pathNpv(bool includeSettlementDateFlows, 
+                                          Date settlementDate, 
+                                          const NotionalPath& notionalPath) const {
+        Real totalNPV = 0.0;
+        for (auto& cashflow : arguments_.cashflows) {
+            if (!cashflow->hasOccurred(settlementDate, includeSettlementDateFlows)) {
+                Real amount = cashFlowRiskyValue(cashflow, notionalPath);
+                totalNPV += amount * discountCurve_->discount(cashflow->date());
+            }
+        }
+        return totalNPV;
+    }
+
+    Real MonteCarloCatBondEngine::cashFlowRiskyValue(const ext::shared_ptr<CashFlow>& cf,
+                                                     const NotionalPath& notionalPath) const {
+        return cf->amount()*notionalPath.notionalRate(cf->date()); //TODO: fix for more complicated cashflows
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>riskynotional.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2012, 2013 Grzegorz Andruszkiewicz
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/catbonds/riskynotional.hpp>
+
+namespace QuantLib
+{
+    NotionalPath::NotionalPath()
+    {
+        Rate previous = 1.0;//full notional at the beginning
+        notionalRate_.emplace_back(Date(), previous);
+    }
+
+    Rate NotionalPath::notionalRate(const Date& date) const
+    {
+        Size i = 0;
+        for (; i<notionalRate_.size() && notionalRate_[i].first<=date; ++i)  //TODO do we take notional after reductions or before?
+        {}
+        return notionalRate_[i-1].second;
+    }
+
+    void NotionalPath::reset() {
+        notionalRate_.resize(1);
+    }
+
+    void NotionalPath::addReduction(const Date &date, Rate newRate) {
+        notionalRate_.emplace_back(date, newRate);
+    }
+
+    Real NotionalPath::loss() {
+        return 1.0-notionalRate_.rbegin()->second;
+    }
+
+    void DigitalNotionalRisk::updatePath(const std::vector<std::pair<Date, Real> >  &events, 
+                                         NotionalPath &path) const {
+        path.reset();
+        for (const auto& event : events) {
+            if (event.second >= threshold_) {
+                path.addReduction(paymentOffset_->paymentDate(event.first), Rate(0.0));
+            }
+        }
+    }
+}
+]]></document_content>
+  </document>
+</documents>

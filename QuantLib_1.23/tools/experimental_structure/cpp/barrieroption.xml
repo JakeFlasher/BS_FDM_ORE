@@ -1,0 +1,3221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>analyticdoublebarrierbinaryengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Thema Consulting SA
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/barrieroption/analyticdoublebarrierbinaryengine.hpp>
+#include <utility>
+
+using std::fabs;
+
+namespace QuantLib {
+
+   // number of iterations ...
+   static Real PI= 3.14159265358979323846264338327950;
+
+    // calc helper object 
+    class AnalyticDoubleBarrierBinaryEngine_helper
+    {
+    
+    public:
+        AnalyticDoubleBarrierBinaryEngine_helper(
+             const ext::shared_ptr<GeneralizedBlackScholesProcess>& process,
+             const ext::shared_ptr<CashOrNothingPayoff> &payoff,
+             const DoubleBarrierOption::arguments &arguments):
+        process_(process),
+        payoff_(payoff),
+        arguments_(arguments)
+        {
+        }
+
+        Real payoffAtExpiry(Real spot, Real variance,
+                            DoubleBarrier::Type barrierType,
+                            Size maxIteration = 100,
+                            Real requiredConvergence = 1e-8);
+        Real payoffKIKO(Real spot, Real variance,
+                        DoubleBarrier::Type barrierType,
+                        Size maxIteration = 1000,
+                        Real requiredConvergence = 1e-8);
+
+    private:
+
+        const ext::shared_ptr<GeneralizedBlackScholesProcess>& process_;
+        const ext::shared_ptr<CashOrNothingPayoff> &payoff_;
+        const DoubleBarrierOption::arguments &arguments_;
+    };
+
+
+    // helper object methods
+    Real AnalyticDoubleBarrierBinaryEngine_helper::payoffAtExpiry(
+         Real spot, Real variance, DoubleBarrier::Type barrierType,
+         Size maxIteration, Real requiredConvergence)
+    {
+        QL_REQUIRE(spot>0.0,
+                   "positive spot value required");
+
+        QL_REQUIRE(variance>=0.0,
+                   "negative variance not allowed");
+
+        Time residualTime = process_->time(arguments_.exercise->lastDate());
+        QL_REQUIRE(residualTime>0.0,
+                   "expiration time must be > 0");
+
+        // Option::Type type   = payoff_->optionType(); // this is not used ?
+        Real cash = payoff_->cashPayoff();
+        Real barrier_lo = arguments_.barrier_lo;
+        Real barrier_hi = arguments_.barrier_hi;
+
+        Real sigmaq = variance/residualTime;
+        Real r = process_->riskFreeRate()->zeroRate(residualTime, Continuous,
+                                             NoFrequency);
+        Real q = process_->dividendYield()->zeroRate(residualTime,
+                                                   Continuous, NoFrequency);
+        Real b = r - q;
+
+        Real alpha = -0.5 * ( 2*b/sigmaq - 1);
+        Real beta = -0.25 * std::pow(( 2*b/sigmaq - 1), 2) - 2 * r/sigmaq;
+        Real Z = std::log(barrier_hi / barrier_lo);
+        Real factor = ((2*PI*cash)/std::pow(Z,2)); // common factor
+        Real lo_alpha = std::pow(spot/barrier_lo, alpha); 
+        Real hi_alpha = std::pow(spot/barrier_hi, alpha); 
+
+        Real tot = 0, term = 0;
+        for (Size i = 1 ; i < maxIteration ; ++i)
+        {
+           Real term1 = (lo_alpha-std::pow(-1.0, (int)i)*hi_alpha) /
+                              (std::pow(alpha,2)+std::pow(i*PI/Z, 2));
+           Real term2 = std::sin(i*PI/Z * std::log(spot/barrier_lo));
+           Real term3 = std::exp(-0.5*(std::pow(i*PI/Z,2)-beta)*variance);
+           term = factor * i * term1 * term2 * term3;
+           tot += term;
+        }
+
+        // Check if convergence is sufficiently fast (for extreme parameters with big alpha the convergence can be very
+        // poor, see for example Hui "One-touch double barrier binary option value")
+        QL_REQUIRE(std::fabs(term) < requiredConvergence, "serie did not converge sufficiently fast");
+
+        if (barrierType == DoubleBarrier::KnockOut)
+           return std::max(tot, 0.0); // KO
+        else {
+           Rate discount = process_->riskFreeRate()->discount(
+                                             arguments_.exercise->lastDate());
+           QL_REQUIRE(discount>0.0,
+                        "positive discount required");
+           return std::max(cash * discount - tot, 0.0); // KI
+        }
+    }
+
+    // helper object methods
+    Real AnalyticDoubleBarrierBinaryEngine_helper::payoffKIKO(
+         Real spot, Real variance, DoubleBarrier::Type barrierType,
+         Size maxIteration, Real requiredConvergence)
+    {
+        QL_REQUIRE(spot>0.0,
+                   "positive spot value required");
+
+        QL_REQUIRE(variance>=0.0,
+                   "negative variance not allowed");
+
+        Time residualTime = process_->time(arguments_.exercise->lastDate());
+        QL_REQUIRE(residualTime>0.0,
+                   "expiration time must be > 0");
+
+        Real cash = payoff_->cashPayoff();
+        Real barrier_lo = arguments_.barrier_lo;
+        Real barrier_hi = arguments_.barrier_hi;
+        if (barrierType == DoubleBarrier::KOKI)
+           std::swap(barrier_lo, barrier_hi);
+
+        Real sigmaq = variance/residualTime;
+        Real r = process_->riskFreeRate()->zeroRate(residualTime, Continuous,
+                                             NoFrequency);
+        Real q = process_->dividendYield()->zeroRate(residualTime,
+                                                   Continuous, NoFrequency);
+        Real b = r - q;
+
+        Real alpha = -0.5 * ( 2*b/sigmaq - 1);
+        Real beta = -0.25 * std::pow(( 2*b/sigmaq - 1), 2) - 2 * r/sigmaq;
+        Real Z = std::log(barrier_hi / barrier_lo);
+        Real log_S_L = std::log(spot / barrier_lo);
+
+        Real tot = 0, term = 0;
+        for (Size i = 1 ; i < maxIteration ; ++i)
+        {
+            Real factor = std::pow(i*PI/Z,2)-beta;
+            Real term1 = (beta - std::pow(i*PI/Z,2) * std::exp(-0.5*factor*variance)) / factor;
+            Real term2 = std::sin(i * PI/Z * log_S_L);
+            term = (2.0/(i*PI)) * term1 * term2;
+            tot += term;
+        }
+        tot += 1 - log_S_L / Z;
+        tot *= cash*std::pow(spot/barrier_lo, alpha);
+
+        // Check if convergence is sufficiently fast
+        QL_REQUIRE(fabs(term) < requiredConvergence, "serie did not converge sufficiently fast");
+
+        return std::max(tot, 0.0);
+    }
+
+    AnalyticDoubleBarrierBinaryEngine::AnalyticDoubleBarrierBinaryEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)) {
+        registerWith(process_);
+    }
+
+    void AnalyticDoubleBarrierBinaryEngine::calculate() const {
+
+        if (arguments_.barrierType == DoubleBarrier::KIKO ||
+            arguments_.barrierType == DoubleBarrier::KOKI) {
+            ext::shared_ptr<AmericanExercise> ex =
+                ext::dynamic_pointer_cast<AmericanExercise>(
+                                                   arguments_.exercise);
+            QL_REQUIRE(ex, "KIKO/KOKI options must have American exercise");
+            QL_REQUIRE(ex->dates()[0] <=
+                       process_->blackVolatility()->referenceDate(),
+                       "American option with window exercise not handled yet");
+        } else {
+            ext::shared_ptr<EuropeanExercise> ex =
+                ext::dynamic_pointer_cast<EuropeanExercise>(
+                                                   arguments_.exercise);
+            QL_REQUIRE(ex, "non-European exercise given");
+        }
+        ext::shared_ptr<CashOrNothingPayoff> payoff =
+            ext::dynamic_pointer_cast<CashOrNothingPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "a cash-or-nothing payoff must be given");
+
+        Real spot = process_->stateVariable()->value();
+        QL_REQUIRE(spot > 0.0, "negative or null underlying given");
+
+        Real variance =
+            process_->blackVolatility()->blackVariance(
+                                             arguments_.exercise->lastDate(),
+                                             payoff->strike());
+        Real barrier_lo = arguments_.barrier_lo;
+        Real barrier_hi = arguments_.barrier_hi;
+        DoubleBarrier::Type barrierType = arguments_.barrierType;
+        QL_REQUIRE(barrier_lo>0.0,
+                   "positive low barrier value required");
+        QL_REQUIRE(barrier_hi>0.0,
+                   "positive high barrier value required");
+        QL_REQUIRE(barrier_lo < barrier_hi,
+                   "barrier_lo must be < barrier_hi");
+        QL_REQUIRE(barrierType == DoubleBarrier::KnockIn ||
+                   barrierType == DoubleBarrier::KnockOut ||
+                   barrierType == DoubleBarrier::KIKO ||
+                   barrierType == DoubleBarrier::KOKI,
+                   "Unsupported barrier type");
+
+        // degenerate cases
+        switch (barrierType) {
+          case DoubleBarrier::KnockOut:
+            if (spot <= barrier_lo || spot >= barrier_hi) {
+                // knocked out, no value
+                results_.value = 0;
+                results_.delta = 0;
+                results_.gamma = 0;
+                results_.vega = 0;
+                results_.rho = 0;
+                return;
+            }
+            break;
+
+          case DoubleBarrier::KnockIn:
+            if (spot <= barrier_lo || spot >= barrier_hi) {
+                // knocked in - pays
+                results_.value = payoff->cashPayoff();
+                results_.delta = 0;
+                results_.gamma = 0;
+                results_.vega = 0;
+                results_.rho = 0;
+                return;
+            }
+            break;
+
+          case DoubleBarrier::KIKO:
+            if (spot >= barrier_hi) {
+                // knocked out, no value
+                results_.value = 0;
+                results_.delta = 0;
+                results_.gamma = 0;
+                results_.vega = 0;
+                results_.rho = 0;
+                return;
+            } else if (spot <= barrier_lo) {
+                // knocked in, pays
+                results_.value = payoff->cashPayoff();
+                results_.delta = 0;
+                results_.gamma = 0;
+                results_.vega = 0;
+                results_.rho = 0;
+                return;
+            }
+            break;
+
+          case DoubleBarrier::KOKI:
+            if (spot <= barrier_lo) {
+                // knocked out, no value
+                results_.value = 0;
+                results_.delta = 0;
+                results_.gamma = 0;
+                results_.vega = 0;
+                results_.rho = 0;
+                return;
+            } else if (spot >= barrier_hi) {
+                // knocked in, pays
+                results_.value = payoff->cashPayoff();
+                results_.delta = 0;
+                results_.gamma = 0;
+                results_.vega = 0;
+                results_.rho = 0;
+                return;
+            }
+            break;
+        }
+
+        AnalyticDoubleBarrierBinaryEngine_helper helper(process_,
+           payoff, arguments_);
+        switch (barrierType)
+        {
+          case DoubleBarrier::KnockOut:
+          case DoubleBarrier::KnockIn:
+            results_.value = helper.payoffAtExpiry(spot, variance, barrierType);
+            break;
+
+          case DoubleBarrier::KIKO:
+          case DoubleBarrier::KOKI:
+            results_.value = helper.payoffKIKO(spot, variance, barrierType);
+            break;
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>analyticdoublebarrierengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Thema Consulting SA
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/barrieroption/analyticdoublebarrierengine.hpp>
+#include <ql/pricingengines/blackcalculator.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    AnalyticDoubleBarrierEngine::AnalyticDoubleBarrierEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process, int series)
+    : process_(std::move(process)), series_(series) {
+        registerWith(process_);
+    }
+
+    void AnalyticDoubleBarrierEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "this engine handles only european options");
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+
+        Real strike = payoff->strike();
+        QL_REQUIRE(strike>0.0,
+                   "strike must be positive");
+
+        Real spot = underlying();
+        QL_REQUIRE(spot >= 0.0, "negative or null underlying given");
+        QL_REQUIRE(!triggered(spot), "barrier(s) already touched");
+
+        DoubleBarrier::Type barrierType = arguments_.barrierType;
+
+        if (triggered(spot)) {
+           if (barrierType == DoubleBarrier::KnockIn)
+               results_.value = vanillaEquivalent();  // knocked in
+           else
+               results_.value = 0.0;  // knocked out
+        } else {
+           switch (payoff->optionType()) {
+             case Option::Call:
+               switch (barrierType) {
+                 case DoubleBarrier::KnockIn:
+                   results_.value = callKI();
+                   break;
+                 case DoubleBarrier::KnockOut:
+                   results_.value = callKO();
+                   break;
+                 case DoubleBarrier::KIKO:
+                 case DoubleBarrier::KOKI:
+                   QL_FAIL("unsupported double-barrier type: "
+                           << barrierType);
+                 default:
+                   QL_FAIL("unknown double-barrier type: "
+                           << barrierType);
+               }
+               break;
+             case Option::Put:
+               switch (barrierType) {
+                 case DoubleBarrier::KnockIn:
+                   results_.value = putKI();
+                   break;
+                 case DoubleBarrier::KnockOut:
+                   results_.value = putKO();
+                   break;
+                 case DoubleBarrier::KIKO:
+                 case DoubleBarrier::KOKI:
+                   QL_FAIL("unsupported double-barrier type: "
+                           << barrierType);
+                 default:
+                   QL_FAIL("unknown double-barrier type: "
+                           << barrierType);
+               }
+               break;
+             default:
+               QL_FAIL("unknown type");
+           }
+        }
+    }
+
+
+    Real AnalyticDoubleBarrierEngine::underlying() const {
+        return process_->x0();
+    }
+
+    Real AnalyticDoubleBarrierEngine::strike() const {
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        return payoff->strike();
+    }
+
+    Time AnalyticDoubleBarrierEngine::residualTime() const {
+        return process_->time(arguments_.exercise->lastDate());
+    }
+
+    Volatility AnalyticDoubleBarrierEngine::volatility() const {
+        return process_->blackVolatility()->blackVol(residualTime(), strike());
+    }
+
+    Real AnalyticDoubleBarrierEngine::volatilitySquared() const {
+        return volatility() * volatility();
+    }
+
+    Real AnalyticDoubleBarrierEngine::stdDeviation() const {
+        return volatility() * std::sqrt(residualTime());
+    }
+
+    Real AnalyticDoubleBarrierEngine::barrierLo() const {
+        return arguments_.barrier_lo;
+    }
+
+    Real AnalyticDoubleBarrierEngine::barrierHi() const {
+        return arguments_.barrier_hi;
+    }
+
+    Rate AnalyticDoubleBarrierEngine::riskFreeRate() const {
+        return process_->riskFreeRate()->zeroRate(residualTime(), Continuous,
+                                                  NoFrequency);
+    }
+
+    DiscountFactor AnalyticDoubleBarrierEngine::riskFreeDiscount() const {
+        return process_->riskFreeRate()->discount(residualTime());
+    }
+
+    Rate AnalyticDoubleBarrierEngine::dividendYield() const {
+        return process_->dividendYield()->zeroRate(residualTime(),
+                                                   Continuous, NoFrequency);
+    }
+
+    DiscountFactor AnalyticDoubleBarrierEngine::dividendDiscount() const {
+        return process_->dividendYield()->discount(residualTime());
+    }
+
+    Rate AnalyticDoubleBarrierEngine::costOfCarry() const {
+        return riskFreeRate() - dividendYield();
+    }
+
+    Real AnalyticDoubleBarrierEngine::vanillaEquivalent() const {
+        // Call KI equates to vanilla - callKO
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        Real forwardPrice = underlying() * dividendDiscount() / riskFreeDiscount();
+        BlackCalculator black(payoff, forwardPrice, stdDeviation(), riskFreeDiscount());
+        Real vanilla = black.value();
+        if (vanilla < 0.0)
+           vanilla = 0.0;
+        return vanilla;
+    }
+
+    Real AnalyticDoubleBarrierEngine::callKO() const {
+       // N.B. for flat barriers mu3=mu1 and mu2=0
+       Real mu1 = 2 * costOfCarry() / volatilitySquared() + 1;
+       Real bsigma = (costOfCarry() + volatilitySquared() / 2.0) * residualTime() / stdDeviation();
+
+       Real acc1 = 0;
+       Real acc2 = 0;
+       for (int n = -series_ ; n <= series_ ; ++n) {
+          Real L2n = std::pow(barrierLo(), 2 * n);
+          Real U2n = std::pow(barrierHi(), 2 * n);
+          Real d1 = std::log( underlying()* U2n / (strike() * L2n) ) / stdDeviation() + bsigma;
+          Real d2 = std::log( underlying()* U2n / (barrierHi() * L2n) ) / stdDeviation() + bsigma;
+          Real d3 = std::log( std::pow(barrierLo(), 2 * n + 2) / (strike() * underlying() * U2n) ) / stdDeviation() + bsigma;
+          Real d4 = std::log( std::pow(barrierLo(), 2 * n + 2) / (barrierHi() * underlying() * U2n) ) / stdDeviation() + bsigma;
+
+          acc1 += std::pow( std::pow(barrierHi(), n) / std::pow(barrierLo(), n), mu1 ) * 
+                  (f_(d1) - f_(d2)) -
+                  std::pow( std::pow(barrierLo(), n+1) / (std::pow(barrierHi(), n) * underlying()), mu1 ) * 
+                  (f_(d3) - f_(d4));
+
+          acc2 += std::pow( std::pow(barrierHi(), n) / std::pow(barrierLo(), n), mu1-2) * 
+                  (f_(d1 - stdDeviation()) - f_(d2 - stdDeviation())) -
+                  std::pow( std::pow(barrierLo(), n+1) / (std::pow(barrierHi(), n) * underlying()), mu1-2 ) * 
+                  (f_(d3-stdDeviation()) - f_(d4-stdDeviation()));
+       }
+
+       Real rend = std::exp(-dividendYield() * residualTime());
+       Real kov = underlying() * rend * acc1 - strike() * riskFreeDiscount() * acc2;
+       return std::max(0.0, kov);
+    }
+    
+    Real AnalyticDoubleBarrierEngine::callKI() const {
+        // Call KI equates to vanilla - callKO
+        return std::max(0.0, vanillaEquivalent() - callKO());
+    }
+
+    Real AnalyticDoubleBarrierEngine::putKO() const {
+       Real mu1 = 2 * costOfCarry() / volatilitySquared() + 1;
+       Real bsigma = (costOfCarry() + volatilitySquared() / 2.0) * residualTime() / stdDeviation();
+
+       Real acc1 = 0;
+       Real acc2 = 0;
+       for (int n = -series_ ; n <= series_ ; ++n) {
+          Real L2n = std::pow(barrierLo(), 2 * n);
+          Real U2n = std::pow(barrierHi(), 2 * n);
+          Real y1 = std::log( underlying()* U2n / (std::pow(barrierLo(), 2 * n + 1)) ) / stdDeviation() + bsigma;
+          Real y2 = std::log( underlying()* U2n / (strike() * L2n) ) / stdDeviation() + bsigma;
+          Real y3 = std::log( std::pow(barrierLo(), 2 * n + 2) / (barrierLo() * underlying() * U2n) ) / stdDeviation() + bsigma;
+          Real y4 = std::log( std::pow(barrierLo(), 2 * n + 2) / (strike() * underlying() * U2n) ) / stdDeviation() + bsigma;
+
+          acc1 += std::pow( std::pow(barrierHi(), n) / std::pow(barrierLo(), n), mu1-2) * 
+                  (f_(y1 - stdDeviation()) - f_(y2 - stdDeviation())) -
+                  std::pow( std::pow(barrierLo(), n+1) / (std::pow(barrierHi(), n) * underlying()), mu1-2 ) * 
+                  (f_(y3-stdDeviation()) - f_(y4-stdDeviation()));
+
+          acc2 += std::pow( std::pow(barrierHi(), n) / std::pow(barrierLo(), n), mu1 ) * 
+                  (f_(y1) - f_(y2)) -
+                  std::pow( std::pow(barrierLo(), n+1) / (std::pow(barrierHi(), n) * underlying()), mu1 ) * 
+                  (f_(y3) - f_(y4));
+
+       }
+
+       Real rend = std::exp(-dividendYield() * residualTime());
+       Real kov = strike() * riskFreeDiscount() * acc1 - underlying() * rend  * acc2;
+       return std::max(0.0, kov);
+    }
+    
+    Real AnalyticDoubleBarrierEngine::putKI() const {
+        // Put KI equates to vanilla - putKO
+        return std::max(0.0, vanillaEquivalent() - putKO());
+    }
+
+    
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>discretizeddoublebarrieroption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Thema Consulting SA
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/barrieroption/discretizeddoublebarrieroption.hpp>
+#include <vector>
+
+namespace QuantLib {
+
+    DiscretizedDoubleBarrierOption::DiscretizedDoubleBarrierOption(
+                                         const DoubleBarrierOption::arguments& args,
+                                         const StochasticProcess& process,
+                                         const TimeGrid& grid)
+    : arguments_(args), vanilla_(arguments_, process, grid)  {
+        QL_REQUIRE(args.exercise->dates().size(), "specify at least one stopping date");
+
+        stoppingTimes_.resize(args.exercise->dates().size());
+        for (Size i=0; i<stoppingTimes_.size(); ++i) {
+            stoppingTimes_[i] =
+                process.time(args.exercise->date(i));
+            if (!grid.empty()) {
+                // adjust to the given grid
+                stoppingTimes_[i] = grid.closestTime(stoppingTimes_[i]);
+            }
+        }
+    }
+
+    void DiscretizedDoubleBarrierOption::reset(Size size) {
+        vanilla_.initialize(method(), time());
+        values_ = Array(size, 0.0);
+        adjustValues();
+    }
+
+    void DiscretizedDoubleBarrierOption::postAdjustValuesImpl() {
+        if (arguments_.barrierType!=DoubleBarrier::KnockOut) {
+            vanilla_.rollback(time());
+        }
+        Array grid = method()->grid(time());
+        checkBarrier(values_, grid);
+    }
+
+    void DiscretizedDoubleBarrierOption::checkBarrier(Array &optvalues, const Array &grid) const {
+
+        Time now = time();
+        bool endTime = isOnTime(stoppingTimes_.back());
+        bool stoppingTime = false;         
+        switch (arguments_.exercise->type()) {
+          case Exercise::American:
+            if (now <= stoppingTimes_[1] &&
+                now >= stoppingTimes_[0])
+                stoppingTime = true;
+            break;
+          case Exercise::European:
+            if (isOnTime(stoppingTimes_[0]))
+                stoppingTime = true;
+            break;
+          case Exercise::Bermudan:
+              for (double i : stoppingTimes_) {
+                  if (isOnTime(i)) {
+                      stoppingTime = true;
+                      break;
+                  }
+              }
+            break;
+          default:
+            QL_FAIL("invalid option type");
+        }
+        for (Size j=0; j<optvalues.size(); j++) {
+            switch (arguments_.barrierType) {
+              case DoubleBarrier::KnockIn:
+                  if (grid[j] <= arguments_.barrier_lo) {
+                     // knocked in dn
+                     if (stoppingTime) {
+                         optvalues[j] = std::max(vanilla()[j],
+                                      (*arguments_.payoff)(grid[j]));
+                     }
+                     else
+                         optvalues[j] = vanilla()[j]; 
+                  }
+                  else if (grid[j] >= arguments_.barrier_hi) {
+                     // knocked in up
+                     if (stoppingTime) {
+                         optvalues[j] = std::max(vanilla()[j],
+                                      (*arguments_.payoff)(grid[j]));
+                     }
+                     else
+                         optvalues[j] = vanilla()[j]; 
+                  }
+                  else if (endTime)
+                      optvalues[j] = arguments_.rebate;
+                  break;
+              case DoubleBarrier::KnockOut:
+                  if (grid[j] <= arguments_.barrier_lo)
+                      optvalues[j] = arguments_.rebate; // knocked out lo
+                  else if (grid[j] >= arguments_.barrier_hi)
+                     optvalues[j] = arguments_.rebate; // knocked out hi
+                  else if (stoppingTime)
+                      optvalues[j] = std::max(optvalues[j],
+                                     (*arguments_.payoff)(grid[j]));
+                  break;
+              case DoubleBarrier::KIKO:
+                  // low barrier is KI, high is KO
+                  if (grid[j] <= arguments_.barrier_lo) {
+                     // knocked in dn
+                     if (stoppingTime) {
+                         optvalues[j] = std::max(vanilla()[j],
+                                      (*arguments_.payoff)(grid[j]));
+                     }
+                     else
+                         optvalues[j] = vanilla()[j];
+                  }
+                  else if (grid[j] >= arguments_.barrier_hi)
+                     optvalues[j] = arguments_.rebate; // knocked out hi
+                  else if (endTime)
+                      optvalues[j] = arguments_.rebate;
+                  break;
+              case DoubleBarrier::KOKI:
+                  // low barrier is KO, high is KI
+                  if (grid[j] <= arguments_.barrier_lo)
+                      optvalues[j] = arguments_.rebate; // knocked out lo
+                  else if (grid[j] >= arguments_.barrier_hi) {
+                     // knocked in up
+                     if (stoppingTime) {
+                         optvalues[j] = std::max(vanilla()[j],
+                                      (*arguments_.payoff)(grid[j]));
+                     }
+                     else
+                         optvalues[j] = vanilla()[j];
+                  }
+                  else if (endTime)
+                      optvalues[j] = arguments_.rebate;
+                  break;
+              default:
+                  QL_FAIL("invalid barrier type");
+            }
+        }
+    }
+
+
+
+    DiscretizedDermanKaniDoubleBarrierOption::DiscretizedDermanKaniDoubleBarrierOption(
+                                         const DoubleBarrierOption::arguments& args,
+                                         const StochasticProcess& process,
+                                         const TimeGrid& grid)
+    : unenhanced_(args, process, grid) {
+    }
+
+    void DiscretizedDermanKaniDoubleBarrierOption::reset(Size size) {
+        unenhanced_.initialize(method(), time());
+        values_ = Array(size, 0.0);
+        adjustValues();
+    }
+
+    void DiscretizedDermanKaniDoubleBarrierOption::postAdjustValuesImpl() {
+        unenhanced_.rollback(time());
+
+        Array grid = method()->grid(time());
+        unenhanced_.checkBarrier(values_, grid); // compute payoffs
+        adjustBarrier(values_, grid);
+    }
+
+    void DiscretizedDermanKaniDoubleBarrierOption::adjustBarrier(Array &optvalues, const Array &grid) {
+        Real barrier_lo = unenhanced_.arguments().barrier_lo;
+        Real barrier_hi = unenhanced_.arguments().barrier_hi;
+        Real rebate = unenhanced_.arguments().rebate;
+        switch (unenhanced_.arguments().barrierType) {
+           case DoubleBarrier::KnockIn:
+              for (Size j=0; j<optvalues.size()-1; ++j) {
+                  if (grid[j]<=barrier_lo && grid[j+1] > barrier_lo) {
+                     // grid[j+1] above barrier_lo, grid[j] under (in),
+                     // interpolate optvalues[j+1]
+                     Real ltob = (barrier_lo-grid[j]);
+                     Real htob = (grid[j+1]-barrier_lo);
+                     Real htol = (grid[j+1]-grid[j]);
+                     Real u1 = unenhanced_.values()[j+1];
+                     Real t1 = unenhanced_.vanilla()[j+1];
+                     optvalues[j+1] = std::max(0.0, (ltob*t1+htob*u1)/htol); // derman std
+                  }
+                  else if (grid[j] < barrier_hi && grid[j+1] >= barrier_hi) {
+                     // grid[j+1] above barrier_hi (in), grid[j] under, 
+                     // interpolate optvalues[j]
+                     Real ltob = (barrier_hi-grid[j]);
+                     Real htob = (grid[j+1]-barrier_hi);
+                     Real htol = (grid[j+1]-grid[j]);
+                     Real u = unenhanced_.values()[j];
+                     Real t = unenhanced_.vanilla()[j];
+                     optvalues[j] = std::max(0.0, (ltob*u+htob*t)/htol); // derman std
+                  }
+              }
+              break;
+           case DoubleBarrier::KnockOut:
+              for (Size j=0; j<optvalues.size()-1; ++j) {
+                  if (grid[j]<=barrier_lo && grid[j+1] > barrier_lo) {
+                     // grid[j+1] above barrier_lo, grid[j] under (out),
+                     // interpolate optvalues[j+1]
+                     Real a = (barrier_lo-grid[j])*rebate;
+                     Real b = (grid[j+1]-barrier_lo)*unenhanced_.values()[j+1];
+                     Real c = (grid[j+1]-grid[j]);
+                     optvalues[j+1] = std::max(0.0, (a+b)/c);
+                  }
+                  else if (grid[j] < barrier_hi && grid[j+1] >= barrier_hi) {
+                     // grid[j+1] above barrier_hi (out), grid[j] under, 
+                     // interpolate optvalues[j]
+                     Real a = (barrier_hi-grid[j])*unenhanced_.values()[j];
+                     Real b = (grid[j+1]-barrier_hi)*rebate;
+                     Real c = (grid[j+1]-grid[j]);
+                     optvalues[j] = std::max(0.0, (a+b)/c);
+                  }
+              }
+              break;
+           default:
+              QL_FAIL("unsupported barrier type");
+              break;
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>doublebarrieroption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Thema Consulting SA
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/barrieroption/doublebarrieroption.hpp>
+#include <ql/experimental/barrieroption/analyticdoublebarrierengine.hpp>
+#include <ql/instruments/impliedvolatility.hpp>
+#include <ql/exercise.hpp>
+#include <memory>
+
+namespace QuantLib {
+
+    DoubleBarrierOption::DoubleBarrierOption(
+        DoubleBarrier::Type barrierType,
+        Real barrier_lo,
+        Real barrier_hi,
+        Real rebate,
+        const ext::shared_ptr<StrikedTypePayoff>& payoff,
+        const ext::shared_ptr<Exercise>& exercise)
+    : OneAssetOption(payoff, exercise),
+      barrierType_(barrierType), barrier_lo_(barrier_lo), 
+      barrier_hi_(barrier_hi), rebate_(rebate) {}
+
+    void DoubleBarrierOption::setupArguments(PricingEngine::arguments* args) const {
+
+        OneAssetOption::setupArguments(args);
+
+        auto* moreArgs = dynamic_cast<DoubleBarrierOption::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+        moreArgs->barrierType = barrierType_;
+        moreArgs->barrier_lo = barrier_lo_;
+        moreArgs->barrier_hi = barrier_hi_;
+        moreArgs->rebate = rebate_;
+    }
+
+
+    Volatility DoubleBarrierOption::impliedVolatility(
+             Real targetValue,
+             const ext::shared_ptr<GeneralizedBlackScholesProcess>& process,
+             Real accuracy,
+             Size maxEvaluations,
+             Volatility minVol,
+             Volatility maxVol) const {
+
+        QL_REQUIRE(!isExpired(), "option expired");
+
+        ext::shared_ptr<SimpleQuote> volQuote(new SimpleQuote);
+
+        ext::shared_ptr<GeneralizedBlackScholesProcess> newProcess =
+            detail::ImpliedVolatilityHelper::clone(process, volQuote);
+
+        // engines are built-in for the time being
+        std::unique_ptr<PricingEngine> engine;
+        switch (exercise_->type()) {
+          case Exercise::European:
+            engine.reset(new AnalyticDoubleBarrierEngine(newProcess));
+            break;
+          case Exercise::American:
+          case Exercise::Bermudan:
+            QL_FAIL("engine not available for non-European barrier option");
+            break;
+          default:
+            QL_FAIL("unknown exercise type");
+        }
+
+        return detail::ImpliedVolatilityHelper::calculate(*this,
+                                                          *engine,
+                                                          *volQuote,
+                                                          targetValue,
+                                                          accuracy,
+                                                          maxEvaluations,
+                                                          minVol, maxVol);
+    }
+
+
+    DoubleBarrierOption::arguments::arguments()
+    : barrierType(DoubleBarrier::Type(-1)), barrier_lo(Null<Real>()),
+      barrier_hi(Null<Real>()), rebate(Null<Real>()) {}
+
+    void DoubleBarrierOption::arguments::validate() const {
+        OneAssetOption::arguments::validate();
+
+        QL_REQUIRE(barrierType == DoubleBarrier::KnockIn ||
+                   barrierType == DoubleBarrier::KnockOut ||
+                   barrierType == DoubleBarrier::KIKO ||
+                   barrierType == DoubleBarrier::KOKI,
+                   "Invalid barrier type");
+
+        QL_REQUIRE(barrier_lo != Null<Real>(), "no low barrier given");
+        QL_REQUIRE(barrier_hi != Null<Real>(), "no high barrier given");
+        QL_REQUIRE(rebate != Null<Real>(), "no rebate given");
+    }
+
+    bool DoubleBarrierOption::engine::triggered(Real underlying) const {
+        return underlying <= arguments_.barrier_lo || underlying >= arguments_.barrier_hi;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>doublebarriertype.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Thema Consulting SA
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/barrieroption/doublebarriertype.hpp>
+#include <ql/types.hpp>
+#include <ql/errors.hpp>
+
+namespace QuantLib {
+
+    std::ostream& operator<<(std::ostream& out,
+                             DoubleBarrier::Type type) {
+        switch (type) {
+          case DoubleBarrier::KnockIn:
+            return out << "KnockIn";
+          case DoubleBarrier::KnockOut:
+            return out << "KnockOut";
+          case DoubleBarrier::KIKO:
+            return out << "KI lo+KO up";
+          case DoubleBarrier::KOKI:
+            return out << "KO lo+KI up";
+          default:
+            QL_FAIL("unknown DoubleBarrier::Type (" << Integer(type) << ")");
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>mcdoublebarrierengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2020 Lew Wei Hao
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/barrieroption/mcdoublebarrierengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    DoubleBarrierPathPricer::DoubleBarrierPathPricer(DoubleBarrier::Type barrierType,
+                                                     Real barrierLow,
+                                                     Real barrierHigh,
+                                                     Real rebate,
+                                                     Option::Type type,
+                                                     Real strike,
+                                                     std::vector<DiscountFactor> discounts)
+    : barrierType_(barrierType), barrierLow_(barrierLow), barrierHigh_(barrierHigh),
+      rebate_(rebate), payoff_(type, strike), discounts_(std::move(discounts)) {
+        QL_REQUIRE(strike>=0.0,
+                   "strike less than zero not allowed");
+        QL_REQUIRE(barrierLow>0.0,
+                   "low barrier less/equal zero not allowed");
+        QL_REQUIRE(barrierHigh>0.0,
+                   "high barrier less/equal zero not allowed");
+    }
+
+    Real DoubleBarrierPathPricer::operator()(const Path& path) const {
+        static Size null = Null<Size>();
+        Size n = path.length();
+        QL_REQUIRE(n>1, "the path cannot be empty");
+
+        bool isOptionActive = false;
+        Size knockNode = null;
+        Real terminal_price = path.back();
+        Real new_asset_price;
+        Size i;
+
+        switch (barrierType_) {
+            case DoubleBarrier::KnockOut:
+                isOptionActive = true;
+                for (i = 0; i < n-1; i++) {
+                    new_asset_price = path[i + 1];
+
+                    if (new_asset_price >= barrierHigh_ || new_asset_price <= barrierLow_){
+                        isOptionActive = false;
+                        if (knockNode == null)
+                            knockNode = i+1;
+                        break;
+                    }
+                }
+                break;
+            case DoubleBarrier::KnockIn:
+                isOptionActive = false;
+                for (i = 0; i < n-1; i++) {
+                    new_asset_price = path[i + 1];
+
+                    if (new_asset_price >= barrierHigh_ || new_asset_price <= barrierLow_){
+                        isOptionActive = true;
+                        if (knockNode == null)
+                            knockNode = i+1;
+                        break;
+                    }
+                }
+                break;
+            default:
+                QL_FAIL("unknown barrier type");
+        }
+
+        if (isOptionActive) {
+            return payoff_(terminal_price) * discounts_.back();
+        } else {
+            switch (barrierType_) {
+                case DoubleBarrier::KnockOut:
+                    return rebate_*discounts_[knockNode];
+                case DoubleBarrier::KnockIn:
+                    return rebate_*discounts_.back();
+                default:
+                    QL_FAIL("unknown barrier type");
+            }
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>perturbativebarrieroptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Lorella Fatone
+ Copyright (C) 2008 Maria Cristina Recchioni
+ Copyright (C) 2008 Francesco Zirilli
+ Copyright (C) 2008 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/errors.hpp>
+#include <ql/exercise.hpp>
+#include <ql/experimental/barrieroption/perturbativebarrieroptionengine.hpp>
+#include <ql/functional.hpp>
+#include <ql/types.hpp>
+#include <algorithm>
+#include <cmath>
+#include <utility>
+
+using namespace std;
+
+#define SIGN(a,b) ((b) >= 0.0 ? fabs(a) : -fabs(a))
+#define ABS(x) (((x) < 0) ? -(x) : (x))
+#define POW(x,y) pow( (Real) (x), (Real) (y))
+#define PI 3.14159265358979324
+
+namespace QuantLib {
+
+    namespace {
+
+    Real ND2(Real a, Real b, Real rho);
+
+    Real H1, H2,  H3, R23, RUA, RUB, AR, RUC;
+    int NUC;
+
+    // standard normal cumulative distribution function
+    Real PHID(Real Z);
+
+    // Functions used to compute the first order approximation
+    Real ff(Real p,Real tt,Real a, Real b, Real gm);
+    Real v(Real p, Real tt,Real a,Real b,Real gm);
+    Real llold(Real p,Real tt, Real a, Real b,
+                 Real c, Real gm);
+
+    // Functions used to compute the second order approximation
+    Real derivn3(Real limit[4],Real sigmarho[4], int idx);
+    Real ddvv(Real s, Real p, Real tt, Real a,
+                Real b, Real gm);
+    Real ddff(Real s, Real p,Real tt,Real a,Real b,Real gm);
+    Real dll(Real s,Real p,Real tt,Real a,Real b,
+               Real c,Real gm);
+    Real ddll(Real s,Real p,Real tt, Real ax, Real bx,
+                Real c, Real gm);
+    Real dvv(Real s,Real p,Real tt,Real a,Real b,Real gm);
+    Real dff(Real s, Real p,Real tt,Real a,Real b,Real gm);
+    Real tvtl(int jj, const Real limit[4], const Real sigmarho[4], Real epsi);
+
+    Real BarrierUPD(Real kprice,
+                    Real stock,
+                    Real hbarr,
+                    Real taumin,
+                    Real taumax,
+                    int iord,
+                    int igm,
+                    const ext::function<Real(Real, Real)>& integr,
+                    const ext::function<Real(Real, Real)>& integalpha,
+                    const ext::function<Real(Real, Real)>& integs,
+                    const ext::function<Real(Real)>& alpha,
+                    const ext::function<Real(Real)>& sigmaq) {
+        Real v0=0.0, v1=0.0, v1p=0.0, v2p=0.0, v2pp=0.0, gm=0.0;
+        int i=0,j=0;
+        Real tmp=0.0, e1=0.0, e2=0.0, e3=0.0, e4=0.0;
+        Real xstar=0.0, s0=0.0;
+        Real sigmat=0.0, disc=0.0, d1=0.0,d2=0.0,d3=0.0,d4=0.0;
+        Real et=0.0,tt=0.0, dt=0.0,p=0.0;
+        int npoint,npoint2;
+        static double pi= 3.14159265358979324;
+        Real dsqpi;
+        Real caux=0.0,ccaux=0.0;
+        Real auxnew=0.0;
+        Real x=0.0,b=0.0,c=0.0;
+
+        if(igm==0) {
+            gm=0.0;
+        } else if(igm==1) {
+            gm=integalpha(taumin,taumax)/(0.5*integs(taumin,taumax));
+        } else {
+            gm=0.0;
+        }
+
+        /*
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          !!                                 !!
+          !! xstar=min(0,log(kprice/hbarr))  !!
+          !!                                 !!
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        */
+
+        xstar=log(kprice/hbarr);
+
+        if(xstar>0.0) xstar=0.0;
+        sigmat=integs(taumin,taumax);
+        disc=-integr(taumin,taumax);
+
+        /*
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          !!    Change of variable            !!
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        */
+        s0=stock/hbarr;
+
+        /*
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          !!                                       !!
+          !! Compute the zero-th order term P_0    !!
+          !!                                       !!
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        */
+        d1=(xstar-log(s0)+(1.0-gm)*0.5*sigmat)/sqrt(sigmat);
+        d2=(xstar+log(s0)+(1.0-gm)*0.5*sigmat)/sqrt(sigmat);
+        d3=(xstar-log(s0)-(1.0+gm)*0.5*sigmat)/sqrt(sigmat);
+        d4=(xstar+log(s0)-(1.0+gm)*0.5*sigmat)/sqrt(sigmat);
+
+        e1=PHID(d1);
+        e2=PHID(d2);
+        e3=PHID(d3);
+        e4=PHID(d4);
+
+        v0=kprice*e1-kprice*POW(s0,(1.0-gm))*e2;
+        v0=v0+exp(gm*0.5*sigmat)*(-hbarr*s0*e3+hbarr*POW(s0,-gm)*e4);
+        v0=v0*exp(disc);
+
+        if(iord==0) return v0;
+
+        /*
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          !!                                           !!
+          !! Compute the first order term  P_1         !!
+          !!                                           !!
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        */
+
+        npoint=1000;
+        npoint2=100;
+
+        dt=(taumax-taumin)/double(npoint);
+
+        tt=0.5*integs(taumin,taumax);
+
+        x=log(s0);
+        et=exp(0.5*(1.0-gm)*x);
+
+        dsqpi=POW(pi,0.5);
+
+        v1=0.0;
+        for( i=1;i<=npoint;i++) {
+            v1p=0.0;
+            tmp=taumin+dt*double(2*i-1)*0.5;
+            p=0.5*integs(tmp,taumax);
+            /*
+              !!
+              !! Function E(p,tt,a,b,gm)
+              !!
+            */
+            ccaux=v(p,tt,x,xstar,gm)+v(p,tt,x,-xstar,gm)-v(p,tt,-x,xstar,gm)-v(p,tt,-x,-xstar,gm);
+            auxnew=ccaux*(-kprice*exp(-xstar*0.5*(1.0-gm))+hbarr*exp(xstar*0.5*(1.0+gm)));
+            v1p=v1p+auxnew;
+            /*
+              !!
+              !! Function L(p,tt,a,b,c,gm)
+              !!
+            */
+            b=gm-1.0;
+            c=-xstar;
+            ccaux=llold(p,tt,x,b,c,gm)-llold(p,tt,-x,b,c,gm);
+            auxnew=kprice*(1.0-gm)*ccaux;
+            v1p=v1p+auxnew;
+
+            b=-(gm+1.0);
+            c=xstar;
+            ccaux=llold(p,tt,x,b,c,gm)-llold(p,tt,-x,b,c,gm);
+            auxnew=-exp(gm*p)*hbarr*ccaux;
+            v1p=v1p+auxnew;
+
+            b=(gm+1.0);
+            c=-xstar;
+            ccaux=llold(p,tt,x,b,c,gm)-llold(p,tt,-x,b,c,gm);
+            auxnew=exp(gm*p)*hbarr*gm*ccaux;
+            v1p=v1p+auxnew;
+            /*
+              !!
+              !! Function F(p,tt,a,b,c,gm)
+              !!
+            */
+            b=gm-1.0;
+            auxnew=-kprice*(1.0-gm)*(ff(p,tt,x,b,gm)-ff(p,tt,-x,b,gm));
+            v1p=v1p+auxnew;
+
+            b=gm+1.0;
+            auxnew=-exp(gm*p)*gm*hbarr*(ff(p,tt,x,b,gm)-ff(p,tt,-x,b,gm));
+            v1p=v1p+auxnew;
+
+            v1=v1+(alpha(tmp)-gm*0.5*sigmaq(tmp))*v1p;
+        }
+
+        v1=exp(disc)*et*v1*dt/(dsqpi*2.0);
+
+        if(iord==1) return v0+v1;
+
+        /*
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          !!                                          !!
+          !! Compute the second order term P_2        !!
+          !!                                          !!
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        */
+
+        Real v2,dtp, tmp1,s,caux2;
+        v2=0.0;
+
+        for(i=1;i<=npoint;i++) {
+            v2p=0.0;
+            tmp=taumin+dt*(double)(2*i-1)*0.5;
+            p=0.5*integs(tmp,taumax);
+
+            dtp=(taumax-tmp)/(double)(npoint2);
+
+            for(j=1;j<=npoint2; j++) {
+                tmp1=tmp+dtp*(double)(2*j-1)*0.50;
+                s=0.50*integs(tmp1,taumax);
+
+                caux=dll(s,p,tt,-x,-1.0+gm,-xstar,gm)-dll(s,p,tt,x,-1.0+gm,-xstar,gm);
+                v2pp=caux*kprice*(1.0-gm);
+
+                caux=dll(s,p,tt,-x,-1.0-gm,xstar,gm)-dll(s,p,tt,x,-1.0-gm,xstar,gm);
+                v2pp=v2pp-exp(gm*s)*hbarr*caux;
+
+                caux=dll(s,p,tt,-x,1.0+gm,-xstar,gm)-dll(s,p,tt,x,1.0+gm,-xstar,gm);
+                v2pp=v2pp+exp(gm*s)*gm*hbarr*caux;
+
+                caux=+dvv(s,p,tt,-x,xstar,gm)-dvv(s,p,tt,x,xstar,gm);
+                caux=caux+(dvv(s,p,tt,-x,-xstar,gm)-dvv(s,p,tt,x,-xstar,gm));
+                caux2=hbarr*exp(0.5*(1.0+gm)*xstar)-kprice*exp(-0.5*(1.0-gm)*xstar);
+                v2pp=v2pp+caux2*caux;
+
+                caux=dff(s,p,tt,-x,-1.0+gm,gm)-dff(s,p,tt,x,-1.0+gm,gm);
+                v2pp=v2pp-(1.0-gm)*kprice*caux;
+
+                caux=dff(s,p,tt,-x,1.0+gm,gm)-dff(s,p,tt,x,1.0+gm,gm);
+                v2pp=v2pp-exp(gm*s)*gm*hbarr*caux;
+
+                v2pp=v2pp*0.5*(1.0-gm);
+
+                caux=-ddll(s,p,tt,-x,-1.0+gm,-xstar,gm)+ddll(s,p,tt,x,-1.0+gm,-xstar,gm);
+                v2pp=v2pp+caux*kprice*(1.0-gm);
+
+                caux=-ddll(s,p,tt,-x,-1.0-gm,xstar,gm)+ddll(s,p,tt,x,-1.0-gm,xstar,gm);
+                v2pp=v2pp-exp(gm*s)*hbarr*caux;
+
+                caux=-ddll(s,p,tt,-x,1.0+gm,-xstar,gm)+ddll(s,p,tt,x,1.0+gm,-xstar,gm);
+                v2pp=v2pp+exp(gm*s)*gm*hbarr*caux;
+
+                caux=-ddvv(s,p,tt,-x,xstar,gm)+ddvv(s,p,tt,x,xstar,gm);
+                caux=caux+(-dvv(s,p,tt,-x,-xstar,gm)+dvv(s,p,tt,x,-xstar,gm));
+                caux2=hbarr*exp(0.5*(1.0+gm)*xstar)-kprice*exp(-0.5*(1-gm)*xstar);
+
+                v2pp=v2pp+caux2*caux;
+
+                caux=-ddff(s,p,tt,-x,-1+gm,gm)+ddff(s,p,tt,x,-1+gm,gm);
+                v2pp=v2pp-(1.0-gm)*kprice*caux;
+
+                caux=-ddff(s,p,tt,-x,1.0+gm,gm)+ddff(s,p,tt,x,1.0+gm,gm);
+                v2pp=v2pp-exp(gm*s)*gm*hbarr*caux;
+
+                v2p=v2p+(alpha(tmp1)-gm*0.5*sigmaq(tmp1))*v2pp;
+            }
+
+            v2=v2+v2p*(alpha(tmp)-gm*0.5*sigmaq(tmp))*dtp;
+        }
+
+        v2=exp(disc)*et*v2*dt;
+
+        return v0+v1+v2;
+    }
+
+
+    Real PHID(Real Z){
+        /*
+         *     Normal distribution probabilities accurate to 1D-15.
+         *     Z = number of standard deviations from the mean.
+         *
+         *     The software that computes the normal distribution
+         *     probabilities has been developed by M.C. Recchioni
+         *     based upon algorithm 5666 (Programmer Alan Miller)
+         *     for the error function, taken from:
+         *     Hart, J.F. et al, 'Computer Approximations', Wiley, 1968
+         *
+         */
+        Real P0, P1, P2, P3, P4, P5, P6;
+        Real Q0, Q1, Q2, Q3, Q4, Q5, Q6, Q7;
+        Real P, EXPNTL, CUTOFF, ROOTPI, ZABS;
+
+        P0 = 220.2068679123761;
+        P1 = 221.2135961699311;
+        P2 = 112.0792914978709;
+        P3 = 33.91286607838300;
+        P4 = 6.373962203531650;
+        P5 = 0.7003830644436881;
+        P6 = 0.03526249659989109;
+
+        Q0 = 440.4137358247522;
+        Q1 = 793.8265125199484;
+        Q2 = 637.3336333788311;
+        Q3 = 296.5642487796737;
+        Q4 = 86.78073220294608;
+        Q5 = 16.064177579206950;
+        Q6 = 1.7556671631826420;
+        Q7 = 0.088388347648318440;
+        ROOTPI = 2.506628274631001;
+        CUTOFF = 7.071067811865475;
+
+        ZABS = fabs(Z);
+        /*
+          |Z| > 37
+        */
+        if (ZABS > 37)
+            P = 0;
+        else
+        {
+            /*
+              |Z| <= 37
+            */
+            EXPNTL =exp(-ZABS*ZABS/2);
+            /*
+              |Z| < CUTOFF = 10/SQRT(2)
+            */
+            if ( ZABS < CUTOFF )
+                P = EXPNTL*((((((P6*ZABS + P5)*ZABS + P4)*ZABS + P3)*ZABS+ P2)*ZABS + P1)*ZABS + P0)/(((((((Q7*ZABS + Q6)*ZABS + Q5)*ZABS + Q4)*ZABS + Q3)*ZABS + Q2)*ZABS + Q1)*ZABS + Q0);
+            /*
+              |Z| >= CUTOFF.
+            */
+            else
+                P = EXPNTL/(ZABS + 1/(ZABS + 2/(ZABS + 3/(ZABS + 4/(ZABS + 0.65)))))/ROOTPI;
+
+        }
+        if ( Z > 0 ) P = 1 - P;
+
+        return(P);
+    }
+
+
+    /*
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+      !!                                                              !!
+      !! Functions needed to compute the  first order term  P_1       !!
+      !!                                                              !!
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    */
+
+    /*
+      !!
+      !! Function F(p,tt,a,b,gm)
+      !!
+    */
+    Real ff(Real p,Real tt,Real a, Real b, Real gm) {
+        Real phid;
+        Real aa, caux;
+        Real ppi= 3.14159265358979324;
+
+        aa=-(b*p-b*tt+a)/POW(2.0*(tt-p),0.5);
+
+        caux=2.0*POW(ppi,0.5)*PHID(aa);
+        aa=b*b-(1.0-gm)*(1.0-gm);
+        aa=aa/4.0;
+        phid=exp(-0.5*a*b)*exp(aa*(tt-p))*caux;
+
+        return phid;
+    }
+
+    /*
+      !!
+      !! Function  E(p,tt,a,b,gm)
+      !!
+    */
+    Real v(Real p, Real tt,Real a,Real b,Real gm)
+    {
+        Real result;
+        Real aa,caux;
+
+        aa=-(p*(a-b)+b*tt)/POW(2.0*p*tt*(tt-p),0.5);
+        caux=PHID(aa);
+
+        aa=exp(POW((a-b),2)/(4.0*tt))*exp(POW((1.0-gm),2)*tt/4.0)*POW(tt,0.5);
+        result=caux/aa;
+
+        return(result);
+    }
+
+    /*
+      !!
+      !! Fuction L(p,tt,a,b,c,gm)
+      !!
+    */
+    Real llold(Real p,Real tt, Real a, Real b,Real c, Real gm){
+        Real bvnd;
+        Real xx,yy,rho,caux;
+        Real ppi= 3.14159265358979324;
+        Real aa;
+
+        xx=(-a+b*(tt-p))/POW(2.0*(tt-p),0.5);
+        yy=(-a+b*tt+c)/POW(2.0*tt,0.5);
+        rho=POW((tt-p)/tt,0.5);
+        aa=b*b-(1.0-gm)*(1.0-gm);
+        aa=aa/4.0;
+        caux=ND2(-xx,-yy,rho);
+
+        bvnd=2.0*POW(ppi,0.5)*exp(-a*b*0.5)*exp(aa*(tt-p))*caux;
+        return(bvnd);
+    }
+
+    /*
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+      !!                                                              !!
+      !! Functions needed to compute the  second order term  P_2      !!
+      !!                                                              !!
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    */
+
+    /*
+      !!
+      !! Function  D_E(s,p,tt,a,b,gm)
+      !!
+    */
+    Real dvv(Real s,Real p,Real tt,Real a,Real b,Real gm)
+    {
+        double ppi= 3.14159265358979324;
+        Real result;
+        Real aa,caux,caux1,caux2;
+        Real xx,yy,rho;
+
+        aa=(a*p+b*(tt-p))/POW(2.0*p*tt*(tt-p),0.5);
+        caux=PHID(aa);
+
+        aa=exp((a-b)*(a-b)/(4.0*tt))*exp(POW((1.0-gm),2)*tt/4.0)*POW(tt,0.5);
+        caux=-caux/aa;
+
+        xx=(a*p+b*(tt-p))/POW(2.0*tt*p*(tt-p),0.5);
+        yy=(a*s+b*(tt-s))/POW(2.0*tt*s*(tt-s),0.5);
+        rho=POW((s*(tt-p))/(p*(tt-s)),0.5);
+        caux1=ND2(-xx,-yy,rho);
+        caux1=caux1/aa;
+
+
+        aa=exp((a+b)*(a+b)/(4.0*tt))*exp(POW((1.0-gm),2)*tt/4.0)*POW(tt,0.5);
+
+        xx=(a*p-b*(tt-p))/POW(2.0*tt*p*(tt-p),0.5);
+        yy=(a*s-b*(tt-s))/POW(2.0*tt*s*(tt-s),0.5);
+        rho=POW((s*(tt-p))/(p*(tt-s)),0.5);
+        caux2=ND2(-xx,-yy,rho);
+        caux2=caux2/aa;
+        result=(caux+caux1+caux2)/(2.0*POW(ppi,0.5));
+        return(result);
+    }
+
+    /*
+      !!
+      !! Function D_F(s,p,tt,a,b,gm)
+      !!
+    */
+    Real dff(Real s, Real p,Real tt,Real a,Real b,Real gm)
+    {
+        Real result;
+        Real aa,caux,caux1,caux2;
+        Real xx,yy,rho;
+
+        xx=(a-b*(tt-p))/POW(2.0*(tt-p),0.5);
+        caux=-PHID(xx)*exp(-0.5*a*b);
+
+        xx=(a+b*(tt-p))/POW(2.0*(tt-p),0.5);
+        yy=(a+b*(tt-s))/POW(2.0*(tt-s),0.5);
+        rho=POW((tt-p)/(tt-s),0.5);
+        caux1=ND2(-xx,-yy,rho);
+        caux1=exp(0.5*a*b)*caux1;
+
+        xx=(a-b*(tt-p))/POW(2.0*(tt-p),0.5);
+        yy=(a-b*(tt-s))/POW(2.0*(tt-s),0.5);
+        rho=POW((tt-p)/(tt-s),0.5);
+        caux2=ND2(-xx,-yy,rho);
+        caux2=exp(-0.5*a*b)*caux2;
+
+        aa=exp((b*b-(1.0-gm)*(1.0-gm))*(tt-s)/4.0);
+
+        result=(caux+caux1+caux2)*aa;
+        return(result);
+    }
+
+
+    /*
+      !!
+      !! Function D_L(s,p,a,b,c,gm)
+      !!
+    */
+    Real dll(Real s,Real p,Real tt,Real a,Real b,Real c,Real gm)
+    {
+        Real result;
+        Real aa,caux,caux1;
+        Real sigmarho[4],limit[4],epsi;
+
+        epsi=1.e-12;
+        limit[1]=(a+b*(tt-p))/POW(2.0*(tt-p),0.5);
+        limit[2]=(a+b*(tt-s))/POW(2.0*(tt-s),0.5);
+        limit[3]=(a+b*tt+c)/POW(2.0*tt,0.5);
+        sigmarho[1]=POW((tt-p)/(tt-s),0.5);
+        sigmarho[2]=POW((tt-p)/tt,0.5);
+        sigmarho[3]=POW((tt-s)/tt,0.5);
+
+        caux=exp(0.5*a*b)*tvtl(0,limit,sigmarho,epsi);
+
+        limit[1]=(a-b*(tt-p))/POW(2.0*(tt-p),0.5);
+        limit[2]=(-a+b*(tt-s))/POW(2.0*(tt-s),0.5);
+        limit[3]=(-a+b*tt+c)/POW(2.0*tt,0.5);
+        sigmarho[1]=-POW((tt-p)/(tt-s),0.5);
+        sigmarho[2]=-POW((tt-p)/tt,0.5);
+        sigmarho[3]=POW((tt-s)/tt,0.5);
+
+        caux1=-exp(-0.5*a*b)*tvtl(0,limit,sigmarho,epsi);
+
+        aa=exp((b*b-(1.0-gm)*(1.0-gm))*(tt-s)/4.0);
+
+
+        result=(caux+caux1)*aa;
+
+        return(result);
+    }
+
+    /*
+      !!
+      !! Derivative with respect to a of the function D_F(s,p,tt,a,b,gm)
+      !!
+    */
+    Real ddff(Real s, Real p,Real tt,Real a,Real b,Real gm)
+    {
+        Real aa,caux,caux1,caux2,caux3,caux4;
+        Real xx,yy,rho;
+        Real result;
+        double ppi= 3.14159265358979324;
+
+        xx=(a-b*(tt-p))/POW(2.0*(tt-p),0.5);
+        caux=PHID(xx)*exp(-0.5*a*b);
+
+        xx=(a+b*(tt-p))/POW(2.0*(tt-p),0.5);
+        yy=(a+b*(tt-s))/POW(2.0*(tt-s),0.5);
+        rho=POW((tt-p)/(tt-s),0.5);
+        caux1=ND2(-xx,-yy,rho);
+        caux1=exp(0.5*a*b)*caux1;
+
+        xx=(a-b*(tt-p))/POW(2.0*(tt-p),0.5);
+        yy=(a-b*(tt-s))/POW(2.0*(tt-s),0.5);
+        rho=POW((tt-p)/(tt-s),0.5);
+        caux2=ND2(-xx,-yy,rho);
+        caux2=-exp(-0.5*a*b)*caux2;
+
+        caux=0.5*b*(caux+caux1+caux2);
+
+        xx=(a+b*(tt-p))/POW(2.0*(tt-p),0.5);
+        yy=b*POW((p-s),0.5)/POW(2.0,0.5);
+        caux1=exp(-0.5*xx*xx)*exp(0.5*a*b)*PHID(yy)/(2.0*POW(ppi*(tt-p),0.5));
+
+
+        xx=(a+b*(tt-s))/POW(2.0*(tt-s),0.5);
+        yy=a*POW((p-s),0.5)/POW(2.0*(tt-p)*(tt-s),0.5);
+        caux2=exp(-0.5*xx*xx)*exp(0.5*a*b)*PHID(yy)/(2.0*POW(ppi*(tt-s),0.5));
+
+        xx=(a-b*(tt-p))/POW(2.0*(tt-p),0.5);
+        yy=b*POW((p-s),0.5)/POW(2.0,0.5);
+        caux3=-exp(-0.5*xx*xx)*exp(-0.5*a*b)*PHID(yy)/(2.0*POW(ppi*(tt-p),0.5));
+
+
+        xx=(a-b*(tt-s))/POW(2.0*(tt-s),0.5);
+        yy=a*POW((p-s),0.5)/POW(2.0*(tt-p)*(tt-s),0.5);
+        caux4=exp(-0.5*xx*xx)*exp(-0.5*a*b)*PHID(yy)/(2.0*POW(ppi*(tt-s),0.5));
+
+
+
+        aa=exp((b*b-(1.0-gm)*(1.0-gm))*(tt-p)/4.0);
+
+
+        result=(caux+caux1+caux2+caux3+caux4)*aa;
+        return(result);
+    }
+
+    /*
+      !!
+      !! Derivative with respect to a of the function D_L(s,p,tt,a,b,c,gm)
+      !!
+    */
+    Real ddll(Real s,Real p,Real tt, Real ax, Real bx,Real c, Real gm)
+    {
+        static Real result;
+        static Real aa,caux,caux1;
+        static Real sigmarho[4],limit[4];
+        static int idx;
+        Real epsi;
+
+        epsi=1.e-12;
+        limit[1]=(ax+bx*(tt-p))/POW(2.0*(tt-p),0.5);
+        limit[2]=(ax+bx*(tt-s))/POW(2.0*(tt-s),0.5);
+        limit[3]=(ax+bx*tt+c)/POW(2.0*tt,0.5);
+        sigmarho[1]=POW((tt-p)/(tt-s),0.5);
+        sigmarho[2]=POW((tt-p)/tt,0.5);
+        sigmarho[3]=POW((tt-s)/tt,0.5);
+
+        caux=0.5*bx*tvtl(0,limit,sigmarho,epsi);
+
+
+        idx=1;
+        caux=caux+derivn3(limit,sigmarho,idx)/POW(2.0*(tt-p),0.5);
+
+        idx=2;
+        caux=caux+derivn3(limit,sigmarho,idx)/POW(2.0*(tt-s),0.5);
+
+        idx=3;
+        caux=caux+derivn3(limit,sigmarho,idx)/POW(2.0*tt,0.5);
+
+        caux=exp(0.5*ax*bx)*caux;
+
+        limit[1]=(ax-bx*(tt-p))/POW(2.0*(tt-p),0.5);
+        limit[2]=(-ax+bx*(tt-s))/POW(2.0*(tt-s),0.5);
+        limit[3]=(-ax+bx*tt+c)/POW(2.0*tt,0.5);
+        sigmarho[1]=-POW((tt-p)/(tt-s),0.5);
+        sigmarho[2]=-POW((tt-p)/tt,0.5);
+        sigmarho[3]=POW((tt-s)/tt,0.5);
+
+        caux1=0.5*bx*tvtl(0,limit,sigmarho,epsi);
+
+        idx=1;
+        caux1=caux1-derivn3(limit,sigmarho,idx)/POW(2.0*(tt-p),0.5);
+
+        idx=2;
+        caux1=caux1+derivn3(limit,sigmarho,idx)/POW(2.0*(tt-s),0.5);
+
+
+        idx=3;
+        caux1=caux1+derivn3(limit,sigmarho,idx)/POW(2.0*tt,0.5);
+
+        caux1=exp(-0.5*ax*bx)*caux1;
+
+
+        aa=exp((bx*bx-(1.0-gm)*(1.0-gm))*(tt-s)/4.0);
+
+        result=(caux+caux1)*aa;
+        return(result);
+    }
+
+    /*
+      !!
+      !!   Derivative with respect to a of the function D_E(s,p,tt,a,b,gm)
+      !!
+    */
+    Real ddvv(Real s, Real p, Real tt, Real a, Real b, Real gm)
+    {
+        static Real result;
+        static Real aa,caux,caux1,caux2,caux6;
+        static Real caux3,caux4,caux5,aux;
+        static Real xx,yy,rho;
+        static double ppi= 3.14159265358979324;
+
+        aa=(a*p+b*(tt-p))/POW(2.0*p*tt*(tt-p),0.5);
+        caux=PHID(aa);
+
+        aa=exp(-(a-b)*(a-b)/(4.0*tt))/tt;
+
+        caux=0.5*aa*caux*(a-b);
+
+        xx=(a*p+b*(tt-p))/POW(2.0*tt*p*(tt-p),0.5);
+        yy=(a*s+b*(tt-s))/POW(2.0*tt*s*(tt-s),0.5);
+        rho=POW((s*(tt-p))/(p*(tt-s)),0.5);
+        caux1=ND2(-xx,-yy,rho);
+        caux1=-0.5*aa*caux1*(a-b);
+
+
+        aa=exp(-(a+b)*(a+b)/(4.0*tt))/tt;
+
+        xx=(a*p-b*(tt-p))/POW(2.0*tt*p*(tt-p),0.5);
+        yy=(a*s-b*(tt-s))/POW(2.0*tt*s*(tt-s),0.5);
+        rho=POW((s*(tt-p))/(p*(tt-s)),0.5);
+        caux2=ND2(-xx,-yy,rho);
+        caux2=-0.5*aa*caux2*(a+b);
+
+        aa=-b*POW((p-s)/POW(2.0*p*s,0.5),0.5);
+        aux=POW(p/(ppi*tt*(tt-p)),0.5)*PHID(aa);
+
+        xx=(a+b)*(a+b)/(4.0*tt);
+        yy=POW((a*p-b*(tt-p)),2)/(4.0*p*tt*(tt-p));
+        caux3=aux*exp(-xx)*exp(-yy)/2.0;
+
+
+        xx=(a-b)*(a-b)/(4.0*tt);
+        yy=POW((a*p+b*(tt-p)),2)/(4.0*p*tt*(tt-p));
+        caux4=aux*exp(-xx)*exp(-yy)/2.0;
+
+        aa=a*POW((p-s)/POW(2.0*(tt-p)*(tt-s),0.5),0.5);
+        aux=POW(s/(ppi*tt*(tt-s)),0.5)*PHID(aa);
+
+        xx=(a+b)*(a+b)/(4.0*tt);
+        yy=POW((a*s-b*(tt-s)),2)/(4.0*s*tt*(tt-s));
+        caux5=aux*exp(-xx)*exp(-yy)/2.0;
+
+        xx=(a-b)*(a-b)/(4.0*tt);
+        yy=POW((a*s+b*(tt-s)),2)/(4.0*s*tt*(tt-s));
+        caux6=aux*exp(-xx)*exp(-yy)/2.0;
+
+        aux=exp((1.0-gm)*(1.0-gm)*tt/4.0)*POW(tt,0.5);
+
+        result=(caux+caux1+caux2+caux3+caux4+caux5+caux6)/(aux*2.0*POW(ppi,0.5));
+        return(result);
+    }
+
+    /*
+      !!
+      !! Derivn3 computes the derivatives of the trivariate cumulative normal
+      !! distribution with respect to one of the integration limits
+      !!
+    */
+    Real derivn3(Real limit[4],Real sigmarho[4], int idx)
+    {
+        static Real aa;
+        static Real xx,yy,rho,sc;
+        static double  ppi= 3.14159265358979324;
+        static Real deriv;
+        sc=POW(2.0*ppi,0.5);
+
+        if(idx==1)
+            {
+                aa=exp(-0.5*POW(limit[1],2));
+                xx=(limit[3]-sigmarho[2]*limit[1])/POW((1.0-POW(sigmarho[2],2)),0.5);
+                yy=(limit[2]-sigmarho[1]*limit[1])/POW((1.0-POW(sigmarho[1],2)),0.5);
+                rho=(sigmarho[3]-sigmarho[1]*sigmarho[2])/POW((1.0-sigmarho[1]*sigmarho[1])*(1.0-sigmarho[2]*sigmarho[2]),0.5);
+                deriv=aa*ND2(-xx,-yy,rho)/sc;
+            }
+        else
+            {
+                if(idx==2)
+                    {
+                        aa=exp(-0.5*limit[2]*limit[2]);
+                        xx=(limit[1]-sigmarho[1]*limit[2])/POW((1.0-POW(sigmarho[1],2)),0.5);
+                        yy=(limit[3]-sigmarho[3]*limit[2])/POW((1.0-POW(sigmarho[3],2)),0.5);
+                        rho=(sigmarho[2]-sigmarho[1]*sigmarho[3])/ \
+                            POW((1.0-sigmarho[1]*sigmarho[1])*(1.0-sigmarho[3]*sigmarho[3]),0.5);
+                        deriv=aa*ND2(-xx,-yy,rho)/sc;
+                    }
+                else
+                    {
+                        //!!! idx=3
+                        aa=exp(-0.5*limit[3]*limit[3]);
+
+                        xx=(limit[1]-sigmarho[2]*limit[3])/POW((1.0-POW(sigmarho[2],2)),0.5);
+                        yy=(limit[2]-sigmarho[3]*limit[3])/POW((1.0-POW(sigmarho[3],2)),0.5);
+                        rho=(sigmarho[1]-sigmarho[2]*sigmarho[3])/ \
+                            POW((1.0-sigmarho[2]*sigmarho[2])*(1.0-sigmarho[3]*sigmarho[3]),0.5);
+                        deriv=aa*ND2(-xx,-yy,rho)/sc;
+                    }
+
+            }
+        return(deriv);
+    }
+
+
+    Real BVTL(int NU, Real DH, Real DK, Real RRR );
+    Real TVTMFN(Real X, Real H1, Real H2, Real H3,
+                  Real R23, Real RUA, Real RUB, Real AR,
+                  Real RUC, int NUC);
+    Real ADONET(Real ZRO,Real ONE,Real EPS,
+                  Real(*TVTMFN)(Real X, Real H1, Real H2,
+                                  Real H3, Real R23, Real RUA,
+                                  Real RUB, Real AR, Real RUC,
+                                  int NUC));
+
+    Real tvtl(int NU, const Real limit[], const Real sigmarho[], Real epsi) {
+        /*
+          A function for computing trivariate normal and t-probabilities.
+
+          This function uses algorithms developed from the ideas
+          described in the papers:
+          R.L. Plackett, Biometrika 41(1954), pp. 351-360.
+          Z. Drezner, Math. Comp. 62(1994), pp. 289-294.
+          and uses adaptive integration.
+
+          The software given here is based on algorithms described in
+          the paper A. Genz: "Numerical Computation of Rectangular
+          Bivariate and Trivariate Normal and t Probabilities",
+          Statistics and Computing 14 (2004) 251-260.
+
+          This software has been developed by M.C. Recchioni based on
+          previous software developed by
+          Alan Genz
+          Department of Mathematics
+          Washington State University
+          Pullman, WA 99164-3113
+          Email : alangenz@wsu.edu
+          The software developed by A. Genz is available free of
+          charge in the website:
+          www.math.wsu.edu/faculty/genz/software/software.html
+
+          The software calculates the probability that
+          X(I) < H(I), for I = 1,2,3
+
+          NU        INTEGER degrees of freedom; use NU = 0 for normal cases.
+          LIMIT     REAL array of uppoer limits for probability distribution
+          SIGMARHO  REAL array of three correlation coefficients, should
+          contain the lower left portion of the correlation matrix.
+          SIGMARHO should contains the values r21, r31, r23 in that order.
+          EPSI      REAL required absolute accuracy; maximum accuracy for most
+          computations is approximately 1D-14
+
+        */
+
+        static Real result;
+        static Real  ONE=1.0, ZRO=0.0, EPS,  TVT;
+        static Real PT, R12, R13;
+        static double ppi= 3.14159265358979324;
+        EPS = max( 1.e-14, epsi );
+        PT=ppi/2.0;
+
+        NUC = NU;
+        H1 = limit[1];
+        H2 = limit[2];
+        H3 = limit[3];
+        R12 = sigmarho[1];
+        R13 = sigmarho[2];
+        R23 = sigmarho[3];
+        /*
+         *     Sort R's and check for special cases
+         */
+        if ( fabs(R12) > fabs(R13) ) {
+            H2 = H3;
+            H3 = limit[2];
+            R12 = R13;
+            R13 = sigmarho[1];
+        }
+
+        if ( fabs(R13) > fabs(R23) ) {
+            H1 = H2;
+            H2 = limit[1];
+            R23 = R13;
+            R13 = sigmarho[3];
+        }
+
+        TVT = 0.0;
+        if ( (fabs(H1) + fabs(H2) + fabs(H3)) < EPS ) TVT = ( 1 + ( asin(R12) + asin(R13) + asin(R23) )/PT )/8.0;
+
+        else  if ( (NU < 1) && ( (fabs(R12) + fabs(R13)) < EPS) )  TVT = PHID(H1)*BVTL( NU, H2, H3, R23 );
+
+        else  if ( (NU < 1) && ((fabs(R13) + fabs(R23))< EPS) ) TVT = PHID(H3)*BVTL( NU, H1, H2, R12 );
+
+        else if( (NU < 1) && ((fabs(R12) + fabs(R23))< EPS) ) TVT = PHID(H2)*BVTL( NU, H1, H3, R13 );
+
+        else if ( (1.0 - R23)< EPS ) TVT = BVTL( NU, H1, min( H2, H3 ), R12 );
+
+        else  if ( (R23 + 1.0) <EPS ) {
+            if  ( H2 > -H3 ) TVT = BVTL( NU, H1, H2, R12 ) - BVTL( NU, H1, -H3, R12 );}
+        else
+            {
+                /*
+                 *        Compute singular TVT value
+                 */
+                if ( NU < 1 ) TVT = BVTL( NU, H2, H3, R23 )*PHID(H1);
+
+                else if ( R23 > 0 ) TVT = BVTL( NU, H1, min( H2, H3 ), ZRO );
+
+                else if ( H2 > -H3 ) TVT = BVTL( NU, H1, H2, ZRO ) - BVTL( NU, H1, -H3, ZRO );
+
+                /*
+                 *        Use numerical integration to compute probability
+                 *
+                 */
+                RUA = asin( R12 );
+                RUB = asin( R13 );
+                AR = asin( R23);
+                RUC = SIGN( PT, AR ) - AR;
+                TVT = TVT + ADONET(ZRO, ONE, EPS, TVTMFN) / (4.0 * PT);
+            }
+        result = max( ZRO, min( TVT, ONE ) );
+
+        return(result);
+    }
+
+    void SINCS(Real v1,Real& v2, Real& v3);
+    Real PNTGND(int , Real ,Real ,Real ,
+                  Real ,Real ,Real ,Real );
+
+    Real TVTMFN(Real X, Real H1, Real H2, Real H3, Real R23,
+                  Real RUA, Real RUB, Real AR,Real RUC, int NUC ){
+        /*
+          Computes Plackett formula integrands
+        */
+
+        static Real R12=0.0, RR2=0, R13=0.0, RR3=0.0, R=0.0, RR=0.0;
+        const Real ZRO = 0.0;
+        Real result = 0.0;
+
+        SINCS( RUA*X, R12, RR2 );
+        SINCS( RUB*X, R13, RR3 );
+
+        if ( fabs(RUA)> 0 )  result += RUA*PNTGND( NUC, H1,H2,H3, R13,R23,R12,RR2);
+        if( fabs(RUB)>0 ) result += RUB*PNTGND( NUC, H1,H3,H2, R12,R23,R13,RR3 ) ;
+        if ( NUC > 0 )
+            {
+                SINCS( AR + RUC*X, R, RR );
+                result -= RUC*PNTGND( NUC, H2, H3, H1, ZRO, ZRO, R, RR );
+            }
+        return(result);
+    }
+    //
+
+
+    void SINCS(Real X, Real& SX, Real& CS )
+    {
+        /*
+          Computes SIN(X), COS(X)^2, with series approx. for |X| near PI/2
+        */
+        static Real PT, EE;
+        PT = 1.57079632679489661923132169163975;
+        EE = POW(( PT - fabs(X) ),2);
+
+        if ( EE < 5e-5 )
+            {
+                SX = SIGN( 1 - EE*( 1 - EE/12 )/2, X );
+                CS = EE*( 1 - EE*( 1 - 2*EE/15 )/3 );
+            }
+        else
+            {
+                SX = sin(X);
+                CS = 1 - SX*SX;
+            }
+    }
+    //
+
+    Real KRNRDT(Real, Real,
+                  Real(*TVTMFN)(Real, Real, Real, Real,
+                                  Real, Real, Real, Real, Real, int),
+                  Real& );
+
+    Real ADONET(Real A,Real B, Real TOL,Real(*TVTMFN)(Real X, Real H1, Real H2, Real H3, Real R23, Real RUA, Real RUB, Real AR, Real RUC, int NUC)){
+        //
+        //     One Dimensional Globally Adaptive Integration Function
+        //
+        int NL=100, I, IM, IP;
+        static Real EI[101], AI[101], BI[101], FI[101], FIN;
+        static Real result,ERR;
+
+
+        AI[1] = A;
+        BI[1] = B;
+        ERR = 1;
+        IP = 1;
+        IM = 1;
+        while ( ((4*ERR)> TOL) && (IM< NL) )
+            {
+                IM = IM + 1;
+                BI[IM] = BI[IP];
+                AI[IM] = (AI[IP] + BI[IP] )/2.0;
+                BI[IP] = AI[IM];
+                FI[IP] = KRNRDT( AI[IP], BI[IP], *TVTMFN, EI[IP] );
+                FI[IM] = KRNRDT( AI[IM], BI[IM], *TVTMFN, EI[IM] );
+
+                ERR = 0.0;
+                FIN = 0.0;
+                for(I = 1; I<=IM; I++)
+                    {
+                        if( EI[I] > EI[IP]) IP = I;
+                        FIN = FIN + FI[I];
+                        ERR = ERR + EI[I]*EI[I];
+                    }
+                ERR = POW( ERR,0.5 );
+            }
+        result=FIN;
+        //   ADONET = FIN
+        return(result);
+    }
+    //
+
+    Real KRNRDT(Real A, Real B,Real(*TVTMFN)(Real X, Real H1, Real H2, Real H3, Real R23, Real RUA, Real RUB, Real AR, Real RUC, int NUC),Real& ERR ){
+
+        //
+        //     Kronrod Rule
+        //
+        static Real  T, CEN, FC, WID, RESG, RESK;
+
+        static Real result;
+        //
+        //        The abscissae and weights are given for the interval (-1,1);
+        //        only positive abscissae and corresponding weights are given.
+        //
+        //        XGK    - abscissae of the 2N+1-point Kronrod rule:
+        //                 XGK(2), XGK(4), ...  N-point Gauss rule abscissae;
+        //                 XGK(1), XGK(3), ...  optimally added abscissae.
+        //        WGK    - weights of the 2N+1-point Kronrod rule.
+        //        WG     - weights of the N-point Gauss rule.
+        //
+        int J, N=11;
+
+        static Real  WG[7], WGK[13], XGK[13];
+
+        WG[1]= 0.2729250867779007;
+        WG[2]=0.05566856711617449;
+        WG[3]=0.1255803694649048;
+        WG[4]=0.1862902109277352;
+        WG[5]= 0.2331937645919914;
+        WG[6]= 0.2628045445102478;
+        //
+        XGK[1]= 0.0000000000000000;
+        XGK[2]= 0.9963696138895427;
+        XGK[3]= 0.9782286581460570;
+        XGK[4]= 0.9416771085780681;
+        XGK[5]= 0.8870625997680953;
+        XGK[6]= 0.8160574566562211;
+        XGK[7]= 0.7301520055740492;
+        XGK[8]= 0.6305995201619651;
+        XGK[9]= 0.5190961292068118;
+        XGK[10]= 0.3979441409523776;
+        XGK[11]= 0.2695431559523450;
+        XGK[12]= 0.1361130007993617;
+        //
+        WGK[1]=0.1365777947111183;
+        WGK[2]=0.9765441045961290e-02;
+        WGK[3]=0.2715655468210443e-01;
+        WGK[4]=0.4582937856442671e-01;
+        WGK[5]=0.6309742475037484e-01;
+        WGK[6]=0.7866457193222764e-01;
+        WGK[7]=0.9295309859690074e-01;
+        WGK[8]=0.1058720744813894;
+        WGK[9]=0.1167395024610472;
+        WGK[10]=0.1251587991003195;
+        WGK[11]=0.1312806842298057;
+        WGK[12]=0.1351935727998845;
+        /*
+          Major variables
+
+          CEN  - mid point of the interval
+          WID  - half-length of the interval
+          RESG - result of the N-point Gauss formula
+          RESK - result of the 2N+1-point Kronrod formula
+          Compute the 2N+1-point Kronrod approximation to
+          the integral, and estimate the absolute error.
+        */
+        WID = ( B - A )/2.0;
+        CEN = ( B + A )/2.0;
+
+        FC = TVTMFN(CEN,H1, H2,  H3, R23, RUA, RUB, AR, RUC, NUC);
+
+        RESG = FC*WG[0+1];
+        RESK = FC*WGK[0+1];
+
+        for (J = 1; J<= N; J++)
+            {
+                T = WID*XGK[J+1];
+                FC = TVTMFN(CEN-T,H1, H2,  H3, R23, RUA, RUB, AR, RUC, NUC )+TVTMFN(CEN+T,H1, H2,  H3, R23, RUA, RUB, AR, RUC, NUC );
+                RESK = RESK + WGK[J+1]*FC;
+                if((J-2*int(J/2)) == 0 ) RESG = RESG + WG[1+J/2]*FC;
+            }
+        result = WID*RESK;
+        ERR = fabs( WID*( RESK - RESG ) );
+        return(result);
+    }
+
+    //
+    Real  STUDNT(int NU, Real T )
+    {
+        /*
+          Student t Distribution Function
+        */
+        static int J;
+        static Real  ZRO=0.0, ONE=1.0;
+        static Real  CSSTHE, SNTHE, POLYN, TT, TS, RN;
+        static Real result;
+
+
+        if ( NU < 1 ) result= PHID( T );
+        else if ( NU == 1 ) result = ( 1 + 2.0*atan(T)/PI )/2.0;
+        else if ( NU == 2 ) result = ( 1 + T/POW(( 2.0 + T*T),0.5))/2.0;
+        else
+            {
+                TT = T*T;
+                CSSTHE = 1/( 1 + TT/double(NU) );
+                POLYN = 1;
+                for( J = NU-2; J>= 2; J=J-2)
+                    {
+                        POLYN = 1.0 + ( J - 1.0 )*CSSTHE*POLYN/(double)J;
+                    }
+                if ((NU-2*int(NU/2) ) == 1 )
+                    {
+                        RN = NU;
+                        TS = T/POW(RN,0.5);
+                        result = ( 1.0 + 2.0*( atan(TS) + TS*CSSTHE*POLYN )/PI )/2.0;
+                    }
+                else
+                    {
+                        SNTHE = T/POW(( NU + TT ),0.5);
+                        result = ( 1 + SNTHE*POLYN )/2.0;
+                    }
+                result = max( ZRO, min( result, ONE ) );
+            }
+        return(result);
+    }
+
+    //
+    Real BVTL(int NU, Real DH, Real DK, Real R )
+    {
+        /*
+          A function for computing bivariate t probabilities.
+          This function is based on the method described by
+          Dunnett, C.W. and M. Sobel, (1954),
+          A bivariate generalization of Student's t-distribution
+          with tables for certain special cases,
+          Biometrika 41, pp. 153-169.
+          The software given here has been developed by M.C. Recchioni based on previous
+          software developed by
+          Alan Genz
+          Department of Mathematics
+          Washington State University
+          Pullman, WA 99164-3113
+          Email : alangenz@wsu.edu
+          The software developed by A. Genz is available free of charge in
+          the website: www.math.wsu.edu/faculty/genz/software/software.html
+          ***
+
+          BVTL - calculate the probability that X < DH and Y < DK.
+
+          parameters
+
+          NU number of degrees of freedom
+          DH 1st lower integration limit
+          DK 2nd lower integration limit
+          R   correlation coefficient
+        */
+        static int  J, HS, KS;
+        static Real  TPI, ORS, HRK, KRH, BVT, SNU;
+        static Real  GMPH, GMPK, XNKH, XNHK, QHRK, HKN, HPK, HKRN;
+        static Real  BTNCKH, BTNCHK, BTPDKH, BTPDHK, ONE, EPS;
+        static Real result;
+        ONE = 1;
+        EPS = 1e-15;
+        if ( NU <1 ) result = ND2( -DH, -DK, R );
+
+        else if ( (1 - R)<= EPS ) result = STUDNT( NU, min( DH, DK ) );
+
+        else  if( (R + 1)<=EPS )
+            {
+                if( DH > -DK ) result = STUDNT( NU, DH ) - STUDNT( NU, -DK );
+                else
+                    result = 0.0;
+            }
+        else
+            {
+                TPI = 2.0*PI;
+                SNU = (double)NU;
+                SNU = POW(SNU,0.5);
+                ORS = 1.0 - R*R;
+                HRK = DH - R*DK;
+                KRH = DK - R*DH;
+                if((fabs(HRK) + ORS)> 0 )
+                    {
+                        XNHK = HRK*HRK/( HRK*HRK + ORS*( NU + DK*DK ) );
+                        XNKH = KRH*KRH/( KRH*KRH+ ORS*( NU + DH*DH ) );
+                    }
+                else
+                    {
+                        XNHK = 0.0;
+                        XNKH = 0.0;
+                    }
+
+                HS =(int)SIGN( ONE, DH - R*DK );
+                KS =(int)SIGN( ONE, DK - R*DH );
+                if((NU-2*(int)(NU/2))==0 )
+                    {
+                        BVT = atan2( POW(ORS,0.5), -R )/TPI;
+                        GMPH = DH/POW( 16*( NU + DH*DH ),0.5 );
+                        GMPK = DK/POW( 16*( NU + DK*DK),0.5);
+                        BTNCKH = 2*atan2( POW( XNKH,0.5 ), POW(( 1-XNKH),0.5) )/PI;
+                        BTPDKH = 2*POW( XNKH*( 1 - XNKH ),0.5 )/PI;
+                        BTNCHK = 2*atan2( POW( XNHK,0.5 ), POW((1 - XNHK),0.5) )/PI;
+                        BTPDHK = 2*POW( XNHK*( 1 - XNHK ),0.5 )/PI;
+                        for( J = 1; J<= NU/2;J++)
+                            {
+                                BVT = BVT + GMPH*( 1 + KS*BTNCKH );
+                                BVT = BVT + GMPK*( 1 + HS*BTNCHK );
+                                BTNCKH = BTNCKH + BTPDKH;
+                                BTPDKH = 2*J*BTPDKH*( 1 - XNKH )/( 2*J + 1 );
+                                BTNCHK = BTNCHK + BTPDHK;
+                                BTPDHK = 2*J*BTPDHK*( 1 - XNHK )/( 2*J + 1 );
+                                GMPH = GMPH*( 2*J - 1 )/( 2*J*( 1 + DH*DH/NU ) );
+                                GMPK = GMPK*( 2*J - 1 )/( 2*J*( 1 + DK*DK/NU ) );
+                            }
+                    }
+                else
+                    {
+                        QHRK = POW((DH*DH + DK*DK - 2*R*DH*DK + NU*ORS),0.5 ) ;
+                        HKRN = DH*DK + R*NU ;
+                        HKN = DH*DK - NU;
+                        HPK = DH + DK;
+                        BVT = atan2( -SNU*( HKN*QHRK + HPK*HKRN ),HKN*HKRN-NU*HPK*QHRK )/TPI;
+                        if ( BVT < -EPS ) BVT = BVT + 1;
+                        GMPH = DH/( TPI*SNU*( 1 + DH*DH/NU ) );
+                        GMPK = DK/( TPI*SNU*( 1 + DK*DK/NU ) );
+                        BTNCKH = POW( XNKH,0.5 );
+                        BTPDKH = BTNCKH;
+                        BTNCHK = POW( XNHK,0.5 );
+                        BTPDHK = BTNCHK;
+                        for( J = 1;J<= ( NU - 1 )/2; J++)
+                            {
+                                BVT = BVT + GMPH*( 1 + KS*BTNCKH );
+                                BVT = BVT + GMPK*( 1 + HS*BTNCHK );
+                                BTPDKH = ( 2*J - 1 )*BTPDKH*( 1 - XNKH )/( 2*J );
+                                BTNCKH = BTNCKH + BTPDKH;
+                                BTPDHK = ( 2*J - 1 )*BTPDHK*( 1 - XNHK )/( 2*J );
+                                BTNCHK = BTNCHK + BTPDHK;
+                                GMPH = 2*J*GMPH/( ( 2*J + 1 )*( 1 + DH*DH/NU ) );
+                                GMPK = 2*J*GMPK/( ( 2*J + 1 )*( 1 + DK*DK/NU ) );
+                            }
+                    }
+                result = BVT;
+            }
+
+        return(result);
+
+    }
+
+
+
+
+      Real PNTGND(int NUC, Real BA, Real BB, Real BC, Real RA, Real RB, Real R, Real RR) {
+          /*
+            Computes Plackett formula integrand
+          */
+          static Real DT, FT, BT,result;
+
+          result = 0.0;
+          DT = RR*( RR - POW(( RA - RB ),2) - 2*RA*RB*( 1 - R ) );
+          if( DT > 0 ) {
+              BT = ( BC*RR + BA*( R*RB - RA ) + BB*( R*RA -RB ) )/POW(DT,0.5);
+              FT = POW(( BA - R*BB ),0.5)/RR + BB*BB;
+              if( NUC<1 ) {
+                  if ( (BT > -10) && (FT <100) ) {
+                      result = exp( -FT/2 );
+                      if ( BT <10 ) result= result*PHID(BT);
+                  } else {
+                      FT = POW((1 + FT/NUC),0.5);
+                      result = STUDNT( NUC, BT/FT )/POW(FT,NUC);
+                  }
+              }
+          }
+          return(result);
+      }
+
+
+
+    //***********************************************************
+    Real ND2(Real a, Real b, Real rho ){
+        /*
+         *     A function for computing bivariate normal probabilities.
+         *     This function is based on the method described by
+         *     Z. Drezner and G.O. Wesolowsky, (1989),
+         *     On the computation of the bivariate normal integral,
+         *     Journal of Statist. Comput. Simul. 35, pp. 101-107,
+         *     with major modifications for double precision, and for |R| close to 1.
+         *     The software given here has been developed by M.C. Recchioni based on previous
+         *     software developed by:
+         *     Alan Genz
+         *     Department of Mathematics
+         *     Washington State University
+         *     Pullman, WA 99164-3113
+         *     Email : alangenz@wsu.edu
+         *     The software developed by A. Genz is available free of charge in the website:
+         *     www.math.wsu.edu/faculty/genz/software/software.html
+         *
+         *
+         *      ND2 calculates the probability that X > DH and Y > DK.
+         *      Note: Prob( X < DH, Y < DK ) = ND2( -DH, -DK, R ).
+         *
+         * Parameters
+         *
+         *   DH  DOUBLE PRECISION, integration limit
+         *   DK  DOUBLE PRECISION, integration limit
+         *   R   DOUBLE PRECISION, correlation coefficient
+         */
+        static double TWOPI = 6.283185307179586;
+        static Real result, DK, DH, R;
+        static int I, IS, LG, NG;
+
+        static Real XL[11][4], WL[11][4], AS, AA, BB, C, D, RS, XS, BVN;
+        static Real SN, ASR, H, K, BS, HS, HK;
+        //  Gauss Legendre Points and Weights, N =  6
+        //  DATA ( W(I,1), X(I,1), I = 1,3) /
+        WL[1][1]=0.1713244923791705;
+        XL[1][1]=-0.9324695142031522;
+        WL[2][1]= 0.3607615730481384;
+        XL[2][1]=-0.6612093864662647;
+        WL[3][1]= 0.4679139345726904;
+        XL[3][1]=-0.2386191860831970;
+
+        //  Gauss Legendre Points and Weights, N = 12
+        //  DATA ( W(I,2), X(I,2), I = 1,6) /
+        WL[1][2]=0.4717533638651177e-01;
+        XL[1][2]=-0.9815606342467191;
+        WL[2][2]=  0.1069393259953183;
+        XL[2][2]=-0.9041172563704750;
+        WL[3][2]=  0.1600783285433464;
+        XL[3][2]=-0.7699026741943050;
+        WL[4][2]=  0.2031674267230659;
+        XL[4][2]=-0.5873179542866171;
+        WL[5][2]=  0.2334925365383547;
+        XL[5][2]=-0.3678314989981802;
+        WL[6][2] = 0.2491470458134029;
+        XL[6][2]=-0.1252334085114692;
+
+        //  Gauss Legendre Points and Weights, N = 20
+        //  DATA ( W(I,3), X(I,3), I = 1, 10 ) /
+        WL[1][3]=0.1761400713915212e-01;
+        XL[1][3]=-0.9931285991850949;
+        WL[2][3]=0.4060142980038694e-01;
+        XL[2][3]=-0.9639719272779138;
+        WL[3][3]=0.6267204833410906e-01;
+        XL[3][3]=-0.9122344282513259;
+        WL[4][3]=0.8327674157670475e-01;
+        XL[4][3]=-0.8391169718222188;
+        WL[5][3]=0.1019301198172404;
+        XL[5][3]=-0.7463319064601508;
+        WL[6][3]=0.1181945319615184;
+        XL[6][3]=-0.6360536807265150;
+        WL[7][3]=0.1316886384491766;
+        XL[7][3]=-0.5108670019508271;
+        WL[8][3]=0.1420961093183821;
+        XL[8][3]=-0.3737060887154196;
+        WL[9][3]=0.1491729864726037;
+        XL[9][3]=-0.2277858511416451;
+        WL[10][3]=0.1527533871307259;
+        XL[10][3]=-0.7652652113349733e-01;
+
+        R=rho;
+        DH=a;
+        DK=b;
+
+        if( fabs(R) < 0.3 ) {
+            NG = 1;
+            LG = 3; }
+        else if ( fabs(R) < 0.75 ) {
+            NG = 2;
+            LG = 6;}
+        else{
+            NG = 3;
+            LG = 10;
+        }
+        H = DH;
+        K = DK;
+        HK = H*K;
+
+        BVN = 0.0 ;
+        if( fabs(R) < 0.925 ) {
+            if( fabs(R) > 0 ) {
+                HS = ( H*H + K*K )/2;
+                ASR = asin(R);
+                for (I = 1;I<= LG; I++){
+                    for( IS = -1; IS<= 1; IS=IS+2){
+                        SN = sin( ASR*(  IS*XL[I][NG] + 1 )/2 );
+                        BVN = BVN + WL[I][NG]*exp( ( SN*HK-HS )/( 1.0-SN*SN ) );
+
+                    }
+                }
+                BVN = BVN*ASR/( 2*TWOPI );
+
+            }
+
+            BVN = BVN + PHID(-H)*PHID(-K);
+
+        }
+        else
+            {
+                if ( R < 0 ) {
+                    K = -K;
+                    HK = -HK;
+                }
+
+                if( fabs(R) <1 ) {
+                    AS = ( 1 - R )*( 1 + R );
+                    AA = POW(AS,0.5);
+
+                    BS = POW(( H - K ),2);
+                    C = ( 4 - HK )/8 ;
+                    D = ( 12 - HK )/16;
+                    ASR = -( BS/AS + HK )/2;
+                    if( ASR > -100 ) BVN = AA*exp(ASR)*( 1 - C*( BS - AS )*( 1 - D*BS/5 )/3 + C*D*AS*AS/5 );
+                    if( -HK<100 ){
+                        BB = POW(BS,0.5);
+                        BVN = BVN - exp( -HK/2 )*POW(TWOPI,0.5)*PHID(-BB/AA)*BB*( 1 - C*BS*( 1 - D*BS/5 )/3 );
+                    }
+                    AA = AA/2   ;
+                    for (I = 1; I<= LG;I++){
+                        for( IS = -1; IS<=1; IS=IS+2){
+                            XS =POW( ( AA*(  IS*XL[I][NG] + 1 ) ),2)  ;
+                            RS = POW( (1 - XS),2 );
+                            ASR = -( BS/XS + HK )/2;
+                            if ( ASR > -100 ) {
+
+                                BVN = BVN + AA*WL[I][NG]*exp( ASR )*(exp( -HK*( 1 - RS )/( 2*( 1 + RS ) ) )/RS- ( 1 + C*XS*( 1 + D*XS ) ) );
+
+
+                            }
+                        }
+                    }
+                    BVN = -BVN/TWOPI;
+                }
+                if ( R > 0 )  {
+
+                    BVN =  BVN + PHID( -max( H, K ) );
+
+                }
+                else
+                    {
+                        BVN = -BVN;
+                        if( K > H ) BVN = BVN + PHID(K) - PHID(H);
+                    }
+            }
+
+
+        result=BVN;
+
+        return(result);
+
+    }
+
+        struct integr_adapter {
+            ext::shared_ptr<YieldTermStructure> r;
+            explicit integr_adapter(const ext::shared_ptr<GeneralizedBlackScholesProcess>& process)
+            : r(*(process->riskFreeRate())) {}
+            Real operator()(Real t1,Real t2) const {
+                return r->forwardRate(t1,t2,Continuous) * (t2-t1);
+            }
+        };
+
+        struct integalpha_adapter {
+            ext::shared_ptr<YieldTermStructure> r;
+            ext::shared_ptr<YieldTermStructure> q;
+            explicit integalpha_adapter(
+                const ext::shared_ptr<GeneralizedBlackScholesProcess>& process)
+            : r(*(process->riskFreeRate())), q(*(process->dividendYield())) {}
+            Real operator()(Real t1,Real t2) const {
+                Real alpha = r->forwardRate(t1,t2,Continuous)
+                           - q->forwardRate(t1,t2,Continuous);
+                return alpha * (t2-t1);
+            }
+        };
+
+        struct alpha_adapter {
+            ext::shared_ptr<YieldTermStructure> r;
+            ext::shared_ptr<YieldTermStructure> q;
+            explicit alpha_adapter(const ext::shared_ptr<GeneralizedBlackScholesProcess>& process)
+            : r(*(process->riskFreeRate())), q(*(process->dividendYield())) {}
+            Real operator()(Real t) const {
+                return r->forwardRate(t,t,Continuous)
+                     - q->forwardRate(t,t,Continuous);
+            }
+        };
+
+        struct sigmaq_adapter {
+            ext::shared_ptr<BlackVolTermStructure> v;
+            Real s;
+            explicit sigmaq_adapter(const ext::shared_ptr<GeneralizedBlackScholesProcess>& process)
+            : v(*(process->blackVolatility())), s(process->x0()) {}
+            Real operator()(Real t) const {
+                Real sigma = v->blackForwardVol(t,t,s,true);
+                return sigma*sigma;
+            }
+        };
+
+        struct integs_adapter {
+            ext::shared_ptr<BlackVolTermStructure> v;
+            Real s;
+            explicit integs_adapter(const ext::shared_ptr<GeneralizedBlackScholesProcess>& process)
+            : v(*(process->blackVolatility())), s(process->x0()) {}
+            Real operator()(Real t1,Real t2) const {
+                return v->blackForwardVariance(t1,t2,s,true);
+            }
+        };
+
+    }
+
+
+    PerturbativeBarrierOptionEngine::PerturbativeBarrierOptionEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process, Natural order, bool zeroGamma)
+    : process_(std::move(process)), order_(order), zeroGamma_(zeroGamma) {
+        registerWith(process_);
+    }
+
+    void PerturbativeBarrierOptionEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.barrierType == Barrier::UpOut,
+                   "this engine only manages up-and-out options");
+
+        QL_REQUIRE(arguments_.rebate == 0.0,
+                   "this engine does not manage non-null rebates");
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff && payoff->optionType() == Option::Put,
+                   "this engine only manages put options");
+
+        Real stock = process_->x0();
+        Real kprice = payoff->strike();
+        Real hbarr = arguments_.barrier;
+
+        Time tauMin = 0.0;
+        Time tauMax = process_->time(arguments_.exercise->lastDate());
+
+        QL_REQUIRE(order_ <= 2, "order must be <= 2");
+
+        int igm = zeroGamma_ ? 0 : 1;
+        
+        results_.value = BarrierUPD(kprice, stock, hbarr,
+                                    tauMin, tauMax, order_, igm,
+                                    integr_adapter(process_),
+                                    integalpha_adapter(process_),
+                                    integs_adapter(process_),
+                                    alpha_adapter(process_),
+                                    sigmaq_adapter(process_));
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>quantodoublebarrieroption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Thema Consulting SA
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/barrieroption/quantodoublebarrieroption.hpp>
+
+namespace QuantLib {
+
+    QuantoDoubleBarrierOption::QuantoDoubleBarrierOption(
+                        DoubleBarrier::Type barrierType,
+                        Real barrier_lo,
+                        Real barrier_hi,
+                        Real rebate,
+                        const ext::shared_ptr<StrikedTypePayoff>& payoff,
+                        const ext::shared_ptr<Exercise>& exercise)
+    : DoubleBarrierOption(barrierType, barrier_lo, barrier_hi, rebate, payoff, exercise) {}
+
+    Real QuantoDoubleBarrierOption::qvega() const {
+        calculate();
+        QL_REQUIRE(qvega_ != Null<Real>(),
+                   "exchange rate vega calculation failed");
+        return qvega_;
+    }
+
+    Real QuantoDoubleBarrierOption::qrho() const {
+        calculate();
+        QL_REQUIRE(qrho_ != Null<Real>(),
+                   "foreign interest rate rho calculation failed");
+        return qrho_;
+    }
+
+    Real QuantoDoubleBarrierOption::qlambda() const {
+        calculate();
+        QL_REQUIRE(qlambda_ != Null<Real>(),
+                   "quanto correlation sensitivity calculation failed");
+        return qlambda_;
+    }
+
+    void QuantoDoubleBarrierOption::setupExpired() const {
+        DoubleBarrierOption::setupExpired();
+        qvega_ = qrho_ = qlambda_ = 0.0;
+    }
+
+    void QuantoDoubleBarrierOption::fetchResults(
+                                      const PricingEngine::results* r) const {
+        DoubleBarrierOption::fetchResults(r);
+        const auto* quantoResults = dynamic_cast<const QuantoDoubleBarrierOption::results*>(r);
+        QL_ENSURE(quantoResults != nullptr, "no quanto results returned from pricing engine");
+        qrho_    = quantoResults->qrho;
+        qvega_   = quantoResults->qvega;
+        qlambda_ = quantoResults->qlambda;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>vannavolgabarrierengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2013 Yue Tian
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/barrieroption/vannavolgabarrierengine.hpp>
+#include <ql/experimental/barrieroption/vannavolgainterpolation.hpp>
+#include <ql/experimental/fx/blackdeltacalculator.hpp>
+#include <ql/math/matrix.hpp>
+#include <ql/pricingengines/barrier/analyticbarrierengine.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <ql/quotes/simplequote.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
+#include <ql/time/calendars/nullcalendar.hpp>
+#include <utility>
+
+using std::pow;
+using std::log;
+using std::sqrt;
+
+namespace QuantLib {
+
+    VannaVolgaBarrierEngine::VannaVolgaBarrierEngine(Handle<DeltaVolQuote> atmVol,
+                                                     Handle<DeltaVolQuote> vol25Put,
+                                                     Handle<DeltaVolQuote> vol25Call,
+                                                     Handle<Quote> spotFX,
+                                                     Handle<YieldTermStructure> domesticTS,
+                                                     Handle<YieldTermStructure> foreignTS,
+                                                     const bool adaptVanDelta,
+                                                     const Real bsPriceWithSmile)
+    : atmVol_(std::move(atmVol)), vol25Put_(std::move(vol25Put)), vol25Call_(std::move(vol25Call)),
+      T_(atmVol_->maturity()), spotFX_(std::move(spotFX)), domesticTS_(std::move(domesticTS)),
+      foreignTS_(std::move(foreignTS)), adaptVanDelta_(adaptVanDelta),
+      bsPriceWithSmile_(bsPriceWithSmile) {
+        QL_REQUIRE(vol25Put_->delta() == -0.25, "25 delta put is required by vanna volga method");
+        QL_REQUIRE(vol25Call_->delta() == 0.25, "25 delta call is required by vanna volga method");
+
+        QL_REQUIRE(vol25Put_->maturity() == vol25Call_->maturity() &&
+                       vol25Put_->maturity() == atmVol_->maturity(),
+                   "Maturity of 3 vols are not the same");
+
+        QL_REQUIRE(!domesticTS_.empty(), "domestic yield curve is not defined");
+        QL_REQUIRE(!foreignTS_.empty(), "foreign yield curve is not defined");
+
+        registerWith(atmVol_);
+        registerWith(vol25Put_);
+        registerWith(vol25Call_);
+        registerWith(spotFX_);
+        registerWith(domesticTS_);
+        registerWith(foreignTS_);
+    }
+
+    void VannaVolgaBarrierEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.barrierType == Barrier::UpIn || arguments_.barrierType == Barrier::UpOut ||
+            arguments_.barrierType == Barrier::DownIn || arguments_.barrierType == Barrier::DownOut,
+            "Invalid barrier type");
+
+        const Real sigmaShift_vega = 0.0001;
+        const Real sigmaShift_volga = 0.0001;
+        const Real spotShift_delta = 0.0001 * spotFX_->value();
+        const Real sigmaShift_vanna = 0.0001;
+
+        Handle<Quote> x0Quote(
+            ext::make_shared<SimpleQuote>(spotFX_->value())); //used for shift
+        Handle<Quote> atmVolQuote(
+            ext::make_shared<SimpleQuote>(atmVol_->value())); //used for shift
+
+        ext::shared_ptr<BlackVolTermStructure> blackVolTS =
+            ext::make_shared<BlackConstantVol>(
+                Settings::instance().evaluationDate(),
+                NullCalendar(), atmVolQuote, Actual365Fixed());
+        ext::shared_ptr<BlackScholesMertonProcess> stochProcess =
+            ext::make_shared<BlackScholesMertonProcess>(
+                                 x0Quote,
+                                 foreignTS_,
+                                 domesticTS_,
+                                 Handle<BlackVolTermStructure>(blackVolTS));
+
+        ext::shared_ptr<PricingEngine> engineBS =
+            ext::make_shared<AnalyticBarrierEngine>(stochProcess);
+
+        BlackDeltaCalculator blackDeltaCalculatorAtm(
+                        Option::Call, atmVol_->deltaType(), x0Quote->value(),
+                        domesticTS_->discount(T_), foreignTS_->discount(T_),
+                        atmVol_->value() * sqrt(T_));
+        Real atmStrike = blackDeltaCalculatorAtm.atmStrike(atmVol_->atmType());
+
+        Real call25Vol = vol25Call_->value();
+        Real put25Vol = vol25Put_->value();
+
+        BlackDeltaCalculator blackDeltaCalculatorPut25(Option::Put, vol25Put_->deltaType(), x0Quote->value(), 
+                                                      domesticTS_->discount(T_), foreignTS_->discount(T_),
+                                                      put25Vol * sqrt(T_));
+        Real put25Strike = blackDeltaCalculatorPut25.strikeFromDelta(-0.25);
+        BlackDeltaCalculator blackDeltaCalculatorCall25(Option::Call, vol25Call_->deltaType(), x0Quote->value(), 
+                                                      domesticTS_->discount(T_), foreignTS_->discount(T_),
+                                                      call25Vol * sqrt(T_));
+        Real call25Strike = blackDeltaCalculatorCall25.strikeFromDelta(0.25);
+
+
+        //here use vanna volga interpolated smile to price vanilla
+        std::vector<Real> strikes;
+        std::vector<Real> vols;
+        strikes.push_back(put25Strike);
+        vols.push_back(put25Vol);
+        strikes.push_back(atmStrike);
+        vols.push_back(atmVol_->value());
+        strikes.push_back(call25Strike);
+        vols.push_back(call25Vol);
+        VannaVolga vannaVolga(x0Quote->value(), domesticTS_->discount(T_), foreignTS_->discount(T_), T_);
+        Interpolation interpolation = vannaVolga.interpolate(strikes.begin(), strikes.end(), vols.begin());
+        interpolation.enableExtrapolation();
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+                                        ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        Real strikeVol = interpolation(payoff->strike());
+
+        //vanilla option price
+        Real vanillaOption = blackFormula(payoff->optionType(), payoff->strike(), 
+                                      x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_), 
+                                      strikeVol * sqrt(T_),
+                                      domesticTS_->discount(T_));
+
+        //spot > barrier up&out 0
+        if(x0Quote->value() >= arguments_.barrier && arguments_.barrierType == Barrier::UpOut){
+            results_.value = 0.0;
+            results_.additionalResults["VanillaPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierInPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierOutPrice"] = 0.0;
+        }
+        //spot > barrier up&in vanilla
+        else if(x0Quote->value() >= arguments_.barrier && arguments_.barrierType == Barrier::UpIn){
+            results_.value = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["VanillaPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierInPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierOutPrice"] = 0.0;
+        }
+        //spot < barrier down&out 0
+        else if(x0Quote->value() <= arguments_.barrier && arguments_.barrierType == Barrier::DownOut){
+            results_.value = 0.0;
+            results_.additionalResults["VanillaPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierInPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierOutPrice"] = 0.0;
+        }
+        //spot < barrier down&in vanilla
+        else if(x0Quote->value() <= arguments_.barrier && arguments_.barrierType == Barrier::DownIn){
+            results_.value = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["VanillaPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierInPrice"] = adaptVanDelta_? bsPriceWithSmile_ : vanillaOption;
+            results_.additionalResults["BarrierOutPrice"] = 0.0;
+        }
+        else{
+
+            //set up BS barrier option pricing
+            //only calculate out barrier option price
+            // in barrier price = vanilla - out barrier
+            Barrier::Type barrierType;
+            if(arguments_.barrierType == Barrier::UpOut)
+                barrierType = arguments_.barrierType;
+            else if(arguments_.barrierType == Barrier::UpIn)
+                barrierType = Barrier::UpOut;
+            else if(arguments_.barrierType == Barrier::DownOut)
+                barrierType = arguments_.barrierType;
+            else
+                barrierType = Barrier::DownOut;
+
+            BarrierOption barrierOption(barrierType,
+                                        arguments_.barrier,
+                                        arguments_.rebate,
+                                        ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff),
+                                        arguments_.exercise);
+
+            barrierOption.setPricingEngine(engineBS);
+
+            //BS price with atm vol
+            Real priceBS = barrierOption.NPV();
+
+            Real priceAtmCallBS = blackFormula(Option::Call,atmStrike,
+                                              x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_), 
+                                              atmVol_->value() * sqrt(T_),
+                                              domesticTS_->discount(T_));
+            Real price25CallBS = blackFormula(Option::Call,call25Strike,
+                                              x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_), 
+                                              atmVol_->value() * sqrt(T_),
+                                              domesticTS_->discount(T_));
+            Real price25PutBS = blackFormula(Option::Put,put25Strike,
+                                              x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_),
+                                              atmVol_->value() * sqrt(T_),
+                                              domesticTS_->discount(T_));
+
+            //market price
+            Real priceAtmCallMkt = blackFormula(Option::Call,atmStrike,
+                                              x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_), 
+                                              atmVol_->value() * sqrt(T_),
+                                              domesticTS_->discount(T_));
+
+            Real price25CallMkt = blackFormula(Option::Call,call25Strike,
+                                              x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_), 
+                                              call25Vol * sqrt(T_),
+                                              domesticTS_->discount(T_));
+            Real price25PutMkt = blackFormula(Option::Put,put25Strike,
+                                              x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_),
+                                              put25Vol * sqrt(T_),
+                                              domesticTS_->discount(T_));
+
+
+            //Analytical Black Scholes formula for vanilla option
+            NormalDistribution norm;
+            Real d1atm = (std::log(x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_)/atmStrike) 
+                           + 0.5*std::pow(atmVolQuote->value(),2.0) * T_)/(atmVolQuote->value() * sqrt(T_));
+            Real vegaAtm_Analytical = x0Quote->value() * norm(d1atm) * sqrt(T_) * foreignTS_->discount(T_);
+            Real vannaAtm_Analytical = vegaAtm_Analytical/x0Quote->value() *(1.0 - d1atm/(atmVolQuote->value()*sqrt(T_)));
+            Real volgaAtm_Analytical = vegaAtm_Analytical * d1atm * (d1atm - atmVolQuote->value() * sqrt(T_))/atmVolQuote->value();
+
+            Real d125call = (std::log(x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_)/call25Strike) 
+                           + 0.5*std::pow(atmVolQuote->value(),2.0) * T_)/(atmVolQuote->value() * sqrt(T_));
+            Real vega25Call_Analytical = x0Quote->value() * norm(d125call) * sqrt(T_) * foreignTS_->discount(T_);
+            Real vanna25Call_Analytical = vega25Call_Analytical/x0Quote->value() *(1.0 - d125call/(atmVolQuote->value()*sqrt(T_)));
+            Real volga25Call_Analytical = vega25Call_Analytical * d125call * (d125call - atmVolQuote->value() * sqrt(T_))/atmVolQuote->value();
+
+            Real d125Put = (std::log(x0Quote->value()* foreignTS_->discount(T_)/ domesticTS_->discount(T_)/put25Strike) 
+                           + 0.5*std::pow(atmVolQuote->value(),2.0) * T_)/(atmVolQuote->value() * sqrt(T_));
+            Real vega25Put_Analytical = x0Quote->value() * norm(d125Put) * sqrt(T_) * foreignTS_->discount(T_);
+            Real vanna25Put_Analytical = vega25Put_Analytical/x0Quote->value() *(1.0 - d125Put/(atmVolQuote->value()*sqrt(T_)));
+            Real volga25Put_Analytical = vega25Put_Analytical * d125Put * (d125Put - atmVolQuote->value() * sqrt(T_))/atmVolQuote->value();
+
+
+            //BS vega
+            ext::static_pointer_cast<SimpleQuote> (atmVolQuote.currentLink())->setValue(atmVolQuote->value() + sigmaShift_vega);
+            barrierOption.recalculate();
+            Real vegaBarBS = (barrierOption.NPV() - priceBS)/sigmaShift_vega;
+
+            ext::static_pointer_cast<SimpleQuote> (atmVolQuote.currentLink())->setValue(atmVolQuote->value() - sigmaShift_vega);//setback
+
+            //BS volga
+
+            //vegaBar2
+            //base NPV
+            ext::static_pointer_cast<SimpleQuote> (atmVolQuote.currentLink())->setValue(atmVolQuote->value() + sigmaShift_volga);
+            barrierOption.recalculate();
+            Real priceBS2 = barrierOption.NPV();
+
+            //shifted npv
+            ext::static_pointer_cast<SimpleQuote> (atmVolQuote.currentLink())->setValue(atmVolQuote->value() + sigmaShift_vega);
+            barrierOption.recalculate();
+            Real vegaBarBS2 = (barrierOption.NPV() - priceBS2)/sigmaShift_vega;
+            Real volgaBarBS = (vegaBarBS2 - vegaBarBS)/sigmaShift_volga;
+
+            ext::static_pointer_cast<SimpleQuote> (atmVolQuote.currentLink())->setValue(atmVolQuote->value() 
+                                                                                               - sigmaShift_volga 
+                                                                                               - sigmaShift_vega);//setback
+
+            //BS Delta
+            //base delta
+            ext::static_pointer_cast<SimpleQuote> (x0Quote.currentLink())->setValue(x0Quote->value() + spotShift_delta);//shift forth
+            barrierOption.recalculate();
+            Real priceBS_delta1 = barrierOption.NPV();
+
+            ext::static_pointer_cast<SimpleQuote> (x0Quote.currentLink())->setValue(x0Quote->value() - 2 * spotShift_delta);//shift back
+            barrierOption.recalculate();
+            Real priceBS_delta2 = barrierOption.NPV();
+
+            ext::static_pointer_cast<SimpleQuote> (x0Quote.currentLink())->setValue(x0Quote->value() +  spotShift_delta);//set back
+            Real deltaBar1 = (priceBS_delta1 - priceBS_delta2)/(2.0*spotShift_delta);
+
+            //shifted delta
+            ext::static_pointer_cast<SimpleQuote> (atmVolQuote.currentLink())->setValue(atmVolQuote->value() + sigmaShift_vanna);//shift sigma
+            ext::static_pointer_cast<SimpleQuote> (x0Quote.currentLink())->setValue(x0Quote->value() + spotShift_delta);//shift forth
+            barrierOption.recalculate();
+            priceBS_delta1 = barrierOption.NPV();
+
+            ext::static_pointer_cast<SimpleQuote> (x0Quote.currentLink())->setValue(x0Quote->value() - 2 * spotShift_delta);//shift back
+            barrierOption.recalculate();
+            priceBS_delta2 = barrierOption.NPV();
+
+            ext::static_pointer_cast<SimpleQuote> (x0Quote.currentLink())->setValue(x0Quote->value() +  spotShift_delta);//set back
+            Real deltaBar2 = (priceBS_delta1 - priceBS_delta2)/(2.0*spotShift_delta);
+
+            Real vannaBarBS = (deltaBar2 - deltaBar1)/sigmaShift_vanna;
+
+            ext::static_pointer_cast<SimpleQuote> (atmVolQuote.currentLink())->setValue(atmVolQuote->value() - sigmaShift_vanna);//set back
+
+            //Matrix
+            Matrix A(3,3,0.0);
+
+            //analytical
+            A[0][0] = vegaAtm_Analytical;
+            A[0][1] = vega25Call_Analytical;
+            A[0][2] = vega25Put_Analytical;
+            A[1][0] = vannaAtm_Analytical;
+            A[1][1] = vanna25Call_Analytical;
+            A[1][2] = vanna25Put_Analytical;
+            A[2][0] = volgaAtm_Analytical;
+            A[2][1] = volga25Call_Analytical;
+            A[2][2] = volga25Put_Analytical;
+
+            Array b(3,0.0);
+            b[0] = vegaBarBS;
+            b[1] = vannaBarBS;
+            b[2] = volgaBarBS;
+
+            Array q = inverse(A) * b;
+
+            //touch probability
+            CumulativeNormalDistribution cnd;
+            Real mu = domesticTS_->zeroRate(T_, Continuous) - foreignTS_->zeroRate(T_, Continuous) - pow(atmVol_->value(), 2.0)/2.0;
+            Real h2 = (log(arguments_.barrier/x0Quote->value()) + mu*T_)/(atmVol_->value()*sqrt(T_));
+            Real h2Prime = (log(x0Quote->value()/arguments_.barrier) + mu*T_)/(atmVol_->value()*sqrt(T_));
+            Real probTouch = 0.0;
+            if(arguments_.barrierType == Barrier::UpIn || arguments_.barrierType == Barrier::UpOut)
+                probTouch = cnd(h2Prime) + pow(arguments_.barrier/x0Quote->value(), 2.0*mu/pow(atmVol_->value(), 2.0))*cnd(-h2);
+            else
+                probTouch = cnd(-h2Prime) + pow(arguments_.barrier/x0Quote->value(), 2.0*mu/pow(atmVol_->value(), 2.0))*cnd(h2);
+            Real p_survival = 1.0 - probTouch;
+
+            Real lambda = p_survival ;
+            Real adjust = q[0]*(priceAtmCallMkt - priceAtmCallBS) 
+                        + q[1]*(price25CallMkt - price25CallBS)
+                        + q[2]*(price25PutMkt - price25PutBS);
+            Real outPrice = priceBS + lambda*adjust;//
+            Real inPrice;
+
+            //adapt Vanilla delta
+            if (adaptVanDelta_) {
+                outPrice += lambda*(bsPriceWithSmile_ - vanillaOption);
+                //capfloored by (0, vanilla)
+                outPrice = std::max(0.0, std::min(bsPriceWithSmile_, outPrice));
+                inPrice = bsPriceWithSmile_ - outPrice;
+            }
+            else{
+                //capfloored by (0, vanilla)
+                outPrice = std::max(0.0, std::min(vanillaOption, outPrice));
+                inPrice = vanillaOption - outPrice;
+            }
+
+            if(arguments_.barrierType == Barrier::DownOut || arguments_.barrierType == Barrier::UpOut)
+                results_.value = outPrice;
+            else
+                results_.value = inPrice;
+            results_.additionalResults["VanillaPrice"] = vanillaOption;
+            results_.additionalResults["BarrierInPrice"] = inPrice;
+            results_.additionalResults["BarrierOutPrice"] = outPrice;
+            results_.additionalResults["lambda"] = lambda;
+         }
+    }
+}
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>wulinyongdoublebarrierengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2013 Yue Tian
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/barrieroption/wulinyongdoublebarrierengine.hpp>
+#include <ql/instruments/europeanoption.hpp>
+#include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    WulinYongDoubleBarrierEngine::WulinYongDoubleBarrierEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process, int series)
+    : process_(std::move(process)), series_(series) {
+        registerWith(process_);
+    }
+
+    void WulinYongDoubleBarrierEngine::calculate() const {
+
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        QL_REQUIRE(payoff->strike()>0.0,
+                   "strike must be positive");
+
+        Real K = payoff->strike();
+        Real S = process_->x0();
+        QL_REQUIRE(S >= 0.0, "negative or null underlying given");
+        QL_REQUIRE(!triggered(S), "barrier touched");
+
+        DoubleBarrier::Type barrierType = arguments_.barrierType;
+        QL_REQUIRE(barrierType == DoubleBarrier::KnockOut || 
+                   barrierType == DoubleBarrier::KnockIn,
+                   "only KnockIn and KnockOut options supported");
+
+        Real L = arguments_.barrier_lo;
+        Real H = arguments_.barrier_hi;
+        Real K_up = std::min(H, K);
+        Real K_down = std::max(L, K);
+        Time T = residualTime();
+        Real rd = riskFreeRate();
+        Real dd = riskFreeDiscount();
+        Real rf = dividendYield();
+        Real df = dividendDiscount();
+        Real vol = volatility();
+        Real mu = rd - rf - vol*vol/2.0;
+        Real sgn = mu > 0 ? 1.0 :(mu < 0 ? -1.0: 0.0);
+        //rebate
+        Real R_L = arguments_.rebate;
+        Real R_H = arguments_.rebate;
+
+        //european option
+        EuropeanOption europeanOption(payoff, arguments_.exercise);
+        ext::shared_ptr<PricingEngine> analyticEuropeanEngine =
+            ext::make_shared<AnalyticEuropeanEngine>(process_);
+        europeanOption.setPricingEngine(analyticEuropeanEngine);
+        Real european = europeanOption.NPV();
+
+        Real barrierOut = 0;
+        Real rebateIn = 0;
+        for(int n = -series_; n < series_; n++){
+            Real d1 = D(S/H*std::pow(L/H, 2.0*n), vol*vol+mu, vol, T);
+            Real d2 = d1 - vol*std::sqrt(T);
+            Real g1 = D(H/S*std::pow(L/H, 2.0*n - 1.0), vol*vol+mu, vol, T);
+            Real g2 = g1 - vol*std::sqrt(T);
+            Real h1 = D(S/H*std::pow(L/H, 2.0*n - 1.0), vol*vol+mu, vol, T);
+            Real h2 = h1 - vol*std::sqrt(T);
+            Real k1 = D(L/S*std::pow(L/H, 2.0*n - 1.0), vol*vol+mu, vol, T);
+            Real k2 = k1 - vol*std::sqrt(T);
+            Real d1_down = D(S/K_down*std::pow(L/H, 2.0*n), vol*vol+mu, vol, T);
+            Real d2_down = d1_down - vol*std::sqrt(T);
+            Real d1_up = D(S/K_up*std::pow(L/H, 2.0*n), vol*vol+mu, vol, T);
+            Real d2_up = d1_up - vol*std::sqrt(T);
+            Real k1_down = D((H*H)/(K_down*S)*std::pow(L/H, 2.0*n), vol*vol+mu, vol, T);
+            Real k2_down = k1_down - vol*std::sqrt(T);
+            Real k1_up = D((H*H)/(K_up*S)*std::pow(L/H, 2.0*n), vol*vol+mu, vol, T);
+            Real k2_up = k1_up - vol*std::sqrt(T);
+
+            if( payoff->optionType() == Option::Call) {
+                barrierOut += std::pow(L/H, 2.0 * n * mu/(vol*vol))*
+                            (df*S*std::pow(L/H, 2.0*n)*(f_(d1_down)-f_(d1))
+                            -dd*K*(f_(d2_down)-f_(d2))
+                            -df*std::pow(L/H, 2.0*n)*H*H/S*std::pow(H/S, 2.0*mu/(vol*vol))*(f_(k1_down)-f_(k1))
+                            +dd*K*std::pow(H/S,2.0*mu/(vol*vol))*(f_(k2_down)-f_(k2)));
+            }
+            else if(payoff->optionType() == Option::Put){
+                barrierOut += std::pow(L/H, 2.0 * n * mu/(vol*vol))*
+                            (dd*K*(f_(h2)-f_(d2_up))
+                            -df*S*std::pow(L/H, 2.0*n)*(f_(h1)-f_(d1_up))
+                            -dd*K*std::pow(H/S,2.0*mu/(vol*vol))*(f_(g2)-f_(k2_up))
+                            +df*std::pow(L/H, 2.0*n)*H*H/S*std::pow(H/S, 2.0*mu/(vol*vol))*(f_(g1)-f_(k1_up)));
+            }
+            else {
+                QL_FAIL("option type not recognized");
+            }
+
+            Real v1 = D(H/S*std::pow(H/L, 2.0*n), -mu, vol, T);
+            Real v2 = D(H/S*std::pow(H/L, 2.0*n), mu, vol, T);
+            Real v3 = D(S/L*std::pow(H/L, 2.0*n), -mu, vol, T);
+            Real v4 = D(S/L*std::pow(H/L, 2.0*n), mu, vol, T);
+            rebateIn +=  dd * R_H * sgn * (std::pow(L/H, 2.0*n*mu/(vol*vol)) * f_(sgn * v1) - std::pow(H/S, 2.0*mu/(vol*vol)) * f_(-sgn * v2))
+                       + dd * R_L * sgn * (std::pow(L/S, 2.0*mu/(vol*vol)) * f_(-sgn * v3) - std::pow(H/L, 2.0*n*mu/(vol*vol)) * f_(sgn * v4));
+        }
+
+        //rebate paid at maturity
+        if(barrierType == DoubleBarrier::KnockOut)
+            results_.value = barrierOut ;
+        else
+            results_.value = european - barrierOut;
+        results_.additionalResults["vanilla"] = european;
+        results_.additionalResults["barrierOut"] = barrierOut;
+        results_.additionalResults["barrierIn"] = european - barrierOut;
+        results_.additionalResults["rebateIn"] = rebateIn;
+    }
+
+
+    Real WulinYongDoubleBarrierEngine::strike() const {
+        ext::shared_ptr<PlainVanillaPayoff> payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+        return payoff->strike();
+    }
+
+    Time WulinYongDoubleBarrierEngine::residualTime() const {
+        return process_->time(arguments_.exercise->lastDate());
+    }
+
+    Volatility WulinYongDoubleBarrierEngine::volatility() const {
+        return process_->blackVolatility()->blackVol(residualTime(), strike());
+    }
+
+    Rate WulinYongDoubleBarrierEngine::riskFreeRate() const {
+        return process_->riskFreeRate()->zeroRate(residualTime(), Continuous,
+                                                  NoFrequency);
+    }
+
+    DiscountFactor WulinYongDoubleBarrierEngine::riskFreeDiscount() const {
+        return process_->riskFreeRate()->discount(residualTime());
+    }
+
+    Rate WulinYongDoubleBarrierEngine::dividendYield() const {
+        return process_->dividendYield()->zeroRate(residualTime(),
+                                                   Continuous, NoFrequency);
+    }
+
+    DiscountFactor WulinYongDoubleBarrierEngine::dividendDiscount() const {
+        return process_->dividendYield()->discount(residualTime());
+    }
+
+    Real WulinYongDoubleBarrierEngine::D(Real X, Real lambda, Real sigma, Real T) const {
+        return (std::log(X) + lambda * T)/(sigma * std::sqrt(T));
+    }
+
+}
+
+]]></document_content>
+  </document>
+</documents>

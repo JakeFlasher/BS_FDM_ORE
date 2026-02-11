@@ -1,0 +1,631 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>analyticvariancegammaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2010 Adrian O' Neill
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<http://quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/variancegamma/analyticvariancegammaengine.hpp>
+#include <ql/math/distributions/gammadistribution.hpp>
+#include <ql/math/integrals/gausslobattointegral.hpp>
+#include <ql/math/integrals/kronrodintegral.hpp>
+#include <ql/math/integrals/segmentintegral.hpp>
+#include <ql/pricingengines/blackscholescalculator.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+
+        class Integrand {
+        public:
+          Integrand(ext::shared_ptr<StrikedTypePayoff> payoff,
+                    Real s0,
+                    Real t,
+                    Real riskFreeDiscount,
+                    Real dividendDiscount,
+                    Real sigma,
+                    Real nu,
+                    Real theta)
+          : payoff_(std::move(payoff)), s0_(s0), t_(t), riskFreeDiscount_(riskFreeDiscount),
+            dividendDiscount_(dividendDiscount), sigma_(sigma), nu_(nu), theta_(theta) {
+              omega_ = std::log(1.0 - theta_ * nu_ - (sigma_ * sigma_ * nu_) / 2.0) / nu_;
+              // We can precompute the denominator of the gamma pdf (does not depend on x)
+              // shape = t_/nu_, scale = nu_
+              GammaFunction gf;
+              gammaDenom_ = std::exp(gf.logValue(t_ / nu_)) * std::pow(nu_, t_ / nu_);
+          }
+
+            Real operator()(Real x) const {
+                // Compute adjusted black scholes price
+                Real s0_adj = s0_ * std::exp(theta_ * x + omega_ * t_ + (sigma_ * sigma_ * x) / 2.0);
+                Real vol_adj = sigma_ * std::sqrt(x / t_);
+                vol_adj *= std::sqrt(t_);
+
+                BlackScholesCalculator bs(payoff_, s0_adj, dividendDiscount_, vol_adj, riskFreeDiscount_);
+                Real bsprice = bs.value();
+
+                // Multiply by gamma distribution
+                Real gamp = (std::pow(x, t_ / nu_ - 1.0) * std::exp(-x / nu_)) / gammaDenom_;
+                Real result = bsprice * gamp;
+                return result;
+            }
+
+        private:
+            ext::shared_ptr<StrikedTypePayoff> payoff_;
+            Real s0_;
+            Real t_;
+            Real riskFreeDiscount_;
+            Real dividendDiscount_;
+            Rate sigma_;
+            Real nu_;
+            Real theta_;
+            Real omega_;
+            Real gammaDenom_;
+        };
+    }
+
+
+    VarianceGammaEngine::VarianceGammaEngine(ext::shared_ptr<VarianceGammaProcess> process,
+                                             Real absoluteError)
+    : process_(std::move(process)), absErr_(absoluteError) {
+        QL_REQUIRE(absErr_ > 0, "absolute error must be positive");
+        registerWith(process_);
+    }
+
+    void VarianceGammaEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+            "not an European Option");
+
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-striked payoff given");
+
+        DiscountFactor dividendDiscount =
+            process_->dividendYield()->discount(
+            arguments_.exercise->lastDate());
+        DiscountFactor riskFreeDiscount =
+            process_->riskFreeRate()->discount(arguments_.exercise->lastDate());
+
+        DayCounter rfdc  = process_->riskFreeRate()->dayCounter();
+        Time t = rfdc.yearFraction(process_->riskFreeRate()->referenceDate(),
+            arguments_.exercise->lastDate());
+
+        Integrand f(payoff,
+            process_->x0(),
+            t, riskFreeDiscount, dividendDiscount,
+            process_->sigma(), process_->nu(), process_->theta());
+
+        Real infinity = 15.0 * std::sqrt(process_->nu() * t);
+        Real target = absErr_*1e-4;
+        Real val = f(infinity);
+        while (std::abs(val)>target){
+          infinity*=1.5;
+          val = f(infinity);
+        }
+        // the integration is split due to occasional singularities at 0
+        Real split = 0.1;
+        GaussKronrodNonAdaptive integrator1(absErr_, 1000, 0);
+        Real pvA = integrator1(f, 0, split);
+        GaussLobattoIntegral integrator2(2000, absErr_);
+        Real pvB = integrator2(f, split, infinity);
+        results_.value = pvA + pvB;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>fftengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2010 Adrian O' Neill
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<http://quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/variancegamma/fftengine.hpp>
+#include <ql/math/fastfouriertransform.hpp>
+#include <ql/math/interpolations/linearinterpolation.hpp>
+#include <complex>
+#include <utility>
+
+namespace QuantLib {
+
+    FFTEngine::FFTEngine(ext::shared_ptr<StochasticProcess1D> process, Real logStrikeSpacing)
+    : process_(std::move(process)), lambda_(logStrikeSpacing) {
+        registerWith(process_);
+    }
+
+    void FFTEngine::calculate() const
+    {
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+            "not an European Option");
+
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-striked payoff given");
+
+        auto r1 = resultMap_.find(arguments_.exercise->lastDate());
+        if (r1 != resultMap_.end())
+        {
+            auto r2 = r1->second.find(payoff);
+            if (r2 != r1->second.end())
+            {
+                results_.value = r2->second;
+                return;
+            }
+        }
+        
+        // Option not precalculated - do entire FFT for one option.  Not very efficient - call precalculate!
+        calculateUncached(payoff, arguments_.exercise);
+    }
+
+    void FFTEngine::update()
+    {
+        // Process has changed so cached values may no longer be correct
+        resultMap_.clear();
+
+        // Call base class implementation
+        VanillaOption::engine::update();
+    }
+
+    void FFTEngine::calculateUncached(const ext::shared_ptr<StrikedTypePayoff>& payoff,
+                                      const ext::shared_ptr<Exercise>& exercise) const {
+        ext::shared_ptr<VanillaOption> option(new VanillaOption(payoff, exercise));
+        std::vector<ext::shared_ptr<Instrument> > optionList;
+        optionList.push_back(option);
+
+        ext::shared_ptr<FFTEngine> tempEngine(clone().release());
+        tempEngine->precalculate(optionList);
+        option->setPricingEngine(tempEngine);
+        results_.value = option->NPV();
+    }
+
+    void FFTEngine::precalculate(const std::vector<ext::shared_ptr<Instrument> >& optionList) {
+        // Group payoffs by expiry date
+        // as with FFT we can compute a bunch of these at once
+        resultMap_.clear();
+
+        typedef std::vector<ext::shared_ptr<StrikedTypePayoff> > PayoffList;
+        typedef std::map<Date, PayoffList> PayoffMap;
+        PayoffMap payoffMap;
+
+        for (const auto& optIt : optionList) {
+            ext::shared_ptr<VanillaOption> option = ext::dynamic_pointer_cast<VanillaOption>(optIt);
+            QL_REQUIRE(option, "instrument must be option");
+            QL_REQUIRE(option->exercise()->type() == Exercise::European,
+                "not an European Option");
+
+            ext::shared_ptr<StrikedTypePayoff> payoff =
+                ext::dynamic_pointer_cast<StrikedTypePayoff>(option->payoff());
+            QL_REQUIRE(payoff, "non-striked payoff given");
+
+            payoffMap[option->exercise()->lastDate()].push_back(payoff);
+        }
+
+        std::complex<Real> i1(0, 1);
+        Real alpha = 1.25;
+
+        for (PayoffMap::const_iterator payIt = payoffMap.begin(); payIt != payoffMap.end(); ++payIt)
+        {
+            Date expiryDate = payIt->first;
+
+            // Calculate n large enough for maximum strike, and round up to a power of 2
+            Real maxStrike = 0.0;
+            for (const auto& payoff : payIt->second) {
+                if (payoff->strike() > maxStrike)
+                    maxStrike = payoff->strike();
+            }
+            Real nR = 2.0 * (std::log(maxStrike) + lambda_) / lambda_;
+      Size log2_n = (static_cast<Size>((std::log(nR) / std::log(2.0))) + 1);
+            Size n = static_cast<std::size_t>(1) << log2_n;
+
+            // Strike range (equation 19,20)
+            Real b = n * lambda_ / 2.0;
+
+            // Grid spacing (equation 23)
+            Real eta = 2.0 * M_PI / (lambda_ * n);
+
+            // Discount factor
+            Real df = discountFactor(expiryDate);
+            Real div = dividendYield(expiryDate);
+
+            // Input to fourier transform
+            std::vector<std::complex<Real> > fti;
+            fti.resize(n);
+
+            // Precalculate any discount factors etc.
+            precalculateExpiry(expiryDate);
+
+            for (Size i=0; i<n; i++)
+            {
+                Real v_j = eta * i;
+                Real sw = eta * (3.0 + ((i % 2) == 0 ? -1.0 : 1.0) - ((i == 0) ? 1.0 : 0.0)) / 3.0; 
+
+                std::complex<Real> psi = df * complexFourierTransform(v_j - (alpha + 1)* i1);
+                psi = psi / (alpha*alpha + alpha - v_j*v_j + i1 * (2 * alpha + 1.0) * v_j);
+
+                fti[i] = std::exp(i1 * b * v_j)  * sw * psi;
+            }
+
+            // Perform fft
+            std::vector<std::complex<Real> > results(n);
+            FastFourierTransform fft(log2_n);
+            fft.transform(fti.begin(), fti.end(), results.begin());
+
+            // Call prices
+            std::vector<Real> prices, strikes;
+            prices.resize(n);
+            strikes.resize(n);
+            for (Size i=0; i<n; i++)
+            {
+                Real k_u = -b + lambda_ * i;
+                prices[i] = (std::exp(-alpha * k_u) / M_PI) * results[i].real();
+                strikes[i] = std::exp(k_u);
+            }
+
+            for (const auto& payoff : payIt->second) {
+                Real callPrice = LinearInterpolation(strikes.begin(), strikes.end(),
+                                                     prices.begin())(payoff->strike());
+                switch (payoff->optionType())
+                {
+                case Option::Call:
+                    resultMap_[expiryDate][payoff] = callPrice;
+                    break;
+                case Option::Put:
+                    resultMap_[expiryDate][payoff] = callPrice - process_->x0() * div + payoff->strike() * df;
+                    break;
+                default:
+                    QL_FAIL("Invalid option type");
+                }
+            }
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>fftvanillaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2010 Adrian O' Neill
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<http://quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/variancegamma/fftvanillaengine.hpp>
+#include <ql/exercise.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
+#include <ql/auto_ptr.hpp>
+#include <complex>
+
+namespace QuantLib {
+
+    FFTVanillaEngine::FFTVanillaEngine(
+        const ext::shared_ptr<GeneralizedBlackScholesProcess>& process, Real logStrikeSpacing)
+        : FFTEngine(process, logStrikeSpacing)
+    {
+    }
+
+    QL_UNIQUE_OR_AUTO_PTR<FFTEngine> FFTVanillaEngine::clone() const
+    {
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process =
+            ext::dynamic_pointer_cast<GeneralizedBlackScholesProcess>(process_);
+        return QL_UNIQUE_OR_AUTO_PTR<FFTEngine>(
+                                      new FFTVanillaEngine(process, lambda_));
+    }
+
+    void FFTVanillaEngine::precalculateExpiry(Date d)
+    {
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process =
+            ext::dynamic_pointer_cast<GeneralizedBlackScholesProcess>(process_);
+
+        dividendDiscount_ =
+            process->dividendYield()->discount(d);
+        riskFreeDiscount_ =
+            process->riskFreeRate()->discount(d);
+
+        DayCounter rfdc  = process->riskFreeRate()->dayCounter();
+        t_ = rfdc.yearFraction(process->riskFreeRate()->referenceDate(), d);
+
+        ext::shared_ptr<BlackConstantVol> constVol = ext::dynamic_pointer_cast<BlackConstantVol>
+            (*(process->blackVolatility()));
+        QL_REQUIRE(constVol, "Constant volatility required");
+        Real vol = constVol->blackVol(0.0, 0.0);
+        var_ = vol*vol;
+    }
+
+    std::complex<Real> FFTVanillaEngine::complexFourierTransform(std::complex<Real> u) const
+    {
+        std::complex<Real> i1(0, 1);
+
+        Real s = process_->x0();
+
+        std::complex<Real> phi = std::exp(i1 * u * (std::log(s) - (var_ * t_) / 2.0) 
+            - (var_ * u * u * t_) / 2.0); 
+        phi = phi * std::pow(dividendDiscount_/ riskFreeDiscount_, i1 * u);
+        return phi;
+    }
+
+    Real FFTVanillaEngine::discountFactor(Date d) const
+    {
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process =
+            ext::dynamic_pointer_cast<GeneralizedBlackScholesProcess>(process_);
+        return process->riskFreeRate()->discount(d);
+    }
+
+    Real FFTVanillaEngine::dividendYield(Date d) const
+    {
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process =
+            ext::dynamic_pointer_cast<GeneralizedBlackScholesProcess>(process_);
+        return process->dividendYield()->discount(d);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>fftvariancegammaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2010 Adrian O' Neill
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<http://quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/variancegamma/fftvariancegammaengine.hpp>
+#include <ql/exercise.hpp>
+#include <ql/auto_ptr.hpp>
+#include <complex>
+
+namespace QuantLib {
+
+    FFTVarianceGammaEngine::FFTVarianceGammaEngine(
+        const ext::shared_ptr<VarianceGammaProcess>& process, Real logStrikeSpacing)
+        : FFTEngine(process, logStrikeSpacing)
+    {
+    }
+
+    QL_UNIQUE_OR_AUTO_PTR<FFTEngine> FFTVarianceGammaEngine::clone() const
+    {
+        ext::shared_ptr<VarianceGammaProcess> process =
+            ext::dynamic_pointer_cast<VarianceGammaProcess>(process_);
+        return QL_UNIQUE_OR_AUTO_PTR<FFTEngine>(
+                                new FFTVarianceGammaEngine(process, lambda_));
+    }
+
+    void FFTVarianceGammaEngine::precalculateExpiry(Date d)
+    {
+        ext::shared_ptr<VarianceGammaProcess> process =
+            ext::dynamic_pointer_cast<VarianceGammaProcess>(process_);
+
+        dividendDiscount_ =
+            process->dividendYield()->discount(d);
+        riskFreeDiscount_ =
+            process->riskFreeRate()->discount(d);
+
+        DayCounter rfdc  = process->riskFreeRate()->dayCounter();
+        t_ = rfdc.yearFraction(process->riskFreeRate()->referenceDate(), d);
+
+        sigma_ = process->sigma();
+        nu_ = process->nu();
+        theta_ = process->theta();
+    }
+
+    std::complex<Real> FFTVarianceGammaEngine::complexFourierTransform(std::complex<Real> u) const
+    {
+        Real s = process_->x0();
+
+        std::complex<Real> i1(0, 1);
+
+        Real omega = std::log(1.0 - theta_ * nu_ - sigma_*sigma_ * nu_ / 2.0) / nu_;
+        std::complex<Real> phi = std::exp(i1 * u * (std::log(s) + omega * t_)) 
+            * std::pow(dividendDiscount_/ riskFreeDiscount_, i1 * u);
+        phi = phi * (std::pow((1.0 - i1 * theta_ * nu_ * u + sigma_*sigma_ * nu_ * u*u / 2.0), (-t_ / nu_)));
+
+        return phi;
+    }
+
+    Real FFTVarianceGammaEngine::discountFactor(Date d) const
+    {
+        ext::shared_ptr<VarianceGammaProcess> process =
+            ext::dynamic_pointer_cast<VarianceGammaProcess>(process_);
+        return process->riskFreeRate()->discount(d);
+    }
+
+    Real FFTVarianceGammaEngine::dividendYield(Date d) const
+    {
+        ext::shared_ptr<VarianceGammaProcess> process =
+            ext::dynamic_pointer_cast<VarianceGammaProcess>(process_);
+        return process->dividendYield()->discount(d);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>variancegammamodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2010 Adrian O' Neill
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<http://quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/variancegamma/variancegammamodel.hpp>
+#include <ql/quotes/simplequote.hpp>
+
+namespace QuantLib {
+
+    VarianceGammaModel::VarianceGammaModel(
+        const ext::shared_ptr<VarianceGammaProcess> & process)
+        : CalibratedModel(3), process_(process) {
+            arguments_[0] = ConstantParameter(process->sigma(),
+                PositiveConstraint());
+            arguments_[1] = ConstantParameter(process->nu(),
+                PositiveConstraint());
+            arguments_[2] = ConstantParameter(process->theta(),
+                NoConstraint());
+
+            generateArguments();
+
+            registerWith(process_->riskFreeRate());
+            registerWith(process_->dividendYield());
+            registerWith(process_->s0());
+    }
+
+    void VarianceGammaModel::generateArguments() {
+        process_.reset(new VarianceGammaProcess(process_->s0(),
+            process_->dividendYield(),
+            process_->riskFreeRate(),
+            sigma(), nu(), theta()));
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>variancegammaprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2010 Adrian O' Neill
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<http://quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/errors.hpp>
+#include <ql/experimental/variancegamma/variancegammaprocess.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/processes/eulerdiscretization.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    VarianceGammaProcess::VarianceGammaProcess(Handle<Quote> s0,
+                                               Handle<YieldTermStructure> dividendYield,
+                                               Handle<YieldTermStructure> riskFreeRate,
+                                               Real sigma,
+                                               Real nu,
+                                               Real theta)
+    : StochasticProcess1D(ext::shared_ptr<discretization>(new EulerDiscretization)),
+      s0_(std::move(s0)), dividendYield_(std::move(dividendYield)),
+      riskFreeRate_(std::move(riskFreeRate)), sigma_(sigma), nu_(nu), theta_(theta) {
+        registerWith(riskFreeRate_);
+        registerWith(dividendYield_);
+        registerWith(s0_);
+    }
+
+    Real VarianceGammaProcess::x0() const
+    {
+        return s0_->value();
+    }
+
+    Real VarianceGammaProcess::drift(Time /*t*/, Real /*x*/) const
+    {
+        QL_FAIL("not implemented yet");
+    }
+
+    Real VarianceGammaProcess::diffusion(Time /*t*/, Real /*x*/) const
+    {
+        QL_FAIL("not implemented yet");
+    }
+
+    const Handle<Quote>& VarianceGammaProcess::s0() const {
+        return s0_;
+    }
+
+    const Handle<YieldTermStructure>& VarianceGammaProcess::dividendYield() const {
+        return dividendYield_;
+    }
+
+    const Handle<YieldTermStructure>& VarianceGammaProcess::riskFreeRate() const {
+        return riskFreeRate_;
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

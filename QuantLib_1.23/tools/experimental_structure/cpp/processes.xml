@@ -1,0 +1,791 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>extendedblackscholesprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Frank Hövermann
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/processes/extendedblackscholesprocess.hpp>
+
+namespace QuantLib {
+
+    ExtendedBlackScholesMertonProcess::ExtendedBlackScholesMertonProcess(
+                              const Handle<Quote>& x0,
+                              const Handle<YieldTermStructure>& dividendTS,
+                              const Handle<YieldTermStructure>& riskFreeTS,
+                              const Handle<BlackVolTermStructure>& blackVolTS,
+                              const ext::shared_ptr<discretization>& d,
+                              Discretization evolDisc)
+    : GeneralizedBlackScholesProcess(x0,dividendTS,riskFreeTS,blackVolTS,d),
+      discretization_(evolDisc) {}
+
+    Real ExtendedBlackScholesMertonProcess::drift(Time t, Real x) const {
+        Real sigma = diffusion(t,x);
+        // we could be more anticipatory if we know the right dt
+        // for which the drift will be used
+        Time t1 = t + 0.0001;
+        return riskFreeRate()->forwardRate(t,t1,Continuous,NoFrequency,true)
+             - dividendYield()->forwardRate(t,t1,Continuous,NoFrequency,true)
+             - 0.5 * sigma * sigma;
+    }
+
+    Real ExtendedBlackScholesMertonProcess::diffusion(Time t, Real x) const {
+        return blackVolatility()->blackVol(t, x, true);
+    }
+
+    Real ExtendedBlackScholesMertonProcess::evolve(Time t0, Real x0,
+                                                   Time dt, Real dw) const {
+        Real predictor, sigma0, sigma1;
+        Time t1;
+        Rate rate0, rate1;
+        Real driftterm, diffusionterm, corrector;
+        switch (discretization_) {
+          case Milstein:
+            // Milstein scheme
+            return apply(x0, drift(t0, x0)*dt
+                           + 0.5*std::pow(diffusion(t0, x0),2)*(dw*dw-1)*dt
+                           + diffusion(t0,x0)*std::sqrt(dt)*dw);
+            break;
+          case Euler:
+            // Usual Euler scheme
+            return apply(expectation(t0,x0,dt), stdDeviation(t0,x0,dt)*dw);
+            break;
+          case PredictorCorrector:
+            // Predictor-Corrector scheme with equal weighting
+            predictor =
+                apply(expectation(t0,x0,dt), stdDeviation(t0,x0,dt)*dw);
+            t1 = t0 + 0.0001;
+            sigma0 = diffusion(t0,x0);
+            sigma1 = diffusion(t0+dt,predictor);
+            rate0 =
+                riskFreeRate()->forwardRate(t0,t1,Continuous,NoFrequency,true)
+              - dividendYield()->forwardRate(t0,t1,Continuous,NoFrequency,true)
+              - 0.5*std::pow(sigma0,2);
+            rate1 =
+                riskFreeRate()->forwardRate(t0+dt,t1+dt,Continuous,
+                                            NoFrequency,true)
+              - dividendYield()->forwardRate(t0+dt,t1+dt,
+                                             Continuous,NoFrequency,true)
+              - 0.5*std::pow(sigma1,2);
+            driftterm = 0.5*rate1+0.5*rate0;
+            diffusionterm = 0.5*(sigma1+sigma0);
+            corrector =
+                apply(x0,driftterm*dt+diffusionterm*std::sqrt(dt)*dw);
+            return corrector;
+            break;
+          default:
+            QL_FAIL("unknown discretization scheme");
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>extendedornsteinuhlenbeckprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/math/integrals/gausslobattointegral.hpp>
+#include <ql/processes/ornsteinuhlenbeckprocess.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+
+        class integrand {
+            ext::function<Real (Real)> b;
+            Real speed;
+          public:
+            integrand(ext::function<Real(Real)> b, Real speed) : b(std::move(b)), speed(speed) {}
+            Real operator()(Real x) const {
+                return b(x) * std::exp(speed*x);
+            }
+        };
+
+    }
+
+    ExtendedOrnsteinUhlenbeckProcess::ExtendedOrnsteinUhlenbeckProcess(
+        Real speed,
+        Volatility vol,
+        Real x0,
+        ext::function<Real(Real)> b,
+        Discretization discretization,
+        Real intEps)
+    : speed_(speed), vol_(vol), b_(std::move(b)), intEps_(intEps),
+      ouProcess_(new OrnsteinUhlenbeckProcess(speed, vol, x0)), discretization_(discretization) {
+        QL_REQUIRE(speed_ >= 0.0, "negative a given");
+        QL_REQUIRE(vol_ >= 0.0, "negative volatility given");
+    }
+
+    Real ExtendedOrnsteinUhlenbeckProcess::x0() const {
+        return ouProcess_->x0();
+    }
+    
+    Real ExtendedOrnsteinUhlenbeckProcess::drift(Time t, Real x) const {
+        return ouProcess_->drift(t, x) + speed_*b_(t);
+    }
+
+    Real ExtendedOrnsteinUhlenbeckProcess::diffusion(Time t, Real x) const{
+        return ouProcess_->diffusion(t, x);
+    }
+
+    Real ExtendedOrnsteinUhlenbeckProcess::stdDeviation(
+                                           Time t0, Real x0, Time dt) const{
+        return ouProcess_->stdDeviation(t0, x0, dt);
+    }
+
+    Real ExtendedOrnsteinUhlenbeckProcess::variance(
+                                           Time t0, Real x0, Time dt) const{
+        return ouProcess_->variance(t0, x0, dt);
+    }
+
+    Real ExtendedOrnsteinUhlenbeckProcess::speed() const {
+        return speed_;
+    }
+
+    Real ExtendedOrnsteinUhlenbeckProcess::volatility() const {
+        return vol_;
+    }
+
+    Real ExtendedOrnsteinUhlenbeckProcess::expectation(
+                                          Time t0, Real x0, Time dt) const {
+        switch (discretization_) {
+          case MidPoint:
+            return ouProcess_->expectation(t0, x0, dt)
+                    + b_(t0+0.5*dt)*(1.0 - std::exp(-speed_*dt));
+            break;
+          case Trapezodial:
+            {
+              const Time t = t0+dt;
+              const Time u = t0;
+              const Real bt = b_(t);
+              const Real bu = b_(u);
+              const Real ex = std::exp(-speed_*dt);
+
+              return ouProcess_->expectation(t0, x0, dt)
+                    + bt-ex*bu - (bt-bu)/(speed_*dt)*(1-ex);
+            }
+            break;
+          case GaussLobatto:
+              return ouProcess_->expectation(t0, x0, dt)
+                  + speed_*std::exp(-speed_*(t0+dt))
+                  * GaussLobattoIntegral(100000, intEps_)(integrand(b_, speed_),
+                                                          t0, t0+dt);
+            break;
+          default:
+            QL_FAIL("unknown discretization scheme");
+        }
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>extouwithjumpsprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+ 
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file expouwithjumpsprocess.cpp
+    \brief Ornstein Uhlenbeck process plus exp jumps (Kluge Model)
+*/
+
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    ExtOUWithJumpsProcess::ExtOUWithJumpsProcess(
+        ext::shared_ptr<ExtendedOrnsteinUhlenbeckProcess> process,
+        Real Y0,
+        Real beta,
+        Real jumpIntensity,
+        Real eta)
+    : Y0_(Y0), beta_(beta), jumpIntensity_(jumpIntensity), eta_(eta),
+      ouProcess_(std::move(process)) {}
+
+    Size ExtOUWithJumpsProcess::size() const {
+        return 2;
+    }    
+    Size ExtOUWithJumpsProcess::factors() const {
+        return 3;
+    }
+    ext::shared_ptr<ExtendedOrnsteinUhlenbeckProcess>
+        ExtOUWithJumpsProcess::getExtendedOrnsteinUhlenbeckProcess() const {
+        return ouProcess_;
+    }
+    Real ExtOUWithJumpsProcess::beta() const {
+        return beta_;
+    }
+    Real ExtOUWithJumpsProcess::jumpIntensity() const {
+        return jumpIntensity_;
+    }
+    Real ExtOUWithJumpsProcess::eta() const {
+        return eta_;
+    }
+
+    Disposable<Array> ExtOUWithJumpsProcess::initialValues() const {
+        Array retVal(2);
+        retVal[0] = ouProcess_->x0();
+        retVal[1] = Y0_;
+        
+        return retVal;
+    }
+    
+    Disposable<Array> ExtOUWithJumpsProcess::drift(Time t, const Array& x) const {
+        Array retVal(2);
+        retVal[0] = ouProcess_->drift(t, x[0]);
+        retVal[1] = -beta_*x[1];
+        
+        return retVal;
+    }
+
+    Disposable<Matrix> 
+    ExtOUWithJumpsProcess::diffusion(Time t, const Array& x) const {
+        Matrix retVal(2, 2, 0.0);    
+        retVal[0][0] = ouProcess_->diffusion(t, x[0]);
+        
+        return retVal;
+    }
+
+    Disposable<Array> ExtOUWithJumpsProcess::evolve(
+        Time t0, const Array& x0, Time dt, const Array& dw) const {
+        
+        Array retVal(2);
+        retVal[0] = ouProcess_->evolve(t0, x0[0], dt, dw[0]);
+        retVal[1] = x0[1]*std::exp(-beta_*dt);
+                
+        const Real u1 = std::max(QL_EPSILON, std::min(cumNormalDist_(dw[1]), 
+                                                      1.0-QL_EPSILON));
+
+        const Time interarrival = -1.0/jumpIntensity_*std::log(u1);
+        if (interarrival < dt) {
+            const Real u2 = std::max(QL_EPSILON, std::min(cumNormalDist_(dw[2]), 
+                                                          1.0-QL_EPSILON));
+            const Real jumpSize = -1.0/eta_*std::log(u2);
+            retVal[1] += jumpSize;
+        }
+        return retVal;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>gemanroncoroniprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+ 
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file gemanroncoroniprocess.cpp
+    \brief Geman-Roncoroni process
+*/
+
+#include <ql/math/functional.hpp>
+#include <ql/processes/eulerdiscretization.hpp>
+#include <ql/experimental/processes/gemanroncoroniprocess.hpp>
+
+
+namespace QuantLib {
+
+    GemanRoncoroniProcess::GemanRoncoroniProcess(
+                                      Real x0, 
+                                      Real alpha, Real beta, 
+                                      Real gamma, Real delta, 
+                                      Real eps, Real zeta, Real d, 
+                                      Real k,  Real tau,
+                                      Real sig2, Real a, Real b,
+                                      Real theta1, Real theta2, Real theta3,
+                                      Real psi)
+    : StochasticProcess1D(ext::shared_ptr<discretization>(
+                                                    new EulerDiscretization)),
+      x0_(x0),
+      alpha_(alpha), beta_(beta),
+      gamma_(gamma), delta_(delta),
+      eps_(eps), zeta_(zeta), d_(d), 
+      k_(k), tau_(tau),
+      sig2_(sig2), a_(a), b_(b),
+      theta1_(theta1), theta2_(theta2), theta3_(theta3),
+      psi_(psi) {  
+    }
+
+    Real GemanRoncoroniProcess::x0() const {
+        return x0_;
+    }
+
+    Real GemanRoncoroniProcess::drift(Time t, Real x) const {
+        const Real mu = alpha_ + beta_*t + gamma_*std::cos(eps_+2*M_PI*t)
+                                         + delta_*std::cos(zeta_+4*M_PI*t);
+        const Real muPrime = beta_ - gamma_*2*M_PI*std::sin(eps_+2*M_PI*t)
+                                   - delta_*4*M_PI*std::sin(zeta_+4*M_PI*t);
+
+        return muPrime + theta1_*(mu-x);
+    }
+    
+    Real GemanRoncoroniProcess::diffusion(Time t, Real /*x*/) const {
+        return std::sqrt(sig2_ + a_*square<Real>()(std::cos(M_PI*t+b_)));
+    }
+
+    Real GemanRoncoroniProcess::stdDeviation(Time t0, Real /*x0*/, Time dt) const {
+        const Volatility sig2t = sig2_+a_*square<Real>()(std::cos(M_PI*t0+b_));
+        
+        return std::sqrt(sig2t/(2*theta1_)*(1.0-std::exp(-2*theta1_*dt)));
+    }
+
+    Real GemanRoncoroniProcess::evolve(Time t0, Real x0, 
+                                       Time dt, Real dw) const {
+        // random number generator for the jump part 
+        if (!urng_) {
+            typedef PseudoRandom::urng_type urng_type;
+            urng_ = ext::make_shared<urng_type>((unsigned long)(1234UL * dw + 56789UL));
+        }
+        Array du(3); 
+        du[0] = urng_->next().value; 
+        du[1] = urng_->next().value;
+
+        return evolve(t0, x0, dt, dw, du);
+    }
+
+    Real GemanRoncoroniProcess::evolve(Time t0, Real x0, Time dt,
+                                       Real dw, const Array& du) const {
+        Real retVal;
+        const Time t = t0 + 0.5*dt;
+        const Real mu = alpha_ + beta_*t + gamma_*std::cos(eps_ +2*M_PI*t)
+                                         + delta_*std::cos(zeta_+4*M_PI*t);
+        
+        const Real j = -1.0/theta3_
+                        *std::log(1.0+du[1]*(std::exp(-theta3_*psi_)-1.0));
+
+        if (x0 <= mu+d_) {
+            retVal = StochasticProcess1D::evolve(t, x0, dt, dw);
+            
+            const Real jumpIntensity
+                = theta2_*(2.0/(1+std::fabs(std::sin(M_PI*(t-tau_)/k_)))-1);            
+            const Time interarrival = -1.0/jumpIntensity*std::log(du[0]);
+
+            if (interarrival < dt) {
+                retVal += j;
+            }
+        }
+        else {
+            retVal = x0-j;
+        }
+
+        return retVal;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>hestonslvprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Johannes Göttker-Schnetmann
+ Copyright (C) 2015 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file hestonslvprocess.cpp
+    \brief Heston stochastic local volatility process
+*/
+
+#include <ql/experimental/processes/hestonslvprocess.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/utilities/squarerootprocessrndcalculator.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    HestonSLVProcess::HestonSLVProcess(const ext::shared_ptr<HestonProcess>& hestonProcess,
+                                       ext::shared_ptr<LocalVolTermStructure> leverageFct,
+                                       const Real mixingFactor)
+    : mixingFactor_(mixingFactor), hestonProcess_(hestonProcess),
+      leverageFct_(std::move(leverageFct)) {
+        registerWith(hestonProcess);
+        update();
+    };
+
+    void HestonSLVProcess::update() {
+        v0_    = hestonProcess_->v0();
+        kappa_ = hestonProcess_->kappa();
+        theta_ = hestonProcess_->theta();
+        sigma_ = hestonProcess_->sigma();
+        rho_   = hestonProcess_->rho();
+        mixedSigma_ = mixingFactor_ * sigma_;
+    }
+
+    Disposable<Array> HestonSLVProcess::drift(Time t, const Array& x) const {
+        Array tmp(2);
+
+        const Volatility vol =
+           std::max(1e-8, std::sqrt(x[1])*leverageFct_->localVol(t, x[0], true));
+
+        tmp[0] = riskFreeRate()->forwardRate(t, t, Continuous)
+               - dividendYield()->forwardRate(t, t, Continuous)
+               - 0.5*vol*vol;
+
+        tmp[1] = kappa_*(theta_ - x[1]);
+
+        return tmp;
+    }
+
+    Disposable<Matrix> HestonSLVProcess::diffusion(Time t, const Array& x)
+    const {
+
+        const Real vol =
+            std::max(1e-8, std::sqrt(x[1])*leverageFct_->localVol(t, x[0], true));
+
+        const Real sigma2 = mixedSigma_ * std::sqrt(x[1]);
+        const Real sqrhov = std::sqrt(1.0 - rho_*rho_);
+
+        Matrix tmp(2,2);
+        tmp[0][0] = vol;          tmp[0][1] = 0.0;
+        tmp[1][0] = rho_*sigma2;  tmp[1][1] = sqrhov*sigma2;
+
+        return tmp;
+    }
+
+    Disposable<Array> HestonSLVProcess::evolve(
+        Time t0, const Array& x0, Time dt, const Array& dw) const {
+        Array retVal(2);
+
+        const Real ex = std::exp(-kappa_*dt);
+
+        const Real m  =  theta_+(x0[1]-theta_)*ex;
+        const Real s2 =  x0[1]*mixedSigma_*mixedSigma_*ex/kappa_*(1-ex)
+                       + theta_*mixedSigma_*mixedSigma_/(2*kappa_)*(1-ex)*(1-ex);
+        const Real psi = s2/(m*m);
+
+        if (psi < 1.5) {
+            const Real b2 = 2/psi-1+std::sqrt(2/psi*(2/psi-1));
+            const Real b  = std::sqrt(b2);
+            const Real a  = m/(1+b2);
+
+            retVal[1] = a*(b+dw[1])*(b+dw[1]);
+        }
+        else {
+            const Real p = (psi-1)/(psi+1);
+            const Real beta = (1-p)/m;
+            const Real u = CumulativeNormalDistribution()(dw[1]);
+
+            retVal[1] = ((u <= p) ? 0.0 : std::log((1-p)/(1-u))/beta);
+        }
+
+        const Real mu = riskFreeRate()->forwardRate(t0, t0+dt, Continuous)
+             - dividendYield()->forwardRate(t0, t0+dt, Continuous);
+
+        const Real rho1 = std::sqrt(1-rho_*rho_);
+
+        const Volatility l_0 = leverageFct_->localVol(t0, x0[0], true);
+        const Real v_0 = 0.5*(x0[1]+retVal[1])*l_0*l_0;
+
+        retVal[0] = x0[0]*std::exp(mu*dt - 0.5*v_0*dt
+            + rho_/mixedSigma_*l_0 * (
+                  retVal[1] - kappa_*theta_*dt
+                  + 0.5*(x0[1]+retVal[1])*kappa_*dt - x0[1])
+            + rho1*std::sqrt(v_0*dt)*dw[0]);
+
+        return retVal;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>klugeextouprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/processes/extendedornsteinuhlenbeckprocess.hpp>
+#include <ql/experimental/processes/extouwithjumpsprocess.hpp>
+#include <ql/experimental/processes/klugeextouprocess.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    KlugeExtOUProcess::KlugeExtOUProcess(
+        Real rho,
+        ext::shared_ptr<ExtOUWithJumpsProcess> klugeProcess,
+        ext::shared_ptr<ExtendedOrnsteinUhlenbeckProcess> ouProcess)
+    : rho_(rho), sqrtMRho_(std::sqrt(1 - rho * rho)), klugeProcess_(std::move(klugeProcess)),
+      ouProcess_(std::move(ouProcess)) {}
+
+    Size KlugeExtOUProcess::size() const {
+        return klugeProcess_->size() + 1;
+    }
+
+    Size KlugeExtOUProcess::factors() const {
+        return klugeProcess_->factors() + 1;
+    }
+
+    Disposable<Array> KlugeExtOUProcess::initialValues() const {
+        Array retVal(size());
+        const Array x0 = klugeProcess_->initialValues();
+        std::copy(x0.begin(), x0.end(), retVal.begin());
+        retVal.back() = ouProcess_->x0();
+
+        return retVal;
+    }
+
+    Disposable<Array> KlugeExtOUProcess::drift(Time t, const Array& x) const {
+        Array retVal(size());
+        Array mu = klugeProcess_->drift(t, x);
+        std::copy(mu.begin(), mu.end(), retVal.begin());
+        retVal.back() = ouProcess_->drift(t, x.back());
+
+        return retVal;
+    }
+
+    Disposable<Matrix> KlugeExtOUProcess::diffusion(Time t, const Array& x)
+        const{
+        Matrix retVal(size(), factors(), 0.0);
+
+        Volatility vol = ouProcess_->diffusion(t, x.back());
+
+        retVal[0][0]              = klugeProcess_->diffusion(t, x)[0][0];
+        retVal[size()][0]         = rho_*vol;
+        retVal[size()][factors()] = sqrtMRho_*vol;
+
+        return retVal;
+    }
+
+    Disposable<Array> KlugeExtOUProcess::evolve(Time t0, const Array& x0,
+                                                Time dt, const Array& dw) const{
+        Array retVal(size());
+
+        Array ev = klugeProcess_->evolve(t0, x0, dt, dw);
+        std::copy(ev.begin(), ev.end(), retVal.begin());
+
+        const Real dz = dw.back()*sqrtMRho_ + dw.front()*rho_;
+        retVal.back() = ouProcess_->evolve(t0, x0.back(), dt, dz);
+
+        return retVal;
+    }
+
+    ext::shared_ptr<ExtOUWithJumpsProcess>
+        KlugeExtOUProcess::getKlugeProcess() const {
+        return klugeProcess_;
+    }
+    ext::shared_ptr<ExtendedOrnsteinUhlenbeckProcess>
+        KlugeExtOUProcess::getExtOUProcess() const {
+        return ouProcess_;
+    }
+
+    Real KlugeExtOUProcess::rho() const {
+        return rho_;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>vegastressedblackscholesprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Michael Heckl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/processes/vegastressedblackscholesprocess.hpp>
+
+namespace QuantLib {
+
+    VegaStressedBlackScholesProcess::VegaStressedBlackScholesProcess(
+             const Handle<Quote>& x0,
+             const Handle<YieldTermStructure>& dividendTS,
+             const Handle<YieldTermStructure>& riskFreeTS,
+             const Handle<BlackVolTermStructure>& blackVolTS,
+             Time lowerTimeBorderForStressTest,
+             Time upperTimeBorderForStressTest,
+             Real lowerAssetBorderForStressTest,
+             Real upperAssetBorderForStressTest,
+             Real stressLevel,
+             const ext::shared_ptr<discretization>& disc)
+    : GeneralizedBlackScholesProcess(x0, dividendTS, riskFreeTS,
+                                     blackVolTS, disc),
+      lowerTimeBorderForStressTest_(lowerTimeBorderForStressTest),
+      upperTimeBorderForStressTest_(upperTimeBorderForStressTest), 
+      lowerAssetBorderForStressTest_(lowerAssetBorderForStressTest), 
+      upperAssetBorderForStressTest_(upperAssetBorderForStressTest),
+      stressLevel_(stressLevel) {}
+
+    // returns the lower time border for the stress test
+    Real VegaStressedBlackScholesProcess::getLowerTimeBorderForStressTest() const {
+        return lowerTimeBorderForStressTest_;
+    }
+
+    // returns the upper time border for the stress test
+    Real VegaStressedBlackScholesProcess::getUpperTimeBorderForStressTest() const {
+        return upperTimeBorderForStressTest_;
+    }
+
+    // returns the lower asset border for the stress test
+    Real VegaStressedBlackScholesProcess::getLowerAssetBorderForStressTest() const {
+        return lowerAssetBorderForStressTest_;
+    }
+
+    // returns the upper asset border for the stress test
+    Real VegaStressedBlackScholesProcess::getUpperAssetBorderForStressTest() const {
+        return upperAssetBorderForStressTest_;
+    }
+
+    // returns the stress Level
+    Real VegaStressedBlackScholesProcess::getStressLevel() const {
+        return stressLevel_;
+    }
+
+
+    // set the lower time border for the stress test
+    void VegaStressedBlackScholesProcess::setLowerTimeBorderForStressTest(Time LTB) {
+        lowerTimeBorderForStressTest_ = LTB;
+        update();
+    }
+
+    // set the upper time border for the stress test
+    void VegaStressedBlackScholesProcess::setUpperTimeBorderForStressTest(Time UTB) {
+        upperTimeBorderForStressTest_ = UTB;
+        update();
+    }
+
+    // set the lower asset border for the stress test
+    void VegaStressedBlackScholesProcess::setLowerAssetBorderForStressTest(Real LAB) {
+        lowerAssetBorderForStressTest_ = LAB;
+        update();
+    }
+
+    // set the upper asset border for the stress test
+    void VegaStressedBlackScholesProcess::setUpperAssetBorderForStressTest(Real UBA) {
+        upperAssetBorderForStressTest_ = UBA;
+        update();
+    }
+
+    // set the stress Level
+    void VegaStressedBlackScholesProcess::setStressLevel(Real SL) {
+        stressLevel_ = SL;
+        update();
+    }
+
+
+
+    Real VegaStressedBlackScholesProcess::diffusion(Time t, Real x) const {
+        if (lowerTimeBorderForStressTest_ <= t && t <= upperTimeBorderForStressTest_ 
+            && lowerAssetBorderForStressTest_ <= x && x <= upperAssetBorderForStressTest_) {
+            return GeneralizedBlackScholesProcess::diffusion(t, x)+stressLevel_;
+        } else {
+            return GeneralizedBlackScholesProcess::diffusion(t, x);
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

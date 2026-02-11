@@ -1,0 +1,551 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>convertiblebond.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Theo Boafo
+ Copyright (C) 2006, 2007 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/couponpricer.hpp>
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/cashflows/iborcoupon.hpp>
+#include <ql/cashflows/simplecashflow.hpp>
+#include <ql/exercise.hpp>
+#include <ql/experimental/convertiblebonds/convertiblebond.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/utilities/null_deleter.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    ConvertibleBond::ConvertibleBond(const ext::shared_ptr<Exercise>&,
+                                     Real conversionRatio,
+                                     DividendSchedule dividends,
+                                     const CallabilitySchedule& callability,
+                                     const Handle<Quote>& creditSpread,
+                                     const Date& issueDate,
+                                     Natural settlementDays,
+                                     const Schedule& schedule,
+                                     Real)
+    : Bond(settlementDays, schedule.calendar(), issueDate), conversionRatio_(conversionRatio),
+      callability_(callability), dividends_(std::move(dividends)), creditSpread_(creditSpread) {
+
+        maturityDate_ = schedule.endDate();
+
+        if (!callability.empty()) {
+            QL_REQUIRE(callability.back()->date() <= maturityDate_,
+                       "last callability date ("
+                       << callability.back()->date()
+                       << ") later than maturity ("
+                       << maturityDate_ << ")");
+        }
+
+        registerWith(creditSpread);
+    }
+
+    void ConvertibleBond::performCalculations() const {
+        option_->setPricingEngine(engine_);
+        NPV_ = settlementValue_ = option_->NPV();
+        errorEstimate_ = Null<Real>();
+    }
+
+
+    ConvertibleZeroCouponBond::ConvertibleZeroCouponBond(
+                          const ext::shared_ptr<Exercise>& exercise,
+                          Real conversionRatio,
+                          const DividendSchedule& dividends,
+                          const CallabilitySchedule& callability,
+                          const Handle<Quote>& creditSpread,
+                          const Date& issueDate,
+                          Natural settlementDays,
+                          const DayCounter& dayCounter,
+                          const Schedule& schedule,
+                          Real redemption)
+    : ConvertibleBond(exercise, conversionRatio, dividends, callability,
+                      creditSpread, issueDate, settlementDays,
+                      schedule, redemption) {
+
+        cashflows_ = Leg();
+
+        // !!! notional forcibly set to 100
+        setSingleRedemption(100.0, redemption, maturityDate_);
+
+        option_ = ext::shared_ptr<option>(
+                           new option(this, exercise, conversionRatio,
+                                      dividends, callability, creditSpread,
+                                      cashflows_, dayCounter, schedule,
+                                      issueDate, settlementDays, redemption));
+    }
+
+
+    ConvertibleFixedCouponBond::ConvertibleFixedCouponBond(
+                          const ext::shared_ptr<Exercise>& exercise,
+                          Real conversionRatio,
+                          const DividendSchedule& dividends,
+                          const CallabilitySchedule& callability,
+                          const Handle<Quote>& creditSpread,
+                          const Date& issueDate,
+                          Natural settlementDays,
+                          const std::vector<Rate>& coupons,
+                          const DayCounter& dayCounter,
+                          const Schedule& schedule,
+                          Real redemption,
+                          const Period& exCouponPeriod,
+                          const Calendar& exCouponCalendar,
+                          const BusinessDayConvention exCouponConvention,
+                          bool exCouponEndOfMonth)
+    : ConvertibleBond(exercise, conversionRatio, dividends, callability,
+                      creditSpread, issueDate, settlementDays,
+                      schedule, redemption) {
+
+        // !!! notional forcibly set to 100
+        cashflows_ = FixedRateLeg(schedule)
+            .withNotionals(100.0)
+            .withCouponRates(coupons, dayCounter)
+            .withPaymentAdjustment(schedule.businessDayConvention())
+            .withExCouponPeriod(exCouponPeriod,
+                                exCouponCalendar,
+                                exCouponConvention,
+                                exCouponEndOfMonth);
+
+        addRedemptionsToCashflows(std::vector<Real>(1, redemption));
+
+        QL_ENSURE(redemptions_.size() == 1, "multiple redemptions created");
+
+        option_ = ext::shared_ptr<option>(
+                           new option(this, exercise, conversionRatio,
+                                      dividends, callability, creditSpread,
+                                      cashflows_, dayCounter, schedule,
+                                      issueDate, settlementDays, redemption));
+    }
+
+
+    ConvertibleFloatingRateBond::ConvertibleFloatingRateBond(
+                          const ext::shared_ptr<Exercise>& exercise,
+                          Real conversionRatio,
+                          const DividendSchedule& dividends,
+                          const CallabilitySchedule& callability,
+                          const Handle<Quote>& creditSpread,
+                          const Date& issueDate,
+                          Natural settlementDays,
+                          const ext::shared_ptr<IborIndex>& index,
+                          Natural fixingDays,
+                          const std::vector<Spread>& spreads,
+                          const DayCounter& dayCounter,
+                          const Schedule& schedule,
+                          Real redemption,
+                          const Period& exCouponPeriod,
+                          const Calendar& exCouponCalendar,
+                          const BusinessDayConvention exCouponConvention,
+                          bool exCouponEndOfMonth)
+    : ConvertibleBond(exercise, conversionRatio, dividends, callability,
+                      creditSpread, issueDate, settlementDays,
+                      schedule, redemption) {
+
+        // !!! notional forcibly set to 100
+        cashflows_ = IborLeg(schedule, index)
+            .withPaymentDayCounter(dayCounter)
+            .withNotionals(100.0)
+            .withPaymentAdjustment(schedule.businessDayConvention())
+            .withFixingDays(fixingDays)
+            .withSpreads(spreads)
+            .withExCouponPeriod(exCouponPeriod,
+                                exCouponCalendar,
+                                exCouponConvention,
+                                exCouponEndOfMonth);
+
+        addRedemptionsToCashflows(std::vector<Real>(1, redemption));
+
+        QL_ENSURE(redemptions_.size() == 1, "multiple redemptions created");
+
+        option_ = ext::shared_ptr<option>(
+                           new option(this, exercise, conversionRatio,
+                                      dividends, callability, creditSpread,
+                                      cashflows_, dayCounter, schedule,
+                                      issueDate, settlementDays, redemption));
+
+        registerWith(index);
+    }
+
+    ConvertibleBond::option::option(const ConvertibleBond* bond,
+                                    const ext::shared_ptr<Exercise>& exercise,
+                                    Real conversionRatio,
+                                    DividendSchedule dividends,
+                                    CallabilitySchedule callability,
+                                    Handle<Quote> creditSpread,
+                                    Leg cashflows,
+                                    DayCounter dayCounter,
+                                    Schedule schedule,
+                                    const Date& issueDate,
+                                    Natural settlementDays,
+                                    Real redemption)
+    : OneAssetOption(
+          ext::shared_ptr<StrikedTypePayoff>(new PlainVanillaPayoff(
+              Option::Call, (bond->notionals()[0]) / 100.0 * redemption / conversionRatio)),
+          exercise),
+      bond_(bond), conversionRatio_(conversionRatio), callability_(std::move(callability)),
+      dividends_(std::move(dividends)), creditSpread_(std::move(creditSpread)),
+      cashflows_(std::move(cashflows)), dayCounter_(std::move(dayCounter)), issueDate_(issueDate),
+      schedule_(std::move(schedule)), settlementDays_(settlementDays), redemption_(redemption) {
+        registerWith(ext::shared_ptr<ConvertibleBond>(const_cast<ConvertibleBond*>(bond),
+                                                        null_deleter()));
+    }
+
+
+    void ConvertibleBond::option::setupArguments(
+                                       PricingEngine::arguments* args) const {
+
+        OneAssetOption::setupArguments(args);
+
+        auto* moreArgs = dynamic_cast<ConvertibleBond::option::arguments*>(args);
+        QL_REQUIRE(moreArgs != nullptr, "wrong argument type");
+
+        moreArgs->conversionRatio = conversionRatio_;
+
+        Date settlement = bond_->settlementDate();
+
+        Size n = callability_.size();
+        moreArgs->callabilityDates.clear();
+        moreArgs->callabilityTypes.clear();
+        moreArgs->callabilityPrices.clear();
+        moreArgs->callabilityTriggers.clear();
+        moreArgs->callabilityDates.reserve(n);
+        moreArgs->callabilityTypes.reserve(n);
+        moreArgs->callabilityPrices.reserve(n);
+        moreArgs->callabilityTriggers.reserve(n);
+        for (Size i=0; i<n; i++) {
+            if (!callability_[i]->hasOccurred(settlement, false)) {
+                moreArgs->callabilityTypes.push_back(callability_[i]->type());
+                moreArgs->callabilityDates.push_back(callability_[i]->date());
+                moreArgs->callabilityPrices.push_back(
+                                            callability_[i]->price().amount());
+                if (callability_[i]->price().type() == Bond::Price::Clean)
+                    moreArgs->callabilityPrices.back() +=
+                        bond_->accruedAmount(callability_[i]->date());
+                ext::shared_ptr<SoftCallability> softCall =
+                    ext::dynamic_pointer_cast<SoftCallability>(
+                                                             callability_[i]);
+                if (softCall != nullptr)
+                    moreArgs->callabilityTriggers.push_back(
+                                                         softCall->trigger());
+                else
+                    moreArgs->callabilityTriggers.push_back(Null<Real>());
+            }
+        }
+
+        const Leg& cashflows = bond_->cashflows();
+
+        moreArgs->couponDates.clear();
+        moreArgs->couponAmounts.clear();
+        for (Size i=0; i<cashflows.size()-1; i++) {
+            if (!cashflows[i]->hasOccurred(settlement, false)) {
+                moreArgs->couponDates.push_back(cashflows[i]->date());
+                moreArgs->couponAmounts.push_back(cashflows[i]->amount());
+            }
+        }
+
+        moreArgs->dividends.clear();
+        moreArgs->dividendDates.clear();
+        for (const auto& dividend : dividends_) {
+            if (!dividend->hasOccurred(settlement, false)) {
+                moreArgs->dividends.push_back(dividend);
+                moreArgs->dividendDates.push_back(dividend->date());
+            }
+        }
+
+        moreArgs->creditSpread = creditSpread_;
+        moreArgs->issueDate = issueDate_;
+        moreArgs->settlementDate = settlement;
+        moreArgs->settlementDays = settlementDays_;
+        moreArgs->redemption = redemption_;
+    }
+
+
+    void ConvertibleBond::option::arguments::validate() const {
+
+        OneAssetOption::arguments::validate();
+
+        QL_REQUIRE(conversionRatio != Null<Real>(), "null conversion ratio");
+        QL_REQUIRE(conversionRatio > 0.0,
+                   "positive conversion ratio required: "
+                   << conversionRatio << " not allowed");
+
+        QL_REQUIRE(redemption != Null<Real>(), "null redemption");
+        QL_REQUIRE(redemption >= 0.0,
+                   "positive redemption required: "
+                   << redemption << " not allowed");
+
+        QL_REQUIRE(settlementDate != Date(), "null settlement date");
+
+        QL_REQUIRE(settlementDays != Null<Natural>(), "null settlement days");
+
+        QL_REQUIRE(callabilityDates.size() == callabilityTypes.size(),
+                   "different number of callability dates and types");
+        QL_REQUIRE(callabilityDates.size() == callabilityPrices.size(),
+                   "different number of callability dates and prices");
+        QL_REQUIRE(callabilityDates.size() == callabilityTriggers.size(),
+                   "different number of callability dates and triggers");
+
+        QL_REQUIRE(couponDates.size() == couponAmounts.size(),
+                   "different number of coupon dates and amounts");
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>discretizedconvertible.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Theo Boafo
+ Copyright (C) 2006, 2007 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/convertiblebonds/discretizedconvertible.hpp>
+#include <ql/math/comparison.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    DiscretizedConvertible::DiscretizedConvertible(
+        ConvertibleBond::option::arguments args,
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        const TimeGrid& grid)
+    : arguments_(std::move(args)), process_(std::move(process)) {
+
+        dividendValues_ = Array(arguments_.dividends.size(), 0.0);
+
+        Date settlementDate = process_->riskFreeRate()->referenceDate();
+        for (Size i=0; i<arguments_.dividends.size(); i++) {
+            if (arguments_.dividends[i]->date() >= settlementDate) {
+                dividendValues_[i] =
+                    arguments_.dividends[i]->amount() *
+                    process_->riskFreeRate()->discount(
+                                             arguments_.dividends[i]->date());
+            }
+        }
+
+        DayCounter dayCounter = process_->riskFreeRate()->dayCounter();
+        Date bondSettlement = arguments_.settlementDate;
+
+        stoppingTimes_.resize(arguments_.exercise->dates().size());
+        for (Size i=0; i<stoppingTimes_.size(); ++i)
+            stoppingTimes_[i] =
+                dayCounter.yearFraction(bondSettlement,
+                                        arguments_.exercise->date(i));
+
+        callabilityTimes_.resize(arguments_.callabilityDates.size());
+        for (Size i=0; i<callabilityTimes_.size(); ++i)
+            callabilityTimes_[i] =
+                dayCounter.yearFraction(bondSettlement,
+                                        arguments_.callabilityDates[i]);
+
+        couponTimes_.resize(arguments_.couponDates.size());
+        for (Size i=0; i<couponTimes_.size(); ++i)
+            couponTimes_[i] =
+                dayCounter.yearFraction(bondSettlement,
+                                        arguments_.couponDates[i]);
+
+        dividendTimes_.resize(arguments_.dividendDates.size());
+        for (Size i=0; i<dividendTimes_.size(); ++i)
+            dividendTimes_[i] =
+                dayCounter.yearFraction(bondSettlement,
+                                        arguments_.dividendDates[i]);
+
+        if (!grid.empty()) {
+            // adjust times to grid
+            for (double& stoppingTime : stoppingTimes_)
+                stoppingTime = grid.closestTime(stoppingTime);
+            for (double& couponTime : couponTimes_)
+                couponTime = grid.closestTime(couponTime);
+            for (double& callabilityTime : callabilityTimes_)
+                callabilityTime = grid.closestTime(callabilityTime);
+            for (double& dividendTime : dividendTimes_)
+                dividendTime = grid.closestTime(dividendTime);
+        }
+    }
+
+    void DiscretizedConvertible::reset(Size size) {
+
+        // Set to bond redemption values
+        values_ = Array(size, arguments_.redemption);
+
+        // coupon amounts should be added when adjusting
+        // values_ = Array(size, arguments_.cashFlows.back()->amount());
+
+        conversionProbability_ = Array(size, 0.0);
+        spreadAdjustedRate_ = Array(size, 0.0);
+
+        DayCounter rfdc  = process_->riskFreeRate()->dayCounter();
+
+        // this takes care of convertibility and conversion probabilities
+        adjustValues();
+
+        Real creditSpread = arguments_.creditSpread->value();
+
+        Date exercise = arguments_.exercise->lastDate();
+
+        Rate riskFreeRate =
+            process_->riskFreeRate()->zeroRate(exercise, rfdc,
+                                               Continuous, NoFrequency);
+
+        // Calculate blended discount rate to be used on roll back.
+        for (Size j=0; j<values_.size(); j++) {
+           spreadAdjustedRate_[j] =
+               conversionProbability_[j] * riskFreeRate +
+               (1-conversionProbability_[j])*(riskFreeRate + creditSpread);
+        }
+    }
+
+    void DiscretizedConvertible::postAdjustValuesImpl() {
+
+        bool convertible = false;
+        switch (arguments_.exercise->type()) {
+          case Exercise::American:
+            if (time() <= stoppingTimes_[1] && time() >= stoppingTimes_[0])
+                convertible = true;
+            break;
+          case Exercise::European:
+            if (isOnTime(stoppingTimes_[0]))
+                convertible = true;
+            break;
+          case Exercise::Bermudan:
+              for (double stoppingTime : stoppingTimes_) {
+                  if (isOnTime(stoppingTime))
+                      convertible = true;
+              }
+            break;
+          default:
+            QL_FAIL("invalid option type");
+        }
+
+        for (Size i=0; i<callabilityTimes_.size(); i++) {
+            if (isOnTime(callabilityTimes_[i]))
+                applyCallability(i,convertible);
+        }
+
+        for (Size i=0; i<couponTimes_.size(); i++) {
+            if (isOnTime(couponTimes_[i]))
+                addCoupon(i);
+        }
+
+        if (convertible)
+            applyConvertibility();
+    }
+
+    void DiscretizedConvertible::applyConvertibility() {
+        Array grid = adjustedGrid();
+        for (Size j=0; j<values_.size(); j++) {
+            Real payoff = arguments_.conversionRatio*grid[j];
+            if (values_[j] <= payoff) {
+                values_[j] = payoff;
+                conversionProbability_[j] = 1.0;
+            }
+        }
+    }
+
+    void DiscretizedConvertible::applyCallability(Size i, bool convertible) {
+        Size j;
+        Array grid = adjustedGrid();
+        switch (arguments_.callabilityTypes[i]) {
+          case Callability::Call:
+            if (arguments_.callabilityTriggers[i] != Null<Real>()) {
+                Real conversionValue =
+                    arguments_.redemption/arguments_.conversionRatio;
+                Real trigger =
+                    conversionValue*arguments_.callabilityTriggers[i];
+                for (j=0; j<values_.size(); j++) {
+                    // the callability is conditioned by the trigger...
+                    if (grid[j] >= trigger) {
+                        // ...and might trigger conversion
+                        values_[j] =
+                            std::min(std::max(
+                                          arguments_.callabilityPrices[i],
+                                          arguments_.conversionRatio*grid[j]),
+                                     values_[j]);
+                    }
+                }
+            } else if (convertible) {
+                for (j=0; j<values_.size(); j++) {
+                    // exercising the callability might trigger conversion
+                    values_[j] =
+                        std::min(std::max(arguments_.callabilityPrices[i],
+                                          arguments_.conversionRatio*grid[j]),
+                                 values_[j]);
+                }
+            } else {
+                for (j=0; j<values_.size(); j++) {
+                    values_[j] = std::min(arguments_.callabilityPrices[i],
+                                          values_[j]);
+                }
+            }
+            break;
+          case Callability::Put:
+            for (j=0; j<values_.size(); j++) {
+                values_[j] = std::max(values_[j],
+                                      arguments_.callabilityPrices[i]);
+            }
+            break;
+          default:
+            QL_FAIL("unknown callability type");
+        }
+    }
+
+    void DiscretizedConvertible::addCoupon(Size i) {
+        values_ += arguments_.couponAmounts[i];
+    }
+
+    Disposable<Array> DiscretizedConvertible::adjustedGrid() const {
+        Time t = time();
+        Array grid = method()->grid(t);
+        // add back all dividend amounts in the future
+        for (Size i=0; i<arguments_.dividends.size(); i++) {
+            Time dividendTime = dividendTimes_[i];
+            if (dividendTime >= t || close(dividendTime,t)) {
+                const ext::shared_ptr<Dividend>& d = arguments_.dividends[i];
+                DiscountFactor dividendDiscount =
+                    process_->riskFreeRate()->discount(dividendTime) /
+                    process_->riskFreeRate()->discount(t);
+                for (double& j : grid)
+                    j += d->amount(j) * dividendDiscount;
+            }
+        }
+        return grid;
+    }
+
+}
+
+]]></document_content>
+  </document>
+</documents>

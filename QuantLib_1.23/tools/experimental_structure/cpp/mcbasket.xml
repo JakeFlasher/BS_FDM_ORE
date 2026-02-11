@@ -1,0 +1,550 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>adaptedpathpayoff.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andrea Odetti
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/mcbasket/adaptedpathpayoff.hpp>
+
+namespace QuantLib {
+
+  /*
+    Initializing maximumTimeRead_ to -1 would make more sense,
+    but it is unsigned and 0 has exactly the same behaviour.
+   */
+  AdaptedPathPayoff::ValuationData::ValuationData(
+                                              const Matrix       & path,
+                                              const std::vector<Handle<YieldTermStructure> > & forwardTermStructures,
+                                              Array              & payments,
+                                              Array              & exercises,
+                                              std::vector<Array> & states) :
+    path_(path),
+    forwardTermStructures_(forwardTermStructures),
+    payments_(payments), exercises_(exercises), states_(states),
+    maximumTimeRead_(0)
+  { }
+
+  Size AdaptedPathPayoff::ValuationData::numberOfTimes() const {
+    return path_.columns();
+  }
+
+  Size AdaptedPathPayoff::ValuationData::numberOfAssets() const {
+    return path_.rows();
+  }
+
+  Real AdaptedPathPayoff::ValuationData::getAssetValue(Size time, Size asset) {
+    maximumTimeRead_ = std::max(maximumTimeRead_, time);
+
+    return path_[asset][time];
+  }
+
+  const Handle<YieldTermStructure> & AdaptedPathPayoff::ValuationData::getYieldTermStructure(Size time) {
+    maximumTimeRead_ = std::max(maximumTimeRead_, time);
+
+    return forwardTermStructures_[time];
+  }
+
+  void AdaptedPathPayoff::ValuationData::setPayoffValue(Size time, Real value) {
+    /*
+      This is to ensure the payoff is an adapted function.
+      We prevent payments to depend on future fixings.
+     */
+    QL_REQUIRE(time >= maximumTimeRead_,
+               "not adapted payoff: looking into the future");
+
+    payments_[time] = value;
+  }
+
+  void AdaptedPathPayoff::ValuationData::setExerciseData(
+                                     Size time, Real exercise, Array & state) {
+    /*
+      This is to ensure the payoff is an adapted function.
+      We prevent payments to depend on future fixings.
+     */
+    QL_REQUIRE(time >= maximumTimeRead_,
+               "not adapted payoff: looking into the future");
+
+    if (!exercises_.empty())
+      exercises_[time] = exercise;
+
+    if (!states_.empty())
+      std::swap(states_[time], state);
+  }
+
+
+  void AdaptedPathPayoff::value(const Matrix       & path,
+                                const std::vector<Handle<YieldTermStructure> > & forwardTermStructures,
+                                Array              & payments,
+                                Array              & exercises,
+                                std::vector<Array> & states) const {
+    ValuationData data(path, forwardTermStructures, payments, exercises, states);
+
+    operator()(data);
+  }
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>longstaffschwartzmultipathpricer.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andrea Odetti
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/mcbasket/longstaffschwartzmultipathpricer.hpp>
+#include <ql/math/generallinearleastsquares.hpp>
+#include <ql/utilities/tracing.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    LongstaffSchwartzMultiPathPricer::PathInfo::PathInfo(Size numberOfTimes)
+        : payments(numberOfTimes, 0.0),
+          exercises(numberOfTimes, 0.0),
+          states(numberOfTimes) {
+    }
+
+    Size LongstaffSchwartzMultiPathPricer::PathInfo::pathLength() const {
+        return states.size();
+    }
+
+
+    LongstaffSchwartzMultiPathPricer::LongstaffSchwartzMultiPathPricer(
+        const ext::shared_ptr<PathPayoff>& payoff,
+        const std::vector<Size>& timePositions,
+        std::vector<Handle<YieldTermStructure> > forwardTermStructures,
+        Array discounts,
+        Size polynomOrder,
+        LsmBasisSystem::PolynomType polynomType)
+    : calibrationPhase_(true), payoff_(payoff), coeff_(new Array[timePositions.size() - 1]),
+      lowerBounds_(new Real[timePositions.size()]), timePositions_(timePositions),
+      forwardTermStructures_(std::move(forwardTermStructures)), dF_(std::move(discounts)),
+      v_(LsmBasisSystem::multiPathBasisSystem(
+          payoff->basisSystemDimension(), polynomOrder, polynomType)) {
+        QL_REQUIRE(   polynomType == LsmBasisSystem::Monomial
+                   || polynomType == LsmBasisSystem::Laguerre
+                   || polynomType == LsmBasisSystem::Hermite
+                   || polynomType == LsmBasisSystem::Hyperbolic
+                   || polynomType == LsmBasisSystem::Chebyshev2nd,
+                   "insufficient polynom type");
+    }
+
+    /*
+      Extract the relevant information from the whole path
+     */
+    LongstaffSchwartzMultiPathPricer::PathInfo 
+    LongstaffSchwartzMultiPathPricer::transformPath(const MultiPath& multiPath)
+    const {
+        const Size numberOfAssets = multiPath.assetNumber();
+        const Size numberOfTimes = timePositions_.size();
+
+        Matrix path(numberOfAssets, numberOfTimes, Null<Real>());
+
+        for (Size i = 0; i < numberOfTimes; ++i) {
+            const Size pos = timePositions_[i];
+            for (Size j = 0; j < numberOfAssets; ++j)
+                path[j][i] = multiPath[j][pos];
+        }
+        
+        PathInfo info(numberOfTimes);
+
+        payoff_->value(path, forwardTermStructures_, info.payments, info.exercises, info.states);
+
+        return info;
+    }
+
+    Real LongstaffSchwartzMultiPathPricer::operator()(
+                                            const MultiPath& multiPath) const {
+        PathInfo path = transformPath(multiPath);
+
+        if (calibrationPhase_) {
+            // store paths for the calibration
+            // only the relevant part
+            paths_.push_back(path);
+            // result doesn't matter
+            return 0.0;
+        }
+
+        // exercise at time t, cancels all payment AFTER t
+
+        const Size len = path.pathLength();
+        Real price = 0.0;
+
+        // this is the last event date
+        {
+            const Real payoff = path.payments[len - 1];
+            const Real exercise = path.exercises[len - 1];
+            const Array & states = path.states[len - 1];
+            const bool canExercise = !states.empty();
+
+            // at the end the continuation value is 0.0
+            if (canExercise && exercise > 0.0)
+                price += exercise;
+            price += payoff;
+        }
+
+        for (Integer i = len - 2; i >= 0; --i) {
+            price *= dF_[i + 1] / dF_[i];
+
+            const Real exercise = path.exercises[i];
+
+            /*
+              coeff_[i].size()
+              - 0 => never exercise
+              - v_.size() => use estimated continuation value 
+                (if > lowerBounds_[i])
+              - v_.size() + 1 => always exercise
+
+              In any case if states is empty, no exercise is allowed.
+             */
+            const Array & states = path.states[i];
+            const bool canExercise = !states.empty();
+
+            if (canExercise) {
+                if (coeff_[i].size() == v_.size() + 1) {   
+                    // special value always exercise
+                    price = exercise;
+                }
+                else {
+                    if (!coeff_[i].empty() && exercise > lowerBounds_[i]) {
+                        
+                        Real continuationValue = 0.0;
+                        for (Size l = 0; l < v_.size(); ++l) {
+                            continuationValue += coeff_[i][l] * v_[l](states);
+                        }
+                        
+                        if (continuationValue < exercise) {
+                            price = exercise;
+                        }
+                    }
+                }
+            }
+            const Real payoff = path.payments[i];
+            price += payoff;
+        }
+
+        return price * dF_[0];
+    }
+
+    void LongstaffSchwartzMultiPathPricer::calibrate() {
+        const Size n = paths_.size(); // number of paths
+        Array prices(n, 0.0), exercise(n, 0.0);
+
+        const Size basisDimension = payoff_->basisSystemDimension();
+
+        const Size len = paths_[0].pathLength();
+
+        /*
+          We try to estimate the lower bound of the continuation value,
+          so that only itm paths contribute to the regression.
+         */
+
+        for (Size j = 0; j < n; ++j) {
+            const Real payoff = paths_[j].payments[len - 1];
+            const Real exercise = paths_[j].exercises[len - 1];
+            const Array & states = paths_[j].states[len - 1];
+            const bool canExercise = !states.empty();
+
+            // at the end the continuation value is 0.0
+            if (canExercise && exercise > 0.0)
+                prices[j] += exercise;
+            prices[j] += payoff;
+        }
+
+        lowerBounds_[len - 1] = *std::min_element(prices.begin(), prices.end());
+
+        std::vector<bool> lsExercise(n);
+
+        for (Integer i = len - 2; i >= 0; --i) {
+            std::vector<Real>  y;
+            std::vector<Array> x;
+
+            // prices are discounted up to time i
+            const Real discountRatio = dF_[i + 1] / dF_[i];
+            prices *= discountRatio;
+            lowerBounds_[i + 1] *= discountRatio;
+
+            //roll back step
+            for (Size j = 0; j < n; ++j) {
+                exercise[j] = paths_[j].exercises[i];
+
+                // If states is empty, no exercise in this path
+                // and the path will not partecipate to the Lesat Square regression
+
+                const Array & states = paths_[j].states[i];
+                QL_REQUIRE(states.empty() || states.size() == basisDimension, 
+                           "Invalid size of basis system");
+
+                // only paths that could potentially create exercise opportunities
+                // partecipate to the regression
+
+                // if exercise is lower than minimum continuation value, no point in considering it
+                if (!states.empty() && exercise[j] > lowerBounds_[i + 1]) {
+                    x.push_back(states);
+                    y.push_back(prices[j]);
+                }
+            }
+
+            if (v_.size() <=  x.size()) {
+                coeff_[i] = GeneralLinearLeastSquares(x, y, v_).coefficients();
+            }
+            else {
+            // if number of itm paths is smaller then the number of
+            // calibration functions -> never exercise
+                QL_TRACE("Not enough itm paths: default decision is NEVER");
+                coeff_[i] = Array(0);
+            }
+
+            /* attempt to avoid static arbitrage given by always or never exercising.
+
+               always is absolute: regardless of the lowerBoundContinuationValue_ (this could be changed)
+               but it still honours "canExercise"
+             */
+            Real sumOptimized = 0.0;
+            Real sumNoExercise = 0.0;
+            Real sumAlwaysExercise = 0.0; // always, if allowed
+
+            for (Size j = 0, k = 0; j < n; ++j) {
+                sumNoExercise += prices[j];
+                lsExercise[j] = false;
+
+                const bool canExercise = !paths_[j].states[i].empty();
+                if (canExercise) {
+                    sumAlwaysExercise += exercise[j];
+                    if (!coeff_[i].empty() && exercise[j] > lowerBounds_[i + 1]) {
+                        Real continuationValue = 0.0;
+                        for (Size l = 0; l < v_.size(); ++l) {
+                            continuationValue += coeff_[i][l] * v_[l](x[k]);
+                        }
+                        
+                        if (continuationValue < exercise[j]) {
+                            lsExercise[j] = true;
+                        }
+                        ++k;
+                    }
+                }
+                else {
+                    sumAlwaysExercise += prices[j];
+                }
+
+                sumOptimized += lsExercise[j] ? exercise[j] : prices[j];
+            }
+
+            sumOptimized /= n;
+            sumNoExercise /= n;
+            sumAlwaysExercise /= n;
+
+            QL_TRACE(   "Time index: " << i 
+                     << ", LowerBound: " << lowerBounds_[i + 1] 
+                     << ", Optimum: " << sumOptimized 
+                     << ", Continuation: " << sumNoExercise 
+                     << ", Termination: " << sumAlwaysExercise);
+
+            if (  sumOptimized >= sumNoExercise 
+                && sumOptimized >= sumAlwaysExercise) {
+                
+                QL_TRACE("Accepted LS decision");
+                for (Size j = 0; j < n; ++j) {
+                    // lsExercise already contains "canExercise"
+                    prices[j] = lsExercise[j] ? exercise[j] : prices[j];
+                }
+            }
+            else if (sumAlwaysExercise > sumNoExercise) {
+                QL_TRACE("Overridden bad LS decision: ALWAYS");
+                for (Size j = 0; j < n; ++j) {
+                    const bool canExercise = !paths_[j].states[i].empty();
+                    prices[j] = canExercise ? exercise[j] : prices[j];
+                }
+                // special value to indicate always exercise
+                coeff_[i] = Array(v_.size() + 1); 
+            }
+            else {
+                QL_TRACE("Overridden bad LS decision: NEVER");
+                // prices already contain the continuation value
+                // special value to indicate never exercise
+                coeff_[i] = Array(0); 
+            }
+
+            // then we add in any case the payment at time t
+            // which is made even if cancellation happens at t
+            for (Size j = 0; j < n; ++j) {
+                const Real payoff = paths_[j].payments[i];
+                prices[j] += payoff;
+            }
+
+            lowerBounds_[i] = *std::min_element(prices.begin(), prices.end());
+        }
+
+        // remove calibration paths
+        paths_.clear();
+        // entering the calculation phase
+        calibrationPhase_ = false;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>mcpathbasketengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andrea Odetti
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/mcbasket/mcpathbasketengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    EuropeanPathMultiPathPricer::EuropeanPathMultiPathPricer(
+        ext::shared_ptr<PathPayoff>& payoff,
+        std::vector<Size> timePositions,
+        std::vector<Handle<YieldTermStructure> > forwardTermStructures,
+        Array discounts)
+    : payoff_(payoff), timePositions_(std::move(timePositions)),
+      forwardTermStructures_(std::move(forwardTermStructures)), discounts_(std::move(discounts)) {}
+
+    Real EuropeanPathMultiPathPricer::operator()(const MultiPath& multiPath)
+                                                                       const {
+
+        Size n = multiPath.pathSize();
+        QL_REQUIRE(n > 0, "the path cannot be empty");
+
+        Size numberOfAssets = multiPath.assetNumber();
+        QL_REQUIRE(numberOfAssets > 0, "there must be some paths");
+
+        const Size numberOfTimes = timePositions_.size();
+
+        Matrix path(numberOfAssets, numberOfTimes, Null<Real>());
+
+        for (Size i = 0; i < numberOfTimes; ++i) {
+            const Size pos = timePositions_[i];
+            for (Size j = 0; j < numberOfAssets; ++j)
+                path[j][i] = multiPath[j][pos];
+        }
+
+        Array values(numberOfTimes, 0.0);
+
+        // ignored
+        Array exercises;
+        std::vector<Array> states;
+
+        payoff_->value(path, forwardTermStructures_, values, exercises, states);
+
+        // in this engine we ignore early exercise
+
+        Real discountedPayoff = DotProduct(values, discounts_);
+
+        return discountedPayoff;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>pathmultiassetoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andrea Odetti
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/mcbasket/pathmultiassetoption.hpp>
+#include <ql/processes/stochasticprocessarray.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <ql/event.hpp>
+
+namespace QuantLib {
+
+    PathMultiAssetOption::PathMultiAssetOption(
+                            const ext::shared_ptr<PricingEngine>& engine) {
+        if (engine != nullptr)
+            setPricingEngine(engine);
+    }
+
+    bool PathMultiAssetOption::isExpired() const {
+        return detail::simple_event(fixingDates().back()).hasOccurred();
+    }
+
+    void PathMultiAssetOption::setupExpired() const {
+        NPV_ = 0.0;
+    }
+
+    void PathMultiAssetOption::setupArguments(PricingEngine::arguments* args)
+                                                                       const {
+        auto* arguments = dynamic_cast<PathMultiAssetOption::arguments*>(args);
+
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->payoff            = pathPayoff();
+        arguments->fixingDates       = fixingDates();
+    }
+
+    void PathMultiAssetOption::arguments::validate() const {
+        QL_REQUIRE(payoff,                 "no payoff given");
+        QL_REQUIRE(!fixingDates.empty(), "no dates given");
+    }
+}
+
+]]></document_content>
+  </document>
+</documents>
