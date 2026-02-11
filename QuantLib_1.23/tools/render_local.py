@@ -32,7 +32,7 @@ from typing import List
 # Constants
 # ---------------------------------------------------------------------------
 
-MAX_DEFAULT_BYTES = 50 * 1024  # 50 KiB
+MAX_DEFAULT_BYTES = 60 * 1024  # 50 KiB
 
 BINARY_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico",

@@ -1,0 +1,560 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>brownianbridge.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+// ===========================================================================
+// NOTE: The following copyright notice applies to the original code,
+//
+// Copyright (C) 2002 Peter Jäckel "Monte Carlo Methods in Finance".
+// All rights reserved.
+//
+// Permission to use, copy, modify, and distribute this software is freely
+// granted, provided that this notice is preserved.
+// ===========================================================================
+
+#include <ql/methods/montecarlo/brownianbridge.hpp>
+
+namespace QuantLib {
+
+    BrownianBridge::BrownianBridge(Size steps)
+    : size_(steps), t_(size_), sqrtdt_(size_),
+      bridgeIndex_(size_), leftIndex_(size_), rightIndex_(size_),
+      leftWeight_(size_), rightWeight_(size_), stdDev_(size_) {
+        for (Size i=0; i<size_; ++i)
+            t_[i] = static_cast<Time>(i+1);
+        initialize();
+    }
+
+    BrownianBridge::BrownianBridge(const std::vector<Time>& times)
+    : size_(times.size()), t_(times), sqrtdt_(size_),
+      bridgeIndex_(size_), leftIndex_(size_), rightIndex_(size_),
+      leftWeight_(size_), rightWeight_(size_), stdDev_(size_) {
+        initialize();
+    }
+
+    BrownianBridge::BrownianBridge(const TimeGrid& timeGrid)
+    : size_(timeGrid.size()-1), t_(size_), sqrtdt_(size_),
+      bridgeIndex_(size_), leftIndex_(size_), rightIndex_(size_),
+      leftWeight_(size_), rightWeight_(size_), stdDev_(size_) {
+        for (Size i=0; i<size_; ++i)
+            t_[i] = timeGrid[i+1];
+        initialize();
+    }
+
+
+    void BrownianBridge::initialize() {
+
+        sqrtdt_[0] = std::sqrt(t_[0]);
+        for (Size i=1; i<size_; ++i)
+            sqrtdt_[i] = std::sqrt(t_[i]-t_[i-1]);
+
+        // map is used to indicate which points are already constructed.
+        // If map[i] is zero, path point i is yet unconstructed.
+        // map[i]-1 is the index of the variate that constructs
+        // the path point # i.
+        std::vector<Size> map(size_, 0);
+
+        //  The first point in the construction is the global step.
+        map[size_-1] = 1;
+        //  The global step is constructed from the first variate.
+        bridgeIndex_[0] = size_-1;
+        //  The variance of the global step
+        stdDev_[0] = std::sqrt(t_[size_-1]);
+        //  The global step to the last point in time is special.
+        leftWeight_[0] = rightWeight_[0] = 0.0;
+        for (Size j=0, i=1; i<size_; ++i) {
+            // Find the next unpopulated entry in the map.
+            while (map[j] != 0U)
+                ++j;
+            Size k = j;
+            // Find the next populated entry in the map from there.
+            while (map[k] == 0U)
+                ++k;
+            // l-1 is now the index of the point to be constructed next.
+            Size l = j + ((k-1-j)>>1);
+            map[l] = i;
+            // The i-th Gaussian variate will be used to set point l-1.
+            bridgeIndex_[i] = l;
+            leftIndex_[i]   = j;
+            rightIndex_[i]  = k;
+            if (j != 0) {
+                leftWeight_[i]= (t_[k]-t_[l])/(t_[k]-t_[j-1]);
+                rightWeight_[i] = (t_[l]-t_[j-1])/(t_[k]-t_[j-1]);
+                stdDev_[i] =
+                    std::sqrt(((t_[l]-t_[j-1])*(t_[k]-t_[l]))
+                              /(t_[k]-t_[j-1]));
+            } else {
+                leftWeight_[i]  = (t_[k]-t_[l])/t_[k];
+                rightWeight_[i] =  t_[l]/t_[k];
+                stdDev_[i] = std::sqrt(t_[l]*(t_[k]-t_[l])/t_[k]);
+            }
+            j=k+1;
+            if (j>=size_)
+                j=0;    //  wrap around
+        }
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>genericlsregression.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006 Mark Joshi
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/montecarlo/genericlsregression.hpp>
+#include <ql/math/statistics/sequencestatistics.hpp>
+#include <ql/math/matrixutilities/svd.hpp>
+
+namespace QuantLib {
+
+    Real genericLongstaffSchwartzRegression(
+                std::vector<std::vector<NodeData> >& simulationData,
+                std::vector<std::vector<Real> >& basisCoefficients) {
+
+        Size steps = simulationData.size();
+        basisCoefficients.resize(steps-1);
+
+        for (Size i=steps-1; i!=0; --i) {
+
+            std::vector<NodeData>& exerciseData = simulationData[i];
+
+            // 1) find the covariance matrix of basis function values and
+            //    deflated cash-flows
+            Size N = exerciseData.front().values.size();
+            std::vector<Real> temp(N+1);
+            SequenceStatistics stats(N+1);
+
+            Size j;
+            for (j=0; j<exerciseData.size(); ++j) {
+                if (exerciseData[j].isValid) {
+                    std::copy(exerciseData[j].values.begin(),
+                              exerciseData[j].values.end(),
+                              temp.begin());
+                    temp.back() = exerciseData[j].cumulatedCashFlows
+                                - exerciseData[j].controlValue;
+
+                    stats.add(temp);
+                }
+            }
+
+            std::vector<Real> means = stats.mean();
+            Matrix covariance = stats.covariance();
+
+            Matrix C(N,N);
+            Array target(N);
+            for (Size k=0; k<N; ++k) {
+                target[k] = covariance[k][N] + means[k]*means[N];
+                for (Size l=0; l<=k; ++l)
+                    C[k][l] = C[l][k] = covariance[k][l] + means[k]*means[l];
+            }
+
+            // 2) solve for least squares regression
+            Array alphas = SVD(C).solveFor(target);
+            basisCoefficients[i-1].resize(N);
+            std::copy(alphas.begin(), alphas.end(),
+                      basisCoefficients[i-1].begin());
+
+            // 3) use exercise strategy to divide paths into exercise and
+            //    non-exercise domains
+            for (j=0; j<exerciseData.size(); ++j) {
+                if (exerciseData[j].isValid) {
+                    Real exerciseValue = exerciseData[j].exerciseValue;
+                    Real continuationValue =
+                        exerciseData[j].cumulatedCashFlows;
+                    Real estimatedContinuationValue =
+                        std::inner_product(
+                                 exerciseData[j].values.begin(),
+                                 exerciseData[j].values.end(),
+                                 alphas.begin(),
+                                 exerciseData[j].controlValue);
+
+                    // for exercise paths, add deflated rebate to
+                    // deflated cash-flows at previous time frame;
+                    // for non-exercise paths, add deflated cash-flows to
+                    // deflated cash-flows at previous time frame
+                    Real value = estimatedContinuationValue <= exerciseValue ?
+                                 exerciseValue :
+                                 continuationValue;
+
+                    simulationData[i-1][j].cumulatedCashFlows += value;
+                }
+            }
+        }
+
+        // the value of the product can now be estimated by averaging
+        // over all paths
+        Statistics estimate;
+        std::vector<NodeData>& estimatedData = simulationData[0];
+        for (auto& j : estimatedData)
+            estimate.add(j.cumulatedCashFlows);
+
+        return estimate.mean();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>lsmbasissystem.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006 Klaus Spanderen
+ Copyright (C) 2010 Kakhkhor Abdijalilov
+ 
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file lsmbasissystem.cpp
+    \brief utility classes for longstaff schwartz early exercise Monte Carlo
+*/
+
+#include <ql/math/integrals/gaussianquadratures.hpp>
+#include <ql/methods/montecarlo/lsmbasissystem.hpp>
+#include <numeric>
+#include <set>
+#include <utility>
+
+namespace QuantLib {
+    namespace {
+
+        // makes typing a little easier
+        typedef std::vector<ext::function<Real(Real)> > VF_R;
+        typedef std::vector<ext::function<Real(Array)> > VF_A;
+        typedef std::vector<std::vector<Size> > VV;
+
+        // pow(x, order)
+        class MonomialFct {
+          public:
+            explicit MonomialFct(Size order): order_(order) {}
+            inline Real operator()(const Real x) const {
+                Real ret = 1.0;
+                for(Size i=0; i<order_; ++i)
+                    ret *= x;
+                return ret;
+            }
+          private:
+            const Size order_;
+        };
+
+        /* multiplies [Real -> Real] functors
+           to create [Array -> Real] functor */
+        class MultiDimFct {
+          public:
+            explicit MultiDimFct(VF_R b) : b_(std::move(b)) {
+                QL_REQUIRE(!b_.empty(), "zero size basis");
+            }
+            inline Real operator()(const Array& a) const {
+                #if defined(QL_EXTRA_SAFETY_CHECKS)
+                QL_REQUIRE(b_.size()==a.size(), "wrong argument size");
+                #endif
+                Real ret = b_[0](a[0]);
+                for(Size i=1; i<b_.size(); ++i)
+                    ret *= b_[i](a[i]);
+                return ret;
+            }
+          private:
+            const VF_R b_;
+        };
+
+        // check size and order of tuples
+        void check_tuples(const VV& v, Size dim, Size order) {
+            for (const auto& i : v) {
+                QL_REQUIRE(dim == i.size(), "wrong tuple size");
+                QL_REQUIRE(order == std::accumulate(i.begin(), i.end(), 0UL), "wrong tuple order");
+            }
+        }
+
+        // build order N+1 tuples from order N tuples
+        VV next_order_tuples(const VV& v) {
+            const Size order = std::accumulate(v[0].begin(), v[0].end(), 0UL);
+            const Size dim = v[0].size();
+
+            check_tuples(v, dim, order);
+
+            // the set of unique tuples
+            std::set<std::vector<Size> > tuples;
+            std::vector<Size> x;
+            for(Size i=0; i<dim; ++i) {
+                // increase i-th value in every tuple by 1
+                for (const auto& j : v) {
+                    x = j;
+                    x[i] += 1;
+                    tuples.insert(x);
+                }
+            }
+
+            VV ret(tuples.begin(), tuples.end());
+            return ret;
+        }
+    } 
+
+    // LsmBasisSystem static methods
+
+    VF_R LsmBasisSystem::pathBasisSystem(Size order, PolynomType polyType) {
+        VF_R ret(order+1);
+        for (Size i=0; i<=order; ++i) {
+            switch (polyType) {
+              case Monomial:
+                ret[i] = MonomialFct(i);
+                break;
+              case Laguerre:
+                {
+                  GaussLaguerrePolynomial p;
+                  ret[i] = [=](Real x){ return p.weightedValue(i, x); };
+                }
+                break;
+              case Hermite:
+                {
+                  GaussHermitePolynomial p;
+                  ret[i] = [=](Real x){ return p.weightedValue(i, x); };
+                }
+                break;
+              case Hyperbolic:
+                {
+                  GaussHyperbolicPolynomial p;
+                  ret[i] = [=](Real x){ return p.weightedValue(i, x); };
+                }
+                break;
+              case Legendre:
+                {
+                  GaussLegendrePolynomial p;
+                  ret[i] = [=](Real x){ return p.weightedValue(i, x); };
+                }
+                break;
+              case Chebyshev:
+                {
+                  GaussChebyshevPolynomial p;
+                  ret[i] = [=](Real x){ return p.weightedValue(i, x); };
+                }
+                break;
+              case Chebyshev2nd:
+                {
+                  GaussChebyshev2ndPolynomial p;
+                  ret[i] = [=](Real x){ return p.weightedValue(i, x); };
+                }
+                break;
+              default:
+                QL_FAIL("unknown regression type");
+            }
+        }
+        return ret;
+    }
+
+    VF_A LsmBasisSystem::multiPathBasisSystem(Size dim, Size order,
+                                              PolynomType polyType) {
+        QL_REQUIRE(dim>0, "zero dimension");
+        // get single factor basis
+        VF_R pathBasis = pathBasisSystem(order, polyType);
+        VF_A ret;
+        // 0-th order term
+        VF_R term(dim, pathBasis[0]);
+        ret.push_back(MultiDimFct(term));
+        // start with all 0 tuple
+        VV tuples(1, std::vector<Size>(dim));
+        // add multi-factor terms
+        for(Size i=1; i<=order; ++i) {
+            tuples = next_order_tuples(tuples);
+            // now we have all tuples of order i
+            // for each tuple add the corresponding term
+            for (auto& tuple : tuples) {
+                for(Size k=0; k<dim; ++k)
+                    term[k] = pathBasis[tuple[k]];
+                ret.push_back(MultiDimFct(term));
+            }
+        }
+        return ret;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>parametricexercise.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/montecarlo/parametricexercise.hpp>
+#include <ql/math/optimization/problem.hpp>
+#include <ql/math/optimization/constraint.hpp>
+
+namespace QuantLib {
+
+    namespace {
+
+        class ValueEstimate : public CostFunction {
+          public:
+            ValueEstimate(const std::vector<NodeData>& simulationData,
+                          const ParametricExercise& exercise,
+                          Size exerciseIndex);
+            Real value(const Array& parameters) const override;
+            Disposable<Array> values(const Array&) const override {
+                QL_FAIL("values method not implemented");
+            }
+
+        private:
+            const std::vector<NodeData>& simulationData_;
+            const ParametricExercise& exercise_;
+            Size exerciseIndex_;
+            mutable std::vector<Real> parameters_;
+        };
+
+        ValueEstimate::ValueEstimate(
+                                 const std::vector<NodeData>& simulationData,
+                                 const ParametricExercise& exercise,
+                                 Size exerciseIndex)
+        : simulationData_(simulationData), exercise_(exercise),
+          exerciseIndex_(exerciseIndex),
+          parameters_(exercise.numberOfParameters()[exerciseIndex]) {
+            for (const auto& i : simulationData_) {
+                if (i.isValid)
+                    return;
+            }
+            QL_FAIL("no valid paths");
+        }
+
+        Real ValueEstimate::value(const Array& parameters) const {
+            std::copy(parameters.begin(), parameters.end(),
+                      parameters_.begin());
+            Real sum = 0.0;
+            Size n = 0;
+            for (const auto& i : simulationData_) {
+                if (i.isValid) {
+                    ++n;
+                    if (exercise_.exercise(exerciseIndex_, parameters_, i.values))
+                        sum += i.exerciseValue;
+                    else
+                        sum += i.cumulatedCashFlows;
+                }
+            }
+            return -sum/n;
+        }
+
+    }
+
+
+
+    Real genericEarlyExerciseOptimization(
+                          std::vector<std::vector<NodeData> >& simulationData,
+                          const ParametricExercise& exercise,
+                          std::vector<std::vector<Real> >& parameters,
+                          const EndCriteria& endCriteria,
+                          OptimizationMethod& method) {
+
+        Size steps = simulationData.size();
+        parameters.resize(steps-1);
+
+        for (Size i=steps-1; i!=0; --i) {
+            const std::vector<NodeData>& exerciseData = simulationData[i];
+
+            parameters[i-1].resize(exercise.numberOfParameters()[i-1]);
+
+
+            // optimize
+            ValueEstimate f(exerciseData, exercise, i-1);
+
+            Array guess(parameters[i-1].size());
+            exercise.guess(i-1, parameters[i-1]);
+            std::copy(parameters[i-1].begin(), parameters[i-1].end(),
+                      guess.begin());
+
+            NoConstraint c;
+
+            Problem p(f, c, guess);
+            method.minimize(p, endCriteria);
+
+            Array result = p.currentValue();
+            std::copy(result.begin(), result.end(),
+                      parameters[i-1].begin());
+
+            std::vector<NodeData>& previousData = simulationData[i-1];
+            for (Size j=0; j<previousData.size(); ++j) {
+                if (exerciseData[j].isValid) {
+                    if (exercise.exercise(i-1,
+                                          parameters[i-1],
+                                          exerciseData[j].values))
+                        previousData[j].cumulatedCashFlows +=
+                            exerciseData[j].exerciseValue;
+                    else
+                        previousData[j].cumulatedCashFlows +=
+                            exerciseData[j].cumulatedCashFlows;
+                }
+            }
+        }
+
+        Real sum = 0.0;
+        const std::vector<NodeData>& initialData = simulationData.front();
+        for (const auto& i : initialData)
+            sum += i.cumulatedCashFlows;
+        return sum/initialData.size();
+    }
+
+}
+
+]]></document_content>
+  </document>
+</documents>
