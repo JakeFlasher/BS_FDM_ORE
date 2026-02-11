@@ -1,2 +1,0 @@
-add_executable(DiscreteHedging DiscreteHedging.cpp)
-target_link_libraries(DiscreteHedging ${QL_LINK_LIBRARY})

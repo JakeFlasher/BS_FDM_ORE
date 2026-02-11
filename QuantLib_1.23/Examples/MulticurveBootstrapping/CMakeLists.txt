@@ -1,2 +1,0 @@
-add_executable(MulticurveBootstrapping MulticurveBootstrapping.cpp)
-target_link_libraries(MulticurveBootstrapping ${QL_LINK_LIBRARY})
