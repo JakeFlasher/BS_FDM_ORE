@@ -27,6 +27,7 @@
 #include <ql/instruments/oneassetoption.hpp>
 #include <ql/methods/finitedifferences/bsmoperator.hpp>
 #include <ql/methods/finitedifferences/bsmtermoperator.hpp>
+#include <ql/methods/finitedifferences/fittedbsmoperator.hpp>
 
 namespace QuantLib {
 
@@ -92,6 +93,9 @@ namespace QuantLib {
 
     void FDVanillaEngine::initializeOperator() const {
         if (timeDependent_) {
+            // Fitted operator is not available for the time-dependent
+            // coefficient path (PdeOperator<PdeBSM>); the flag is
+            // silently ignored here.
             finiteDifferenceOperator_ = BSMTermOperator(intrinsicValues_.grid(),
                                                         process_, getResidualTime());
         } else {
@@ -106,8 +110,13 @@ namespace QuantLib {
             Volatility sigma =
                 process_->blackVolatility()->blackVol(exerciseDate_, K);
 
-            finiteDifferenceOperator_ = BSMOperator(intrinsicValues_.grid(),
-                                                    r, q, sigma);
+            if (useFittedOperator_) {
+                finiteDifferenceOperator_ = FittedBSMOperator(
+                    intrinsicValues_.grid(), r, q, sigma);
+            } else {
+                finiteDifferenceOperator_ = BSMOperator(intrinsicValues_.grid(),
+                                                        r, q, sigma);
+            }
         }
     }
 

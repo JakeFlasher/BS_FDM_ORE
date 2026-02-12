@@ -49,12 +49,28 @@ namespace QuantLib {
         FDVanillaEngine(ext::shared_ptr<GeneralizedBlackScholesProcess> process,
                         Size timeSteps,
                         Size gridPoints,
-                        bool timeDependent = false)
+                        bool timeDependent = false,
+                        bool useFittedOperator = false)
         : process_(std::move(process)), timeSteps_(timeSteps), gridPoints_(gridPoints),
-          timeDependent_(timeDependent), intrinsicValues_(gridPoints), BCs_(2) {}
+          timeDependent_(timeDependent), useFittedOperator_(useFittedOperator),
+          intrinsicValues_(gridPoints), BCs_(2) {}
         virtual ~FDVanillaEngine() = default;
         // accessors
         const Array& grid() const { return intrinsicValues_.grid(); }
+        /*! Enable or disable exponentially fitted spatial operator.
+            When enabled and the operator is time-independent, a
+            FittedBSMOperator (Duffy 2004) replaces BSMOperator,
+            guaranteeing M-matrix / monotonicity properties regardless
+            of the mesh Péclet number.  Best combined with fully
+            implicit (theta = 1) time stepping.
+
+            \note The fitted operator is not available for the
+                  time-dependent coefficient path (BSMTermOperator);
+                  the flag is silently ignored in that case.
+        */
+        void enableFittedOperator(bool flag = true) {
+            useFittedOperator_ = flag;
+        }
       protected:
         // methods
         virtual void setupArguments(const PricingEngine::arguments*) const;
@@ -68,6 +84,7 @@ namespace QuantLib {
         ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
         Size timeSteps_, gridPoints_;
         bool timeDependent_;
+        bool useFittedOperator_;
         mutable Date exerciseDate_;
         mutable ext::shared_ptr<Payoff> payoff_;
         mutable TridiagonalOperator finiteDifferenceOperator_;

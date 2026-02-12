@@ -1,0 +1,1359 @@
+<system_context>
+You are an expert C++ developer implementing improvements to QuantLib v1.23's
+finite difference framework for Black-Scholes option pricing. You have deep
+familiarity with QuantLib's coding conventions, class hierarchy, and the modern
+Fdm* framework (not the deprecated legacy MixedScheme framework).
+
+CODING CONVENTIONS (mandatory):
+- Namespace: all classes in `namespace QuantLib { }`
+- Smart pointers: use `ext::shared_ptr`, NOT `std::shared_ptr`
+- Return arrays: use `Array` (QuantLib uses move semantics; match existing
+  method signatures — if similar methods return `Disposable<Array>`, do so too)
+- Assertions: use `QL_REQUIRE(condition, message)` for preconditions,
+  `QL_ENSURE(condition, message)` for postconditions
+- Include guards: `#ifndef quantlib_<path_underscored>_hpp` /
+  `#define quantlib_<path_underscored>_hpp`
+- Copyright header: match the style of adjacent files in the same directory
+- Includes: use angle brackets `<ql/...>` for QuantLib headers
+- No `using namespace std;` in headers
+- Follow existing naming: `camelCase` for methods, `camelCase_` for private
+  members, `CamelCase` for classes
+
+OUTPUT RULES:
+- Produce COMPLETE files, never diffs or partial snippets
+- Only output files that are new or modified in this round
+- Each file must compile against unmodified QuantLib v1.23 headers (plus any
+  files produced in prior rounds, which will be provided if needed)
+- Include all necessary #include directives
+</system_context>
+
+<mathematical_context>
+PDE in log-price x = ln(S/K), time-to-maturity τ (τ=0 at payoff, τ=T today):
+
+  -u_τ + a(x,τ)·u_xx + b(x,τ)·u_x − r·u = 0
+
+where a(x,τ) = σ²/2,  b(x,τ) = (r−q) − σ²/2.
+
+EXPONENTIAL FITTING:
+  θ_j = b_j·h / (2·a_j)       (local Péclet parameter)
+  ρ_j = θ_j·coth(θ_j)         (fitting factor; ρ ≈ 1 + θ²/3 for |θ| < 1e-8)
+
+Fitted stencil at interior node j (uniform grid spacing h):
+  ℓ_j = a_j·ρ_j/h² − b_j/(2h)     (lower off-diagonal)
+  d_j = −2·a_j·ρ_j/h² − r          (main diagonal)
+  u_j⁺ = a_j·ρ_j/h² + b_j/(2h)    (upper off-diagonal)
+
+IMPORTANT: Exponential fitting GUARANTEES ℓ_j ≥ 0 and u_j⁺ ≥ 0 for all
+finite a_j > 0 (proof: ℓ_j = (b_j/(2h))·(coth(θ_j)−1) which is non-negative
+for all signs of b_j). Upwind fallback is only needed as a degenerate guard
+when a_j ≈ 0.
+
+This stencil decomposes as: b_j·(∂/∂x) + a_j·ρ_j·(∂²/∂x²) − r·I,
+which means it can be assembled via TripleBandLinearOp::axpyb():
+  mapT_.axpyb(b_array, firstDerivOp, secondDerivOp.mult(aρ_array), Array(1,-r))
+
+RANNACHER-SMOOTHED CN: After each discontinuity event (payoff at τ=0,
+monitoring projection), perform 2 implicit Euler half-steps at dt/2, then
+resume Crank-Nicolson.
+
+GREEKS: Δ = u_x/S,  Γ = (u_xx − u_x)/S²  where x = ln(S/K).
+
+SINH MESH: x(ξ) = x_center + c·sinh(α·(ξ − ξ₀)) for ξ ∈ [0,1], with ξ₀
+found by bisection to satisfy endpoint constraints x(0)=xMin, x(1)=xMax.
+</mathematical_context>
+
+<task>
+ROUND 7 OF 7: Create a comprehensive test file that validates all improvements
+from Rounds 1-6. The tests serve as both validation and regression protection.
+
+OUTPUT: 1 file (test implementation).
+</task>
+
+<source_files>
+Provide ALL output headers from Rounds 1-6 so the test can compile:
+[>>> ATTACH HERE: output file(s) generated in Round(s) 1, 2, 3, 4, 5, 6 <<<]
+
+Also provide the QuantLib test infrastructure headers:
+FILE: test-suite/utilities.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2003, 2004, 2008 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#ifndef quantlib_test_utilities_hpp
+#define quantlib_test_utilities_hpp
+
+#include <ql/instruments/payoffs.hpp>
+#include <ql/exercise.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/termstructures/volatility/equityfx/blackvoltermstructure.hpp>
+#include <ql/quote.hpp>
+#include <ql/patterns/observable.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <ql/functional.hpp>
+#include <boost/test/unit_test.hpp>
+#if BOOST_VERSION < 105900
+#include <boost/test/floating_point_comparison.hpp>
+#else
+#include <boost/test/tools/floating_point_comparison.hpp>
+#endif
+#include <cmath>
+#include <iomanip>
+#include <numeric>
+#include <string>
+#include <utility>
+#include <vector>
+
+// This makes it easier to use array literals (for new code, use std::vector though)
+#define LENGTH(a) (sizeof(a)/sizeof(a[0]))
+
+#define QUANTLIB_TEST_CASE(f) BOOST_TEST_CASE(QuantLib::detail::quantlib_test_case(f))
+
+namespace QuantLib {
+
+    namespace detail {
+
+        // used to avoid no-assertion messages in Boost 1.35
+        class quantlib_test_case {
+            ext::function<void()> test_;
+          public:
+            template <class F>
+            explicit quantlib_test_case(F test) : test_(test) {}
+            void operator()() const {
+                Date before = Settings::instance().evaluationDate();
+                BOOST_CHECK(true);
+                test_();
+                Date after = Settings::instance().evaluationDate();
+                if (before != after)
+                    BOOST_ERROR("Evaluation date not reset"
+                                << "\n  before: " << before
+                                << "\n  after:  " << after);
+            }
+            #if BOOST_VERSION <= 105300
+            // defined to avoid unused-variable warnings. It doesn't
+            // work after Boost 1.53 because the functions were
+            // overloaded and the address can't be resolved.
+            void _use_check(
+                    const void* = &boost::test_tools::check_is_close,
+                    const void* = &boost::test_tools::check_is_small) const {}
+            #endif
+        };
+
+    }
+
+    std::string payoffTypeToString(const ext::shared_ptr<Payoff>&);
+    std::string exerciseTypeToString(const ext::shared_ptr<Exercise>&);
+
+
+    ext::shared_ptr<YieldTermStructure>
+    flatRate(const Date& today,
+             const ext::shared_ptr<Quote>& forward,
+             const DayCounter& dc);
+
+    ext::shared_ptr<YieldTermStructure>
+    flatRate(const Date& today,
+             Rate forward,
+             const DayCounter& dc);
+
+    ext::shared_ptr<YieldTermStructure>
+    flatRate(const ext::shared_ptr<Quote>& forward,
+             const DayCounter& dc);
+
+    ext::shared_ptr<YieldTermStructure>
+    flatRate(Rate forward,
+             const DayCounter& dc);
+
+
+    ext::shared_ptr<BlackVolTermStructure>
+    flatVol(const Date& today,
+            const ext::shared_ptr<Quote>& volatility,
+            const DayCounter& dc);
+
+    ext::shared_ptr<BlackVolTermStructure>
+    flatVol(const Date& today,
+            Volatility volatility,
+            const DayCounter& dc);
+
+    ext::shared_ptr<BlackVolTermStructure>
+    flatVol(const ext::shared_ptr<Quote>& volatility,
+            const DayCounter& dc);
+
+    ext::shared_ptr<BlackVolTermStructure>
+    flatVol(Volatility volatility,
+            const DayCounter& dc);
+
+
+    Real relativeError(Real x1, Real x2, Real reference);
+
+    //bool checkAbsError(Real x1, Real x2, Real tolerance){
+    //    return std::fabs(x1 - x2) < tolerance;
+    //};
+
+    class Flag : public QuantLib::Observer {
+      private:
+        bool up_ = false;
+
+      public:
+        Flag() = default;
+        void raise() { up_ = true; }
+        void lower() { up_ = false; }
+        bool isUp() const { return up_; }
+        void update() override { raise(); }
+    };
+
+    template<class Iterator>
+    Real norm(const Iterator& begin, const Iterator& end, Real h) {
+        // squared values
+        std::vector<Real> f2(end-begin);
+        std::transform(begin,end,begin,f2.begin(),
+                       std::multiplies<Real>());
+        // numeric integral of f^2
+        Real I = h * (std::accumulate(f2.begin(),f2.end(),Real(0.0))
+                      - 0.5*f2.front() - 0.5*f2.back());
+        return std::sqrt(I);
+    }
+
+
+    inline Integer timeToDays(Time t, Integer daysPerYear = 360) {
+        return Integer(std::lround(t * daysPerYear));
+    }
+
+
+    // this cleans up index-fixing histories when destroyed
+    class IndexHistoryCleaner {
+      public:
+        IndexHistoryCleaner() = default;
+        ~IndexHistoryCleaner();
+    };
+
+
+    // Allow streaming vectors to error messages.
+
+    // The standard forbids defining new overloads in the std
+    // namespace, so we have to use a wrapper instead of overloading
+    // operator<< to send a vector to the stream directly.
+    // Defining the overload outside the std namespace wouldn't work
+    // with Boost streams because of ADT name lookup rules.
+
+    template <class T>
+    struct vector_streamer {
+        explicit vector_streamer(std::vector<T> v) : v(std::move(v)) {}
+        std::vector<T> v;
+    };
+
+    template <class T>
+    vector_streamer<T> to_stream(const std::vector<T>& v) {
+        return vector_streamer<T>(v);
+    }
+
+    template <class T>
+    std::ostream& operator<<(std::ostream& out, const vector_streamer<T>& s) {
+        out << "{ ";
+        if (!s.v.empty()) {
+            for (size_t n=0; n<s.v.size()-1; ++n)
+                out << s.v[n] << ", ";
+            out << s.v.back();
+        }
+        out << " }";
+        return out;
+    }
+
+
+}
+
+
+#endif
+
+
+FILE: test-suite/speedlevel.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2017 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#ifndef quantlib_test_speed_level_hpp
+#define quantlib_test_speed_level_hpp
+
+enum SpeedLevel {
+    Slow   = 0,
+    Fast   = 1,
+    Faster = 2
+};
+
+#endif
+
+
+
+FILE: test-suite/americanoption.cpp (registration pattern reference)
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2003, 2004 Ferdinando Ametrano
+ Copyright (C) 2005, 2007 StatPro Italia srl
+ Copyright (C) 2005 Joseph Wang
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include "americanoption.hpp"
+#include "utilities.hpp"
+#include <ql/time/daycounters/actual360.hpp>
+#include <ql/instruments/vanillaoption.hpp>
+#include <ql/pricingengines/vanilla/baroneadesiwhaleyengine.hpp>
+#include <ql/pricingengines/vanilla/bjerksundstenslandengine.hpp>
+#include <ql/pricingengines/vanilla/juquadraticengine.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesshoutengine.hpp>
+#include <ql/termstructures/yield/flatforward.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
+#include <ql/utilities/dataformatters.hpp>
+#include <map>
+
+using namespace QuantLib;
+using namespace boost::unit_test_framework;
+
+#undef REPORT_FAILURE
+#define REPORT_FAILURE(greekName, payoff, exercise, s, q, r, today, \
+                       v, expected, calculated, error, tolerance) \
+    BOOST_ERROR(exerciseTypeToString(exercise) << " " \
+               << payoff->optionType() << " option with " \
+               << payoffTypeToString(payoff) << " payoff:\n" \
+               <<"    spot value:        " << s << "\n" \
+               << "    strike:           " << payoff->strike() << "\n" \
+               << "    dividend yield:   " << io::rate(q) << "\n" \
+               << "    risk-free rate:   " << io::rate(r) << "\n" \
+               << "    reference date:   " << today << "\n" \
+               << "    maturity:         " << exercise->lastDate() << "\n" \
+               << "    volatility:       " << io::volatility(v) << "\n\n" \
+               << std::fixed << std::setprecision(4) \
+               << "    expected   " << greekName << ": " << expected << "\n" \
+               << "    calculated " << greekName << ": " << calculated << "\n"\
+               << std::scientific \
+               << "    error:            " << error << "\n" \
+               << "    tolerance:        " << tolerance);
+
+namespace {
+
+    struct AmericanOptionData {
+        Option::Type type;
+        Real strike;
+        Real s;        // spot
+        Rate q;        // dividend
+        Rate r;        // risk-free rate
+        Time t;        // time to maturity
+        Volatility v;  // volatility
+        Real result;   // expected result
+    };
+
+}
+
+
+void AmericanOptionTest::testBaroneAdesiWhaleyValues() {
+
+    BOOST_TEST_MESSAGE("Testing Barone-Adesi and Whaley approximation "
+                       "for American options...");
+
+    /* The data below are from
+       "Option pricing formulas", E.G. Haug, McGraw-Hill 1998
+       pag 24
+
+       The following values were replicated only up to the second digit
+       by the VB code provided by Haug, which was used as base for the
+       C++ implementation
+
+    */
+    AmericanOptionData values[] = {
+      //        type, strike,   spot,    q,    r,    t,  vol,   value
+      { Option::Call, 100.00,  90.00, 0.10, 0.10, 0.10, 0.15,  0.0206 },
+      { Option::Call, 100.00, 100.00, 0.10, 0.10, 0.10, 0.15,  1.8771 },
+      { Option::Call, 100.00, 110.00, 0.10, 0.10, 0.10, 0.15, 10.0089 },
+      { Option::Call, 100.00,  90.00, 0.10, 0.10, 0.10, 0.25,  0.3159 },
+      { Option::Call, 100.00, 100.00, 0.10, 0.10, 0.10, 0.25,  3.1280 },
+      { Option::Call, 100.00, 110.00, 0.10, 0.10, 0.10, 0.25, 10.3919 },
+      { Option::Call, 100.00,  90.00, 0.10, 0.10, 0.10, 0.35,  0.9495 },
+      { Option::Call, 100.00, 100.00, 0.10, 0.10, 0.10, 0.35,  4.3777 },
+      { Option::Call, 100.00, 110.00, 0.10, 0.10, 0.10, 0.35, 11.1679 },
+      { Option::Call, 100.00,  90.00, 0.10, 0.10, 0.50, 0.15,  0.8208 },
+      { Option::Call, 100.00, 100.00, 0.10, 0.10, 0.50, 0.15,  4.0842 },
+      { Option::Call, 100.00, 110.00, 0.10, 0.10, 0.50, 0.15, 10.8087 },
+      { Option::Call, 100.00,  90.00, 0.10, 0.10, 0.50, 0.25,  2.7437 },
+      { Option::Call, 100.00, 100.00, 0.10, 0.10, 0.50, 0.25,  6.8015 },
+      { Option::Call, 100.00, 110.00, 0.10, 0.10, 0.50, 0.25, 13.0170 },
+      { Option::Call, 100.00,  90.00, 0.10, 0.10, 0.50, 0.35,  5.0063 },
+      { Option::Call, 100.00, 100.00, 0.10, 0.10, 0.50, 0.35,  9.5106 },
+      { Option::Call, 100.00, 110.00, 0.10, 0.10, 0.50, 0.35, 15.5689 },
+      { Option::Put,  100.00,  90.00, 0.10, 0.10, 0.10, 0.15, 10.0000 },
+      { Option::Put,  100.00, 100.00, 0.10, 0.10, 0.10, 0.15,  1.8770 },
+      { Option::Put,  100.00, 110.00, 0.10, 0.10, 0.10, 0.15,  0.0410 },
+      { Option::Put,  100.00,  90.00, 0.10, 0.10, 0.10, 0.25, 10.2533 },
+      { Option::Put,  100.00, 100.00, 0.10, 0.10, 0.10, 0.25,  3.1277 },
+      { Option::Put,  100.00, 110.00, 0.10, 0.10, 0.10, 0.25,  0.4562 },
+      { Option::Put,  100.00,  90.00, 0.10, 0.10, 0.10, 0.35, 10.8787 },
+      { Option::Put,  100.00, 100.00, 0.10, 0.10, 0.10, 0.35,  4.3777 },
+      { Option::Put,  100.00, 110.00, 0.10, 0.10, 0.10, 0.35,  1.2402 },
+      { Option::Put,  100.00,  90.00, 0.10, 0.10, 0.50, 0.15, 10.5595 },
+      { Option::Put,  100.00, 100.00, 0.10, 0.10, 0.50, 0.15,  4.0842 },
+      { Option::Put,  100.00, 110.00, 0.10, 0.10, 0.50, 0.15,  1.0822 },
+      { Option::Put,  100.00,  90.00, 0.10, 0.10, 0.50, 0.25, 12.4419 },
+      { Option::Put,  100.00, 100.00, 0.10, 0.10, 0.50, 0.25,  6.8014 },
+      { Option::Put,  100.00, 110.00, 0.10, 0.10, 0.50, 0.25,  3.3226 },
+      { Option::Put,  100.00,  90.00, 0.10, 0.10, 0.50, 0.35, 14.6945 },
+      { Option::Put,  100.00, 100.00, 0.10, 0.10, 0.50, 0.35,  9.5104 },
+      { Option::Put,  100.00, 110.00, 0.10, 0.10, 0.50, 0.35,  5.8823 },
+      { Option::Put,  100.00, 100.00, 0.00, 0.00, 0.50, 0.15,  4.2294 }
+    };
+
+    Date today = Date::todaysDate();
+    DayCounter dc = Actual360();
+    ext::shared_ptr<SimpleQuote> spot(new SimpleQuote(0.0));
+    ext::shared_ptr<SimpleQuote> qRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> qTS = flatRate(today, qRate, dc);
+    ext::shared_ptr<SimpleQuote> rRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> rTS = flatRate(today, rRate, dc);
+    ext::shared_ptr<SimpleQuote> vol(new SimpleQuote(0.0));
+    ext::shared_ptr<BlackVolTermStructure> volTS = flatVol(today, vol, dc);
+
+    Real tolerance = 3.0e-3;
+
+    for (auto& value : values) {
+
+        ext::shared_ptr<StrikedTypePayoff> payoff(new PlainVanillaPayoff(value.type, value.strike));
+        Date exDate = today + timeToDays(value.t);
+        ext::shared_ptr<Exercise> exercise(
+                                         new AmericanExercise(today, exDate));
+
+        spot->setValue(value.s);
+        qRate->setValue(value.q);
+        rRate->setValue(value.r);
+        vol->setValue(value.v);
+
+        ext::shared_ptr<BlackScholesMertonProcess> stochProcess(new
+            BlackScholesMertonProcess(Handle<Quote>(spot),
+                                      Handle<YieldTermStructure>(qTS),
+                                      Handle<YieldTermStructure>(rTS),
+                                      Handle<BlackVolTermStructure>(volTS)));
+
+        ext::shared_ptr<PricingEngine> engine(
+                      new BaroneAdesiWhaleyApproximationEngine(stochProcess));
+
+        VanillaOption option(payoff, exercise);
+        option.setPricingEngine(engine);
+
+        Real calculated = option.NPV();
+        Real error = std::fabs(calculated - value.result);
+        if (error > tolerance) {
+            REPORT_FAILURE("value", payoff, exercise, value.s, value.q, value.r, today, value.v,
+                           value.result, calculated, error, tolerance);
+        }
+    }
+}
+
+
+void AmericanOptionTest::testBjerksundStenslandValues() {
+
+    BOOST_TEST_MESSAGE("Testing Bjerksund and Stensland approximation "
+                       "for American options...");
+
+    AmericanOptionData values[] = {
+        //      type, strike,   spot,    q,    r,    t,  vol,   value, tol
+        // from "Option pricing formulas", Haug, McGraw-Hill 1998, pag 27
+      { Option::Call,  40.00,  42.00, 0.08, 0.04, 0.75, 0.35,  5.2704 },
+        // from "Option pricing formulas", Haug, McGraw-Hill 1998, VBA code
+      { Option::Put,   40.00,  36.00, 0.00, 0.06, 1.00, 0.20,  4.4531 },
+        // ATM option with very small volatility, reference value taken from R
+      { Option::Call, 100, 100, 0.05, 0.05, 1.0, 0.0021, 0.08032314 },
+        // ATM option with very small volatility,
+        // reference value taken from Barone-Adesi and Whaley Approximation
+      { Option::Call, 100, 100, 0.05, 0.05, 1.0, 0.0001, 0.003860656 },
+      { Option::Call, 100, 99.99, 0.05, 0.05, 1.0, 0.0001, 0.00081 },
+        // ITM option with a very small volatility
+      { Option::Call, 100, 110, 0.05, 0.05, 1.0, 0.0001, 10.0 },
+      { Option::Put, 110, 100, 0.05, 0.05, 1.0, 0.0001, 10.0 },
+        // ATM option with a very large volatility
+      { Option::Put, 100, 110, 0.05, 0.05, 1.0, 10, 94.89543 }
+    };
+
+    Date today = Date::todaysDate();
+    DayCounter dc = Actual360();
+    ext::shared_ptr<SimpleQuote> spot(new SimpleQuote(0.0));
+    ext::shared_ptr<SimpleQuote> qRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> qTS = flatRate(today, qRate, dc);
+    ext::shared_ptr<SimpleQuote> rRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> rTS = flatRate(today, rRate, dc);
+    ext::shared_ptr<SimpleQuote> vol(new SimpleQuote(0.0));
+    ext::shared_ptr<BlackVolTermStructure> volTS = flatVol(today, vol, dc);
+
+    Real tolerance = 5.0e-5;
+
+    for (auto& value : values) {
+
+        ext::shared_ptr<StrikedTypePayoff> payoff(new PlainVanillaPayoff(value.type, value.strike));
+        Date exDate = today + timeToDays(value.t);
+        ext::shared_ptr<Exercise> exercise(
+                                         new AmericanExercise(today, exDate));
+
+        spot->setValue(value.s);
+        qRate->setValue(value.q);
+        rRate->setValue(value.r);
+        vol->setValue(value.v);
+
+        ext::shared_ptr<BlackScholesMertonProcess> stochProcess(new
+            BlackScholesMertonProcess(Handle<Quote>(spot),
+                                      Handle<YieldTermStructure>(qTS),
+                                      Handle<YieldTermStructure>(rTS),
+                                      Handle<BlackVolTermStructure>(volTS)));
+
+        ext::shared_ptr<PricingEngine> engine(
+                     new BjerksundStenslandApproximationEngine(stochProcess));
+
+        VanillaOption option(payoff, exercise);
+        option.setPricingEngine(engine);
+
+        Real calculated = option.NPV();
+        Real error = std::fabs(calculated - value.result);
+        if (error > tolerance) {
+            REPORT_FAILURE("value", payoff, exercise, value.s, value.q, value.r, today, value.v,
+                           value.result, calculated, error, tolerance);
+        }
+    }
+}
+
+namespace {
+
+    /* The data below are from
+       An Approximate Formula for Pricing American Options
+       Journal of Derivatives Winter 1999
+       Ju, N.
+    */
+    AmericanOptionData juValues[] = {
+        //        type, strike,   spot,    q,    r,    t,     vol,   value, tol
+        // These values are from Exhibit 3 - Short dated Put Options
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.0833,  0.2,  0.006 },
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.3333,  0.2,  0.201 },
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.5833,  0.2,  0.433 },
+
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.0833,  0.2,  0.851 },
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.3333,  0.2,  1.576 },
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.5833,  0.2,  1.984 },
+
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.0833,  0.2,  5.000 },
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.3333,  0.2,  5.084 },
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.5833,  0.2,  5.260 },
+
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.0833,  0.3,  0.078 },
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.3333,  0.3,  0.697 },
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.5833,  0.3,  1.218 },
+
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.0833,  0.3,  1.309 },
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.3333,  0.3,  2.477 },
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.5833,  0.3,  3.161 },
+
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.0833,  0.3,  5.059 },
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.3333,  0.3,  5.699 },
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.5833,  0.3,  6.231 },
+
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.0833,  0.4,  0.247 },
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.3333,  0.4,  1.344 },
+        { Option::Put, 35.00,   40.00,  0.0,  0.0488, 0.5833,  0.4,  2.150 },
+
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.0833,  0.4,  1.767 },
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.3333,  0.4,  3.381 },
+        { Option::Put, 40.00,   40.00,  0.0,  0.0488, 0.5833,  0.4,  4.342 },
+
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.0833,  0.4,  5.288 },
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.3333,  0.4,  6.501 },
+        { Option::Put, 45.00,   40.00,  0.0,  0.0488, 0.5833,  0.4,  7.367 },
+
+        // Type in Exhibits 4 and 5 if you have some spare time ;-)
+
+        //        type, strike,   spot,    q,    r,    t,     vol,   value, tol
+        // values from Exhibit 6 - Long dated Call Options with dividends
+        { Option::Call, 100.00,   80.00,  0.07,  0.03, 3.0,  0.2,   2.605 },
+        { Option::Call, 100.00,   90.00,  0.07,  0.03, 3.0,  0.2,   5.182 },
+        { Option::Call, 100.00,  100.00,  0.07,  0.03, 3.0,  0.2,   9.065 },
+        { Option::Call, 100.00,  110.00,  0.07,  0.03, 3.0,  0.2,  14.430 },
+        { Option::Call, 100.00,  120.00,  0.07,  0.03, 3.0,  0.2,  21.398 },
+
+        { Option::Call, 100.00,   80.00,  0.07,  0.03, 3.0,  0.4,  11.336 },
+        { Option::Call, 100.00,   90.00,  0.07,  0.03, 3.0,  0.4,  15.711 },
+        { Option::Call, 100.00,  100.00,  0.07,  0.03, 3.0,  0.4,  20.760 },
+        { Option::Call, 100.00,  110.00,  0.07,  0.03, 3.0,  0.4,  26.440 },
+        { Option::Call, 100.00,  120.00,  0.07,  0.03, 3.0,  0.4,  32.709 },
+
+        { Option::Call, 100.00,   80.00,  0.07,  0.00001, 3.0,  0.3,   5.552 },
+        { Option::Call, 100.00,   90.00,  0.07,  0.00001, 3.0,  0.3,   8.868 },
+        { Option::Call, 100.00,  100.00,  0.07,  0.00001, 3.0,  0.3,  13.158 },
+        { Option::Call, 100.00,  110.00,  0.07,  0.00001, 3.0,  0.3,  18.458 },
+        { Option::Call, 100.00,  120.00,  0.07,  0.00001, 3.0,  0.3,  24.786 },
+
+        { Option::Call, 100.00,   80.00,  0.03,  0.07, 3.0,  0.3,  12.177 },
+        { Option::Call, 100.00,   90.00,  0.03,  0.07, 3.0,  0.3,  17.411 },
+        { Option::Call, 100.00,  100.00,  0.03,  0.07, 3.0,  0.3,  23.402 },
+        { Option::Call, 100.00,  110.00,  0.03,  0.07, 3.0,  0.3,  30.028 },
+        { Option::Call, 100.00,  120.00,  0.03,  0.07, 3.0,  0.3,  37.177 }
+    };
+
+}
+
+
+void AmericanOptionTest::testJuValues() {
+
+    BOOST_TEST_MESSAGE("Testing Ju approximation for American options...");
+
+    Date today = Date::todaysDate();
+    DayCounter dc = Actual360();
+    ext::shared_ptr<SimpleQuote> spot(new SimpleQuote(0.0));
+    ext::shared_ptr<SimpleQuote> qRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> qTS = flatRate(today, qRate, dc);
+    ext::shared_ptr<SimpleQuote> rRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> rTS = flatRate(today, rRate, dc);
+    ext::shared_ptr<SimpleQuote> vol(new SimpleQuote(0.0));
+    ext::shared_ptr<BlackVolTermStructure> volTS = flatVol(today, vol, dc);
+
+    Real tolerance = 1.0e-3;
+
+    for (auto& juValue : juValues) {
+
+        ext::shared_ptr<StrikedTypePayoff> payoff(
+            new PlainVanillaPayoff(juValue.type, juValue.strike));
+        Date exDate = today + timeToDays(juValue.t);
+        ext::shared_ptr<Exercise> exercise(
+                                         new AmericanExercise(today, exDate));
+
+        spot->setValue(juValue.s);
+        qRate->setValue(juValue.q);
+        rRate->setValue(juValue.r);
+        vol->setValue(juValue.v);
+
+        ext::shared_ptr<BlackScholesMertonProcess> stochProcess(new
+            BlackScholesMertonProcess(Handle<Quote>(spot),
+                                      Handle<YieldTermStructure>(qTS),
+                                      Handle<YieldTermStructure>(rTS),
+                                      Handle<BlackVolTermStructure>(volTS)));
+
+        ext::shared_ptr<PricingEngine> engine(
+                            new JuQuadraticApproximationEngine(stochProcess));
+
+        VanillaOption option(payoff, exercise);
+        option.setPricingEngine(engine);
+
+        Real calculated = option.NPV();
+        Real error = std::fabs(calculated - juValue.result);
+        if (error > tolerance) {
+            REPORT_FAILURE("value", payoff, exercise, juValue.s, juValue.q, juValue.r, today,
+                           juValue.v, juValue.result, calculated, error, tolerance);
+        }
+    }
+}
+
+
+void AmericanOptionTest::testFdValues() {
+
+    BOOST_TEST_MESSAGE("Testing finite-difference engine "
+                       "for American options...");
+
+    Date today = Date::todaysDate();
+    DayCounter dc = Actual360();
+    ext::shared_ptr<SimpleQuote> spot(new SimpleQuote(0.0));
+    ext::shared_ptr<SimpleQuote> qRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> qTS = flatRate(today, qRate, dc);
+    ext::shared_ptr<SimpleQuote> rRate(new SimpleQuote(0.0));
+    ext::shared_ptr<YieldTermStructure> rTS = flatRate(today, rRate, dc);
+    ext::shared_ptr<SimpleQuote> vol(new SimpleQuote(0.0));
+    ext::shared_ptr<BlackVolTermStructure> volTS = flatVol(today, vol, dc);
+
+    Real tolerance = 8.0e-2;
+
+    for (auto& juValue : juValues) {
+
+        ext::shared_ptr<StrikedTypePayoff> payoff(
+            new PlainVanillaPayoff(juValue.type, juValue.strike));
+
+        Date exDate = today + timeToDays(juValue.t);
+        ext::shared_ptr<Exercise> exercise(
+                                         new AmericanExercise(today, exDate));
+
+        spot->setValue(juValue.s);
+        qRate->setValue(juValue.q);
+        rRate->setValue(juValue.r);
+        vol->setValue(juValue.v);
+
+        ext::shared_ptr<BlackScholesMertonProcess> stochProcess =
+            ext::make_shared<BlackScholesMertonProcess>(Handle<Quote>(spot),
+                                                        Handle<YieldTermStructure>(qTS),
+                                                        Handle<YieldTermStructure>(rTS),
+                                                        Handle<BlackVolTermStructure>(volTS));
+
+        ext::shared_ptr<PricingEngine> engine =
+            ext::make_shared<FdBlackScholesVanillaEngine>(stochProcess, 100, 100);
+
+        VanillaOption option(payoff, exercise);
+        option.setPricingEngine(engine);
+
+        Real calculated = option.NPV();
+        Real error = std::fabs(calculated - juValue.result);
+        if (error > tolerance) {
+            REPORT_FAILURE("value", payoff, exercise, juValue.s, juValue.q, juValue.r, today,
+                           juValue.v, juValue.result, calculated, error, tolerance);
+        }
+    }
+}
+
+
+namespace {
+
+    template <class Engine>
+    void testFdGreeks() {
+
+        SavedSettings backup;
+
+        std::map<std::string,Real> calculated, expected, tolerance;
+        tolerance["delta"]  = 7.0e-4;
+        tolerance["gamma"]  = 2.0e-4;
+        //tolerance["theta"]  = 1.0e-4;
+
+        Option::Type types[] = { Option::Call, Option::Put };
+        Real strikes[] = { 50.0, 99.5, 100.0, 100.5, 150.0 };
+        Real underlyings[] = { 100.0 };
+        Rate qRates[] = { 0.04, 0.05, 0.06 };
+        Rate rRates[] = { 0.01, 0.05, 0.15 };
+        Integer years[] = { 1, 2 };
+        Volatility vols[] = { 0.11, 0.50, 1.20 };
+
+        DayCounter dc = Actual360();
+        Date today = Date::todaysDate();
+        Settings::instance().evaluationDate() = today;
+
+        ext::shared_ptr<SimpleQuote> spot(new SimpleQuote(0.0));
+        ext::shared_ptr<SimpleQuote> qRate(new SimpleQuote(0.0));
+        Handle<YieldTermStructure> qTS(flatRate(qRate, dc));
+        ext::shared_ptr<SimpleQuote> rRate(new SimpleQuote(0.0));
+        Handle<YieldTermStructure> rTS(flatRate(rRate, dc));
+        ext::shared_ptr<SimpleQuote> vol(new SimpleQuote(0.0));
+        Handle<BlackVolTermStructure> volTS(flatVol(vol, dc));
+
+        ext::shared_ptr<StrikedTypePayoff> payoff;
+
+        for (auto& type : types) {
+            for (double strike : strikes) {
+                for (int year : years) {
+                    Date exDate = today + year * Years;
+                    ext::shared_ptr<Exercise> exercise(new AmericanExercise(today, exDate));
+                    ext::shared_ptr<StrikedTypePayoff> payoff(new PlainVanillaPayoff(type, strike));
+                    ext::shared_ptr<BlackScholesMertonProcess> stochProcess(
+                        new BlackScholesMertonProcess(Handle<Quote>(spot), qTS, rTS, volTS));
+
+                    ext::shared_ptr<PricingEngine> engine(new Engine(stochProcess, 50));
+
+                    VanillaOption option(payoff, exercise);
+                    option.setPricingEngine(engine);
+
+                    for (double u : underlyings) {
+                        for (double m : qRates) {
+                            for (double n : rRates) {
+                                for (double v : vols) {
+                                    Rate q = m, r = n;
+                                    spot->setValue(u);
+                                    qRate->setValue(q);
+                                    rRate->setValue(r);
+                                    vol->setValue(v);
+                                    // FLOATING_POINT_EXCEPTION
+                                    Real value = option.NPV();
+                                    calculated["delta"] = option.delta();
+                                    calculated["gamma"] = option.gamma();
+                                    // calculated["theta"]  = option.theta();
+
+                                    if (value > spot->value() * 1.0e-5) {
+                                        // perturb spot and get delta and gamma
+                                        Real du = u * 1.0e-4;
+                                        spot->setValue(u + du);
+                                        Real value_p = option.NPV(), delta_p = option.delta();
+                                        spot->setValue(u - du);
+                                        Real value_m = option.NPV(), delta_m = option.delta();
+                                        spot->setValue(u);
+                                        expected["delta"] = (value_p - value_m) / (2 * du);
+                                        expected["gamma"] = (delta_p - delta_m) / (2 * du);
+
+                                        /*
+                                        // perturb date and get theta
+                                        Time dT = dc.yearFraction(today-1, today+1);
+                                        Settings::instance().setEvaluationDate(today-1);
+                                        value_m = option.NPV();
+                                        Settings::instance().setEvaluationDate(today+1);
+                                        value_p = option.NPV();
+                                        Settings::instance().setEvaluationDate(today);
+                                        expected["theta"] = (value_p - value_m)/dT;
+                                        */
+
+                                        // compare
+                                        std::map<std::string, Real>::iterator it;
+                                        for (it = calculated.begin(); it != calculated.end();
+                                             ++it) {
+                                            std::string greek = it->first;
+                                            Real expct = expected[greek], calcl = calculated[greek],
+                                                 tol = tolerance[greek];
+                                            Real error = relativeError(expct, calcl, u);
+                                            if (error > tol) {
+                                                REPORT_FAILURE(greek, payoff, exercise, u, q, r,
+                                                               today, v, expct, calcl, error, tol);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}
+
+
+void AmericanOptionTest::testFdAmericanGreeks() {
+    BOOST_TEST_MESSAGE("Testing finite-differences American option greeks...");
+    testFdGreeks<FdBlackScholesVanillaEngine>();
+}
+
+void AmericanOptionTest::testFdShoutGreeks() {
+    BOOST_TEST_MESSAGE("Testing finite-differences shout option greeks...");
+    testFdGreeks<FdBlackScholesShoutEngine>();
+}
+
+void AmericanOptionTest::testFDShoutNPV() {
+    BOOST_TEST_MESSAGE("Testing finite-differences shout option pricing...");
+
+    SavedSettings backup;
+
+    const auto dc = Actual365Fixed();
+    const auto today = Date(4, February, 2021);
+    Settings::instance().evaluationDate() = today;
+
+    const auto spot = Handle<Quote>(ext::make_shared<SimpleQuote>(100.0));
+    const auto q = Handle<YieldTermStructure>(flatRate(0.03, dc));
+    const auto r = Handle<YieldTermStructure>(flatRate(0.06, dc));
+
+    const auto volTS = Handle<BlackVolTermStructure>(flatVol(0.25, dc));
+    const auto process = ext::make_shared<BlackScholesMertonProcess>(
+            spot, q, r, volTS);
+
+    const auto maturityDate = today + Period(5, Years);
+
+    struct TestDescription { Real strike; Option::Type type; Real expected; };
+
+    const TestDescription testDescriptions[] = {
+            {105, Option::Put, 19.136},
+            {105, Option::Call, 28.211},
+            {120, Option::Put, 28.02},
+            {80, Option::Call, 40.785}
+    };
+
+    const auto engine = ext::make_shared<FdBlackScholesShoutEngine>(
+        process, 400, 200);
+
+    for (const TestDescription& desc: testDescriptions) {
+        const Real strike = desc.strike;
+        const Option::Type type = desc.type;
+
+        auto option = VanillaOption(
+            ext::make_shared<PlainVanillaPayoff>(type, strike),
+            ext::make_shared<AmericanExercise>(maturityDate));
+
+        option.setPricingEngine(engine);
+
+        const Real expected = desc.expected;
+        const Real tol = 2e-2;
+        const Real calculated = option.NPV();
+        const Real diff = std::fabs(calculated-expected);
+
+        if (diff > tol) {
+            BOOST_FAIL("failed to reproduce known shout option price for "
+                    << "\n    strike:     " << strike
+                    << "\n    option type:" <<
+                        ((type == Option::Call)?"Call" : "Put")
+                    << "\n    calculated: " << calculated
+                    << "\n    expected:   " << expected
+                    << "\n    difference: " << diff
+                    << "\n    tolerance:  " << tol);
+        }
+    }
+}
+
+void AmericanOptionTest::testZeroVolFDShoutNPV() {
+    BOOST_TEST_MESSAGE("Testing zero volatility shout option pricing"
+                       " with discrete dividends...");
+
+    SavedSettings backup;
+
+    const auto dc = Actual365Fixed();
+    const auto today = Date(14, February, 2021);
+    Settings::instance().evaluationDate() = today;
+
+    const auto spot = Handle<Quote>(ext::make_shared<SimpleQuote>(100.0));
+    const auto q = Handle<YieldTermStructure>(flatRate(0.03, dc));
+    const auto r = Handle<YieldTermStructure>(flatRate(0.07, dc));
+
+    const auto volTS = Handle<BlackVolTermStructure>(flatVol(1e-6, dc));
+    const auto process = ext::make_shared<BlackScholesMertonProcess>(
+            spot, q, r, volTS);
+
+   const auto maturityDate = today + Period(1, Years);
+   const Date dividendDate = today + Period(3, Months);
+
+   DividendVanillaOption option(
+       ext::make_shared<PlainVanillaPayoff>(Option::Put, 100.0),
+       ext::make_shared<AmericanExercise>(today, maturityDate),
+       std::vector<Date>{dividendDate},
+       std::vector<Real>{10.0}
+   );
+
+   option.setPricingEngine(
+       ext::make_shared<FdBlackScholesVanillaEngine>(process, 50, 50));
+
+   const Real americanNPV = option.NPV();
+
+   option.setPricingEngine(
+       ext::make_shared<FdBlackScholesShoutEngine>(process, 50, 50));
+
+   const Real shoutNPV = option.NPV();
+   const DiscountFactor df = r->discount(maturityDate)/r->discount(dividendDate);
+
+   const Real tol = 1e-3;
+   const Real diff = std::fabs(americanNPV - shoutNPV/df);
+
+   if (diff > tol) {
+       BOOST_FAIL("failed to reproduce American option NPV with "
+               "Shout option pricing engine for "
+               << "\n    calculated: " << shoutNPV/df
+               << "\n    expected  : " << americanNPV
+               << "\n    difference: " << diff
+               << "\n    tolerance:  " << tol);
+   }
+}
+
+void AmericanOptionTest::testLargeDividendShoutNPV() {
+    BOOST_TEST_MESSAGE("Testing zero strike shout option pricing"
+                       " with discrete dividends...");
+
+    SavedSettings backup;
+
+    const auto dc = Actual365Fixed();
+    const auto today = Date(21, February, 2021);
+    Settings::instance().evaluationDate() = today;
+
+    const Real s0 = 100.0;
+    const Volatility vol = 0.25;
+
+    const auto q = Handle<YieldTermStructure>(flatRate(0.00, dc));
+    const auto r = Handle<YieldTermStructure>(flatRate(0.00, dc));
+    const auto vTS = Handle<BlackVolTermStructure>(flatVol(vol, dc));
+
+    const auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(s0)), q, r, vTS);
+
+   const auto maturityDate = today + Period(6, Months);
+   const Date dividendDate = today + Period(3, Months);
+   const Real divAmount = 30.0;
+
+   const Real strike = 80.0;
+   DividendVanillaOption divOption(
+       ext::make_shared<PlainVanillaPayoff>(Option::Call, strike),
+       ext::make_shared<AmericanExercise>(today, maturityDate),
+       std::vector<Date>{dividendDate},
+       std::vector<Real>{divAmount}
+   );
+
+   divOption.setPricingEngine(
+       ext::make_shared<FdBlackScholesShoutEngine>(process, 100, 400));
+
+   const Real calculated = divOption.NPV();
+
+   VanillaOption option(
+       ext::make_shared<PlainVanillaPayoff>(Option::Call, strike),
+       ext::make_shared<AmericanExercise>(today, dividendDate)
+   );
+
+   option.setPricingEngine(
+       ext::make_shared<FdBlackScholesShoutEngine>(process, 100, 400));
+
+   const Real expected = option.NPV()
+       * r->discount(maturityDate) / r->discount(dividendDate);
+
+   const Real tol = 5e-2;
+   const Real diff = std::fabs(expected - calculated);
+
+   if (diff > tol) {
+       BOOST_FAIL("failed to reproduce American option NPV with "
+               "Shout option pricing engine for "
+               << "\n    calculated: " << calculated
+               << "\n    expected  : " << expected
+               << "\n    difference: " << diff
+               << "\n    tolerance:  " << tol);
+   }
+}
+
+void AmericanOptionTest::testEscrowedVsSpotAmericanOption() {
+    BOOST_TEST_MESSAGE("Testing escrowed vs spot dividend model "
+            "for American options...");
+
+    SavedSettings backup;
+
+    const auto dc = Actual360();
+    const auto today = Date(27, February, 2021);
+    Settings::instance().evaluationDate() = today;
+
+    ext::shared_ptr<SimpleQuote> vol(new SimpleQuote(0.3));
+
+    const auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(100)),
+        Handle<YieldTermStructure>(flatRate(0.08, dc)),
+        Handle<YieldTermStructure>(flatRate(0.04, dc)),
+        Handle<BlackVolTermStructure>(flatVol(vol, dc))
+    );
+
+   const auto maturityDate = today + Period(12, Months);
+   const Date dividendDate = today + Period(10, Months);
+   const Real divAmount = 10.0;
+
+   const Real strike = 100.0;
+   DividendVanillaOption option(
+       ext::make_shared<PlainVanillaPayoff>(Option::Call, strike),
+       ext::make_shared<AmericanExercise>(today, maturityDate),
+       std::vector<Date>{dividendDate},
+       std::vector<Real>{divAmount}
+   );
+
+   option.setPricingEngine(
+       ext::make_shared<FdBlackScholesVanillaEngine>(process, 100, 400));
+
+   const Real spotNpv = option.NPV();
+   const Real spotDelta = option.delta();
+
+   vol->setValue(100/90.*0.3);
+
+   option.setPricingEngine(
+       MakeFdBlackScholesVanillaEngine(process)
+           .withTGrid(100)
+           .withXGrid(400)
+           .withCashDividendModel(FdBlackScholesVanillaEngine::Escrowed)
+    );
+
+   const Real escrowedNpv = option.NPV();
+   const Real escrowedDelta = option.delta();
+
+   const Real diffNpv = std::abs(escrowedNpv - spotNpv);
+   const Real tol = 1e-2;
+
+   if (diffNpv > tol) {
+       BOOST_FAIL("failed to compare American option NPV with "
+               "escrowed and spot dividend model "
+               << "\n    escrowed div: " << escrowedNpv
+               << "\n    spot div    : " << spotNpv
+               << "\n    difference: " << diffNpv
+               << "\n    tolerance:  " << tol);
+   }
+
+
+   const Real diffDelta = std::abs(escrowedDelta - spotDelta);
+
+   if (diffDelta > tol) {
+       BOOST_FAIL("failed to compare American option Delta with "
+               "escrowed and spot dividend model "
+               << "\n    escrowed div: " << escrowedDelta
+               << "\n    spot div    : " << spotDelta
+               << "\n    difference: " << diffDelta
+               << "\n    tolerance:  " << tol);
+   }
+}
+
+
+void AmericanOptionTest::testTodayIsDividendDate() {
+    BOOST_TEST_MESSAGE("Testing escrowed vs spot dividend model"
+            " on dividend dates for American options...");
+
+    SavedSettings backup;
+
+    const auto dc = Actual360();
+    const auto today = Date(27, February, 2021);
+    Settings::instance().evaluationDate() = today;
+
+    ext::shared_ptr<SimpleQuote> vol(new SimpleQuote(0.3));
+
+    const auto process = ext::make_shared<BlackScholesMertonProcess>(
+        Handle<Quote>(ext::make_shared<SimpleQuote>(100)),
+        Handle<YieldTermStructure>(flatRate(0.05, dc)),
+        Handle<YieldTermStructure>(flatRate(0.07, dc)),
+        Handle<BlackVolTermStructure>(flatVol(vol, dc))
+    );
+
+    const auto maturityDate = today + Period(12, Months);
+    const Date divDate1 = today;
+    const Date divDate2 = today + Period(11, Months);
+    const Real divAmount = 5.0;
+
+    const auto spotEngine =
+        ext::make_shared<FdBlackScholesVanillaEngine>(process, 100, 400);
+
+    const auto escrowedEngine =
+        MakeFdBlackScholesVanillaEngine(process)
+            .withTGrid(100)
+            .withXGrid(400)
+            .withCashDividendModel(FdBlackScholesVanillaEngine::Escrowed);
+
+    const Real strike = 90.0;
+    DividendVanillaOption option(
+        ext::make_shared<PlainVanillaPayoff>(Option::Put, strike),
+        ext::make_shared<AmericanExercise>(today, maturityDate),
+        std::vector<Date>{divDate1, divDate2},
+        std::vector<Real>{divAmount, divAmount}
+    );
+
+    option.setPricingEngine(spotEngine);
+
+    Real spotNpv = option.NPV();
+    const Real spotDelta = option.delta();
+    BOOST_CHECK_THROW(option.theta(), QuantLib::Error);
+
+    vol->setValue(100/95.*0.3);
+
+    option.setPricingEngine(escrowedEngine);
+
+    Real escrowedNpv = option.NPV();
+    const Real escrowedDelta = option.delta();
+    BOOST_CHECK_THROW(option.theta(), QuantLib::Error);
+
+    Real diffNpv = std::abs(escrowedNpv - spotNpv);
+    Real tol = 5e-2;
+
+    if (diffNpv > tol) {
+        BOOST_FAIL("failed to compare American option NPV with "
+                "escrowed and spot dividend model "
+                << "\n    escrowed div: " << escrowedNpv
+                << "\n    spot div    : " << spotNpv
+                << "\n    difference: " << diffNpv
+                << "\n    tolerance:  " << tol);
+    }
+
+    const Real diffDelta = std::abs(escrowedDelta - spotDelta);
+
+    tol = 1e-3;
+    if (diffDelta > tol) {
+        BOOST_FAIL("failed to compare American option Delta with "
+                "escrowed and spot dividend model "
+                << "\n    escrowed div: " << escrowedDelta
+                << "\n    spot div    : " << spotDelta
+                << "\n    difference: " << diffDelta
+                << "\n    tolerance:  " << tol);
+    }
+
+    DividendVanillaOption optionTomorrow(
+        ext::make_shared<PlainVanillaPayoff>(Option::Put, strike),
+        ext::make_shared<AmericanExercise>(today, maturityDate),
+        std::vector<Date>{today + Period(1, Days), divDate2},
+        std::vector<Real>{divAmount, divAmount}
+    );
+
+    vol->setValue(0.3);
+
+    optionTomorrow.setPricingEngine(spotEngine);
+    spotNpv = optionTomorrow.NPV();
+
+    vol->setValue(100/95.0*0.3);
+    optionTomorrow.setPricingEngine(escrowedEngine);
+
+    escrowedNpv = optionTomorrow.NPV();
+    BOOST_CHECK_NO_THROW(optionTomorrow.theta());
+
+    diffNpv = std::abs(escrowedNpv - spotNpv);
+    tol = 5e-2;
+
+    if (diffNpv > tol) {
+        BOOST_FAIL("failed to compare American option NPV with "
+                "escrowed and spot dividend model "
+                << "\n    escrowed div: " << escrowedNpv
+                << "\n    spot div    : " << spotNpv
+                << "\n    difference: " << diffNpv
+                << "\n    tolerance:  " << tol);
+    }
+}
+
+test_suite* AmericanOptionTest::suite(SpeedLevel speed) {
+    auto* suite = BOOST_TEST_SUITE("American option tests");
+
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testBaroneAdesiWhaleyValues));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testBjerksundStenslandValues));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testJuValues));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testFdValues));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testFdAmericanGreeks));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testFDShoutNPV));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testZeroVolFDShoutNPV));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testLargeDividendShoutNPV));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testEscrowedVsSpotAmericanOption));
+    suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testTodayIsDividendDate));
+
+    if (speed <= Fast) {
+        suite->add(QUANTLIB_TEST_CASE(&AmericanOptionTest::testFdShoutGreeks));
+    }
+
+    return suite;
+}
+
+
+</source_files>
+
+<implementation_guidance>
+
+File: test-suite/fdmimprovedcn.cpp
+(or adapt naming to match QuantLib's test convention — check existing test
+files for the pattern)
+
+The file should define a test suite with the following test cases:
+
+=== T1: European Call Convergence ===
+Params: S0=100, K=100, T=1, r=0.05, q=0, σ=0.2
+Reference: Black-Scholes closed-form (use QuantLib's BlackScholesCalculator
+or AnalyticEuropeanEngine for the reference value)
+Procedure:
+  - Run improved CN engine at (J,N) = (200,200), (400,400), (800,800)
+  - Compare price against BS at each level
+  - Compute Richardson order estimate p = log2(|e1|/|e2|) where e1 = v_200-v_400,
+    e2 = v_400-v_800
+  - Assert p ∈ [1.5, 2.5] for price
+  - Assert |price_800 - BS| < 1e-4
+  - Assert |delta_800 - BS_delta| < 1e-3
+  - Assert |gamma_800 - BS_gamma| < 1e-2
+
+=== T2: Digital Put Positivity ===
+Params: S0=100, K=100, T=1, r=0.05, q=0, σ=0.2, cash-or-nothing put payoff
+Procedure:
+  - Run with fitted operator, 4 damping half-steps, xGrid=1200, tGrid=1200
+  - Extract final solution array
+  - Assert: min(u) >= -1e-10 (no significant negativity)
+  - Assert: FdmDiagnostics::oscillationScore(u) < 0.02
+
+=== T3: Low-Volatility M-Matrix ===
+Params: S0=100, K=100, T=0.5, r=0.05, q=0, σ=0.02
+Procedure:
+  - Run with STANDARD operator (useFittedOperator=false), check for oscillations
+  - Run with FITTED operator (useFittedOperator=true)
+  - Assert fitted: mMatrixSatisfied() == true (from operator diagnostics)
+  - Assert fitted: no negative values
+  - Assert both converge to BS closed-form as grid refines
+
+=== T4: Discretely Monitored Double Knock-Out ===
+Params: S0=100, K=100, T=0.5, r=0.05, q=0, σ=0.25, L=95, U=110,
+        5 equally-spaced monitoring dates
+Procedure:
+  - Run with monitoring-restart damping (monitoringDampingSteps=2),
+    fitted operator, sinh mesh
+  - Assert no negative values after solve
+  - Compare against a fine-grid reference (same engine at 4x resolution)
+  - Assert convergence (fine price ≈ coarse price within tolerance)
+
+=== T5: Down-and-Out Rebate Call ===
+Params: S0=50, K=40, T=0.5, r=0.04, q=0, σ=0.3, barrier B=20, rebate=2.5
+Reference: QuantLib's AnalyticBarrierEngine (continuous barrier)
+Procedure:
+  - Run with barrier-aligned grid (barrier at x_min)
+  - Assert |FD_price - analytic_price| < 1e-3
+
+=== T6: American Put Policy Iteration ===
+Params: S0=100, K=100, T=1, r=0.05, q=0, σ=0.2
+Reference: fine binomial tree (CoxRossRubinstein, 10000 steps)
+Procedure:
+  - This test validates the policy iteration LCP solver standalone
+  - Build a simple implicit Euler system for one time step
+  - Apply policy iteration with American put payoff
+  - Assert complementarity: u[j] >= payoff[j] for all j
+  - Assert |FD_price - binomial_price| < 0.01
+
+=== T7: Far-Field Boundary Sensitivity ===
+Params: S0=300, K=100, T=5, r=0.03, q=0, σ=0.2 (deep ITM call)
+Procedure:
+  - Run with domain width m=6, m=8, m=10 standard deviations
+  - Assert |price_m10 - price_m8| < 1e-6
+
+HELPER FUNCTIONS to implement:
+- BSClosedForm(S0, K, T, r, q, sigma) → (price, delta, gamma)
+  using QuantLib's BlackScholesCalculator
+- A function to extract the solution array from the engine (may need to
+  access the internal solver, or run Fdm1DimSolver directly)
+
+NOTE ON TEST INFRASTRUCTURE: QuantLib's test suite typically uses either
+Boost.Test macros or a custom QUANTLIB_TEST_CASE registration. Check existing
+test files (e.g., test-suite/europeanoption.cpp) for the pattern and replicate.
+
+</implementation_guidance>
+
+<constraints>
+- All tests must pass with the default improved-CN configuration
+- Tests must not depend on external data files
+- Each test should complete in < 10 seconds on a modern machine
+- Use QL_CHECK_CLOSE, QL_CHECK_SMALL, or BOOST_CHECK_CLOSE as appropriate
+- T4 (DKO) tolerance should be wider than T1 (vanilla) since no closed-form
+  reference exists
+- T6 may need the policy iteration class to be called directly (not through
+  the engine) if the engine doesn't expose American option configuration
+</constraints>
+
+<output_specification>
+Produce 1 file:
+1. fdmimprovedcn.cpp (complete test file)
+
+Include a comment block at the top listing:
+- Which test cases map to which failure modes (F1-F8)
+- What grid sizes are used
+- Expected run time
+</output_specification>
+
+<quality_checklist>
+□ All 7 tests are present and have meaningful assertions
+□ Reference values are computed, not hardcoded (except for very stable constants)
+□ Richardson convergence test (T1) checks the order, not just the value
+□ Positivity test (T2) uses FdmDiagnostics from Round 1
+□ M-matrix test (T3) runs both standard and fitted operators
+□ DKO test (T4) uses monitoring-restart damping
+□ American test (T6) verifies complementarity explicitly
+□ All tests use QuantLib's existing infrastructure (Process, TermStructure, etc.)
+□ Test file compiles against QuantLib v1.23 + all Round 1-6 outputs
+</quality_checklist>

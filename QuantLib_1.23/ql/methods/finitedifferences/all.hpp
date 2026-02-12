@@ -13,6 +13,7 @@
 #include <ql/methods/finitedifferences/expliciteuler.hpp>
 #include <ql/methods/finitedifferences/fdtypedefs.hpp>
 #include <ql/methods/finitedifferences/finitedifferencemodel.hpp>
+#include <ql/methods/finitedifferences/fittedbsmoperator.hpp>
 #include <ql/methods/finitedifferences/impliciteuler.hpp>
 #include <ql/methods/finitedifferences/mixedscheme.hpp>
 #include <ql/methods/finitedifferences/onefactoroperator.hpp>

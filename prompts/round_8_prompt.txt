@@ -1,0 +1,726 @@
+<system_context>
+You are an expert C++ developer implementing improvements to QuantLib v1.23's
+finite difference framework for Black-Scholes option pricing. You have deep
+familiarity with QuantLib's coding conventions, class hierarchy, and the modern
+Fdm* framework (including the deprecated legacy MixedScheme/FiniteDifferenceModel framework — see note below).
+
+CODING CONVENTIONS (mandatory):
+- Namespace: all classes in `namespace QuantLib { }`
+- Smart pointers: use `ext::shared_ptr`, NOT `std::shared_ptr`
+- Return arrays: use `Array` (QuantLib uses move semantics; match existing
+  method signatures — if similar methods return `Disposable<Array>`, do so too)
+- Assertions: use `QL_REQUIRE(condition, message)` for preconditions,
+  `QL_ENSURE(condition, message)` for postconditions
+- Include guards: `#ifndef quantlib_<path_underscored>_hpp` /
+  `#define quantlib_<path_underscored>_hpp`
+- Copyright header: match the style of adjacent files in the same directory
+- Includes: use angle brackets `<ql/...>` for QuantLib headers
+- No `using namespace std;` in headers
+- Follow existing naming: `camelCase` for methods, `camelCase_` for private
+  members, `CamelCase` for classes
+
+OUTPUT RULES:
+- Produce COMPLETE files, never diffs or partial snippets
+- Only output files that are new or modified in this round
+- Each file must compile against unmodified QuantLib v1.23 headers (plus any
+  files produced in prior rounds, which will be provided if needed)
+- Include all necessary #include directives
+</system_context>
+
+<mathematical_context>
+PDE in log-price x = ln(S/K), time-to-maturity τ (τ=0 at payoff, τ=T today):
+
+  -u_τ + a(x,τ)·u_xx + b(x,τ)·u_x − r·u = 0
+
+where a(x,τ) = σ²/2,  b(x,τ) = (r−q) − σ²/2.
+
+EXPONENTIAL FITTING:
+  θ_j = b_j·h / (2·a_j)       (local Péclet parameter)
+  ρ_j = θ_j·coth(θ_j)         (fitting factor; ρ ≈ 1 + θ²/3 for |θ| < 1e-8)
+
+Fitted stencil at interior node j (uniform grid spacing h):
+  ℓ_j = a_j·ρ_j/h² − b_j/(2h)     (lower off-diagonal)
+  d_j = −2·a_j·ρ_j/h² − r          (main diagonal)
+  u_j⁺ = a_j·ρ_j/h² + b_j/(2h)    (upper off-diagonal)
+
+IMPORTANT: Exponential fitting GUARANTEES ℓ_j ≥ 0 and u_j⁺ ≥ 0 for all
+finite a_j > 0 (proof: ℓ_j = (b_j/(2h))·(coth(θ_j)−1) which is non-negative
+for all signs of b_j). Upwind fallback is only needed as a degenerate guard
+when a_j ≈ 0.
+
+This stencil decomposes as: b_j·(∂/∂x) + a_j·ρ_j·(∂²/∂x²) − r·I,
+which means it can be assembled via TripleBandLinearOp::axpyb():
+  mapT_.axpyb(b_array, firstDerivOp, secondDerivOp.mult(aρ_array), Array(1,-r))
+
+RANNACHER-SMOOTHED CN: After each discontinuity event (payoff at τ=0,
+monitoring projection), perform 2 implicit Euler half-steps at dt/2, then
+resume Crank-Nicolson.
+
+GREEKS: Δ = u_x/S,  Γ = (u_xx − u_x)/S²  where x = ln(S/K).
+
+SINH MESH: x(ξ) = x_center + c·sinh(α·(ξ − ξ₀)) for ξ ∈ [0,1], with ξ₀
+found by bisection to satisfy endpoint constraints x(0)=xMin, x(1)=xMax.
+</mathematical_context>
+This round specifically targets the DEPRECATED legacy MixedScheme/
+FiniteDifferenceModel framework. These changes are optional and may not be
+accepted upstream. Implement only if legacy engine support is required.
+
+<task>
+ROUND 8 (OPTIONAL): Create FittedBSMOperator for the legacy framework,
+and add notifyDiscontinuity() support to MixedScheme.
+
+OUTPUT: 4 files (2 new + 2 modified).
+</task>
+
+<source_files>
+
+FILE: ql/methods/finitedifferences/bsmoperator.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+ Copyright (C) 2003, 2004, 2005 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file bsmoperator.hpp
+    \brief differential operator for Black-Scholes-Merton equation
+*/
+
+#ifndef quantlib_bsm_operator_hpp
+#define quantlib_bsm_operator_hpp
+
+#include <ql/methods/finitedifferences/tridiagonaloperator.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+
+namespace QuantLib {
+
+    //! Black-Scholes-Merton differential operator
+    /*! \ingroup findiff */
+    class BSMOperator : public TridiagonalOperator {
+      public:
+        BSMOperator() = default;
+        BSMOperator(Size size, Real dx, Rate r, Rate q, Volatility sigma);
+        BSMOperator(const Array& grid, Rate r, Rate q, Volatility sigma);
+    };
+
+}
+
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/mixedscheme.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2002, 2003 Ferdinando Ametrano
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file mixedscheme.hpp
+    \brief Mixed (explicit/implicit) scheme for finite difference methods
+*/
+
+#ifndef quantlib_mixed_scheme_hpp
+#define quantlib_mixed_scheme_hpp
+
+#include <ql/methods/finitedifferences/finitedifferencemodel.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    //! Mixed (explicit/implicit) scheme for finite difference methods
+    /*! In this implementation, the passed operator must be derived
+        from either TimeConstantOperator or TimeDependentOperator.
+        Also, it must implement at least the following interface:
+
+        \code
+        typedef ... array_type;
+
+        // copy constructor/assignment
+        // (these will be provided by the compiler if none is defined)
+        Operator(const Operator&);
+        Operator& operator=(const Operator&);
+
+        // inspectors
+        Size size();
+
+        // modifiers
+        void setTime(Time t);
+
+        // operator interface
+        array_type applyTo(const array_type&);
+        array_type solveFor(const array_type&);
+        static Operator identity(Size size);
+
+        // operator algebra
+        Operator operator*(Real, const Operator&);
+        Operator operator+(const Operator&, const Operator&);
+        Operator operator+(const Operator&, const Operator&);
+        \endcode
+
+        \warning The differential operator must be linear for
+                 this evolver to work.
+
+        \todo
+        - derive variable theta schemes
+        - introduce multi time-level schemes.
+
+        \ingroup findiff
+    */
+    template <class Operator>
+    class MixedScheme  {
+      public:
+        // typedefs
+        typedef OperatorTraits<Operator> traits;
+        typedef typename traits::operator_type operator_type;
+        typedef typename traits::array_type array_type;
+        typedef typename traits::bc_set bc_set;
+        typedef typename traits::condition_type condition_type;
+        // constructors
+        MixedScheme(const operator_type& L, Real theta, bc_set bcs)
+        : L_(L), I_(operator_type::identity(L.size())), dt_(0.0), theta_(theta),
+          bcs_(std::move(bcs)) {}
+        void step(array_type& a,
+                  Time t);
+        void setStep(Time dt) {
+            dt_ = dt;
+            if (theta_!=1.0) // there is an explicit part
+                explicitPart_ = I_-((1.0-theta_) * dt_)*L_;
+            if (theta_!=0.0) // there is an implicit part
+                implicitPart_ = I_+(theta_ * dt_)*L_;
+        }
+      protected:
+        operator_type L_, I_, explicitPart_, implicitPart_;
+        Time dt_;
+        Real theta_;
+        bc_set bcs_;
+    };
+
+
+    // inline definitions
+
+    template <class Operator>
+    inline void MixedScheme<Operator>::step(array_type& a, Time t) {
+        Size i;
+        for (i=0; i<bcs_.size(); i++)
+            bcs_[i]->setTime(t);
+        if (theta_!=1.0) { // there is an explicit part
+            if (L_.isTimeDependent()) {
+                L_.setTime(t);
+                explicitPart_ = I_-((1.0-theta_) * dt_)*L_;
+            }
+            for (i=0; i<bcs_.size(); i++)
+                bcs_[i]->applyBeforeApplying(explicitPart_);
+            a = explicitPart_.applyTo(a);
+            for (i=0; i<bcs_.size(); i++)
+                bcs_[i]->applyAfterApplying(a);
+        }
+        if (theta_!=0.0) { // there is an implicit part
+            if (L_.isTimeDependent()) {
+                L_.setTime(t-dt_);
+                implicitPart_ = I_+(theta_ * dt_)*L_;
+            }
+            for (i=0; i<bcs_.size(); i++)
+                bcs_[i]->applyBeforeSolving(implicitPart_,a);
+            implicitPart_.solveFor(a, a);
+            for (i=0; i<bcs_.size(); i++)
+                bcs_[i]->applyAfterSolving(a);
+        }
+    }
+
+}
+
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/finitedifferencemodel.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file finitedifferencemodel.hpp
+    \brief generic finite difference model
+*/
+
+#ifndef quantlib_finite_difference_model_hpp
+#define quantlib_finite_difference_model_hpp
+
+#include <ql/methods/finitedifferences/boundarycondition.hpp>
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/stepcondition.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    //! Generic finite difference model
+    /*! \ingroup findiff */
+    template<class Evolver>
+    class FiniteDifferenceModel {
+      public:
+        typedef typename Evolver::traits traits;
+        typedef typename traits::operator_type operator_type;
+        typedef typename traits::array_type array_type;
+        typedef typename traits::bc_set bc_set;
+        typedef typename traits::condition_type condition_type;
+        // constructors
+        FiniteDifferenceModel(const operator_type& L,
+                              const bc_set& bcs,
+                              std::vector<Time> stoppingTimes = std::vector<Time>())
+        : evolver_(L, bcs), stoppingTimes_(std::move(stoppingTimes)) {
+            std::sort(stoppingTimes_.begin(), stoppingTimes_.end());
+            auto last = std::unique(stoppingTimes_.begin(), stoppingTimes_.end());
+            stoppingTimes_.erase(last, stoppingTimes_.end());
+        }
+        FiniteDifferenceModel(Evolver evolver,
+                              std::vector<Time> stoppingTimes = std::vector<Time>())
+        : evolver_(std::move(evolver)), stoppingTimes_(std::move(stoppingTimes)) {
+            std::sort(stoppingTimes_.begin(), stoppingTimes_.end());
+            auto last = std::unique(stoppingTimes_.begin(), stoppingTimes_.end());
+            stoppingTimes_.erase(last, stoppingTimes_.end());
+        }
+        // methods
+        // array_type grid() const { return evolver.xGrid(); }
+        const Evolver& evolver() const{ return evolver_; }
+        /*! solves the problem between the given times.
+            \warning being this a rollback, <tt>from</tt> must be a later
+                     time than <tt>to</tt>.
+        */
+        void rollback(array_type& a,
+                      Time from,
+                      Time to,
+                      Size steps) {
+            rollbackImpl(a, from, to, steps, (const condition_type*)nullptr);
+        }
+        /*! solves the problem between the given times,
+            applying a condition at every step.
+            \warning being this a rollback, <tt>from</tt> must be a later
+                     time than <tt>to</tt>.
+        */
+        void rollback(array_type& a,
+                      Time from,
+                      Time to,
+                      Size steps,
+                      const condition_type& condition) {
+            rollbackImpl(a,from,to,steps,&condition);
+        }
+      private:
+        void rollbackImpl(array_type& a,
+                          Time from,
+                          Time to,
+                          Size steps,
+                          const condition_type* condition) {
+
+            QL_REQUIRE(from >= to,
+                       "trying to roll back from " << from << " to " << to);
+
+            Time dt = (from-to)/steps, t = from;
+            evolver_.setStep(dt);
+
+            if(!stoppingTimes_.empty() && stoppingTimes_.back() == from) {
+                if (condition)
+                    condition->applyTo(a,from);
+            }
+            for (Size i=0; i<steps; ++i, t -= dt) {
+                Time now = t;
+                // make sure last step ends exactly on "to" in order to not
+                // miss a stopping time at "to" due to numerical issues
+                Time next = (i < steps -1)? t-dt : to;
+
+                if (std::fabs(to-next) < std::sqrt(QL_EPSILON)) next = to;
+                bool hit = false;
+                for (Integer j = static_cast<Integer>(stoppingTimes_.size())-1; j >= 0 ; --j) {
+                    if (next <= stoppingTimes_[j] && stoppingTimes_[j] < now) {
+                        // a stopping time was hit
+                        hit = true;
+
+                        // perform a small step to stoppingTimes_[j]...
+                        evolver_.setStep(now-stoppingTimes_[j]);
+                        evolver_.step(a,now);
+                        if (condition)
+                            condition->applyTo(a,stoppingTimes_[j]);
+                        // ...and continue the cycle
+                        now = stoppingTimes_[j];
+                    }
+                }
+                // if we did hit...
+                if (hit) {
+                    // ...we might have to make a small step to
+                    // complete the big one...
+                    if (now > next) {
+                        evolver_.setStep(now - next);
+                        evolver_.step(a,now);
+                        if (condition)
+                            condition->applyTo(a,next);
+                    }
+                    // ...and in any case, we have to reset the
+                    // evolver to the default step.
+                    evolver_.setStep(dt);
+                } else {
+                    // if we didn't, the evolver is already set to the
+                    // default step, which is ok for us.
+                    evolver_.step(a,now);
+                    if (condition)
+                        condition->applyTo(a, next);
+                }
+            }
+        }
+        Evolver evolver_;
+        std::vector<Time> stoppingTimes_;
+    };
+
+}
+
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/tridiagonaloperator.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+ Copyright (C) 2003, 2004, 2005, 2006 StatPro Italia srl
+ Copyright (C) 2011 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <http://quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file tridiagonaloperator.hpp
+    \brief tridiagonal operator
+*/
+
+#ifndef quantlib_tridiagonal_operator_hpp
+#define quantlib_tridiagonal_operator_hpp
+
+#include <ql/math/array.hpp>
+#include <ql/math/comparison.hpp>
+#include <ql/shared_ptr.hpp>
+
+namespace QuantLib {
+
+    //! Base implementation for tridiagonal operator
+    /*! \warning to use real time-dependant algebra, you must overload
+                 the corresponding operators in the inheriting
+                 time-dependent class.
+
+        \ingroup findiff
+    */
+    class TridiagonalOperator {
+        // unary operators
+        friend Disposable<TridiagonalOperator>
+        operator+(const TridiagonalOperator&);
+        friend Disposable<TridiagonalOperator>
+        operator-(const TridiagonalOperator&);
+        // binary operators
+        friend Disposable<TridiagonalOperator>
+        operator+(const TridiagonalOperator&,
+                  const TridiagonalOperator&);
+        friend Disposable<TridiagonalOperator>
+        operator-(const TridiagonalOperator&,
+                  const TridiagonalOperator&);
+        friend Disposable<TridiagonalOperator>
+        operator*(Real,
+                  const TridiagonalOperator&);
+        friend Disposable<TridiagonalOperator>
+        operator*(const TridiagonalOperator&,
+                  Real);
+        friend Disposable<TridiagonalOperator>
+        operator/(const TridiagonalOperator&,
+                  Real);
+      public:
+        typedef Array array_type;
+        // constructors
+        explicit TridiagonalOperator(Size size = 0);
+        TridiagonalOperator(const Array& low,
+                            const Array& mid,
+                            const Array& high);
+        TridiagonalOperator(const TridiagonalOperator&) = default;
+        TridiagonalOperator(TridiagonalOperator&&) QL_NOEXCEPT;
+        #ifdef QL_USE_DISPOSABLE
+        TridiagonalOperator(const Disposable<TridiagonalOperator>&);
+        #endif
+        TridiagonalOperator& operator=(const TridiagonalOperator&);
+        TridiagonalOperator& operator=(TridiagonalOperator&&) QL_NOEXCEPT;
+        #ifdef QL_USE_DISPOSABLE
+        TridiagonalOperator& operator=(const Disposable<TridiagonalOperator>&);
+        #endif
+        //! \name Operator interface
+        //@{
+        //! apply operator to a given array
+        Disposable<Array> applyTo(const Array& v) const;
+        //! solve linear system for a given right-hand side
+        Disposable<Array> solveFor(const Array& rhs) const;
+        /*! solve linear system for a given right-hand side
+            without result Array allocation. The rhs and result parameters
+            can be the same Array, in which case rhs will be changed
+        */
+        void solveFor(const Array& rhs,
+                      Array& result) const;
+        //! solve linear system with SOR approach
+        Disposable<Array> SOR(const Array& rhs,
+                              Real tol) const;
+        //! identity instance
+        static Disposable<TridiagonalOperator> identity(Size size);
+        //@}
+        //! \name Inspectors
+        //@{
+        Size size() const { return n_; }
+        bool isTimeDependent() const { return !!timeSetter_; }
+        const Array& lowerDiagonal() const { return lowerDiagonal_; }
+        const Array& diagonal() const { return diagonal_; }
+        const Array& upperDiagonal() const { return upperDiagonal_; }
+        //@}
+        //! \name Modifiers
+        //@{
+        void setFirstRow(Real, Real);
+        void setMidRow(Size, Real, Real, Real);
+        void setMidRows(Real, Real, Real);
+        void setLastRow(Real, Real);
+        void setTime(Time t);
+        //@}
+        //! \name Utilities
+        //@{
+        void swap(TridiagonalOperator&);
+        //@}
+        //! encapsulation of time-setting logic
+        class TimeSetter {
+          public:
+            virtual ~TimeSetter() = default;
+            virtual void setTime(Time t,
+                                 TridiagonalOperator& L) const = 0;
+        };
+      protected:
+        Size n_;
+        Array diagonal_, lowerDiagonal_, upperDiagonal_;
+        mutable Array temp_;
+        ext::shared_ptr<TimeSetter> timeSetter_;
+    };
+
+    /* \relates TridiagonalOperator */
+    void swap(TridiagonalOperator&, TridiagonalOperator&);
+
+
+    // inline definitions
+
+    inline TridiagonalOperator::TridiagonalOperator(TridiagonalOperator&& from) QL_NOEXCEPT {
+        swap(from);
+    }
+
+    #ifdef QL_USE_DISPOSABLE
+    inline TridiagonalOperator::TridiagonalOperator(
+                                const Disposable<TridiagonalOperator>& from) {
+        swap(const_cast<Disposable<TridiagonalOperator>&>(from));
+    }
+    #endif
+
+    inline TridiagonalOperator& TridiagonalOperator::operator=(
+                                const TridiagonalOperator& from) {
+        TridiagonalOperator temp(from);
+        swap(temp);
+        return *this;
+    }
+
+    inline TridiagonalOperator&
+    TridiagonalOperator::operator=(TridiagonalOperator&& from) QL_NOEXCEPT {
+        swap(from);
+        return *this;
+    }
+
+    #ifdef QL_USE_DISPOSABLE
+    inline TridiagonalOperator& TridiagonalOperator::operator=(
+                                const Disposable<TridiagonalOperator>& from) {
+        swap(const_cast<Disposable<TridiagonalOperator>&>(from));
+        return *this;
+    }
+    #endif
+
+    inline void TridiagonalOperator::setFirstRow(Real valB,
+                                                 Real valC) {
+        diagonal_[0]      = valB;
+        upperDiagonal_[0] = valC;
+    }
+
+    inline void TridiagonalOperator::setMidRow(Size i,
+                                               Real valA,
+                                               Real valB,
+                                               Real valC) {
+        QL_REQUIRE(i>=1 && i<=n_-2,
+                   "out of range in TridiagonalSystem::setMidRow");
+        lowerDiagonal_[i-1] = valA;
+        diagonal_[i]        = valB;
+        upperDiagonal_[i]   = valC;
+    }
+
+    inline void TridiagonalOperator::setMidRows(Real valA,
+                                                Real valB,
+                                                Real valC) {
+        for (Size i=1; i<=n_-2; i++) {
+            lowerDiagonal_[i-1] = valA;
+            diagonal_[i]        = valB;
+            upperDiagonal_[i]   = valC;
+        }
+    }
+
+    inline void TridiagonalOperator::setLastRow(Real valA,
+                                                Real valB) {
+        lowerDiagonal_[n_-2] = valA;
+        diagonal_[n_-1]      = valB;
+    }
+
+    inline void TridiagonalOperator::setTime(Time t) {
+        if (timeSetter_ != nullptr)
+            timeSetter_->setTime(t, *this);
+    }
+
+    inline void TridiagonalOperator::swap(TridiagonalOperator& from) {
+        using std::swap;
+        swap(n_, from.n_);
+        diagonal_.swap(from.diagonal_);
+        lowerDiagonal_.swap(from.lowerDiagonal_);
+        upperDiagonal_.swap(from.upperDiagonal_);
+        temp_.swap(from.temp_);
+        swap(timeSetter_, from.timeSetter_);
+    }
+
+
+    // Time constant algebra
+
+    inline Disposable<TridiagonalOperator>
+    operator+(const TridiagonalOperator& D) {
+        TridiagonalOperator D1 = D;
+        return D1;
+    }
+
+    inline Disposable<TridiagonalOperator>
+    operator-(const TridiagonalOperator& D) {
+        Array low = -D.lowerDiagonal_,
+            mid = -D.diagonal_,
+            high = -D.upperDiagonal_;
+        TridiagonalOperator result(low, mid, high);
+        return result;
+    }
+
+    inline Disposable<TridiagonalOperator>
+    operator+(const TridiagonalOperator& D1,
+              const TridiagonalOperator& D2) {
+        Array low = D1.lowerDiagonal_ + D2.lowerDiagonal_,
+            mid = D1.diagonal_ + D2.diagonal_,
+            high = D1.upperDiagonal_ + D2.upperDiagonal_;
+        TridiagonalOperator result(low, mid, high);
+        return result;
+    }
+
+    inline Disposable<TridiagonalOperator>
+    operator-(const TridiagonalOperator& D1,
+              const TridiagonalOperator& D2) {
+        Array low = D1.lowerDiagonal_ - D2.lowerDiagonal_,
+            mid = D1.diagonal_ - D2.diagonal_,
+            high = D1.upperDiagonal_ - D2.upperDiagonal_;
+        TridiagonalOperator result(low, mid, high);
+        return result;
+    }
+
+    inline Disposable<TridiagonalOperator>
+    operator*(Real a,
+              const TridiagonalOperator& D) {
+        Array low = D.lowerDiagonal_ * a,
+            mid = D.diagonal_ * a,
+            high = D.upperDiagonal_ * a;
+        TridiagonalOperator result(low, mid, high);
+        return result;
+    }
+
+    inline Disposable<TridiagonalOperator>
+    operator*(const TridiagonalOperator& D,
+              Real a) {
+        Array low = D.lowerDiagonal_ * a,
+            mid = D.diagonal_ * a,
+            high = D.upperDiagonal_ * a;
+        TridiagonalOperator result(low, mid, high);
+        return result;
+    }
+
+    inline Disposable<TridiagonalOperator>
+    operator/(const TridiagonalOperator& D,
+              Real a) {
+        Array low = D.lowerDiagonal_ / a,
+            mid = D.diagonal_ / a,
+            high = D.upperDiagonal_ / a;
+        TridiagonalOperator result(low, mid, high);
+        return result;
+    }
+
+    inline void swap(TridiagonalOperator& L1,
+                     TridiagonalOperator& L2) {
+        L1.swap(L2);
+    }
+
+}
+
+#endif
+
+
+</source_files>
+
+Key guidance for MixedScheme modification:
+- Add a default no-op notifyDiscontinuity() method
+- This is a template class, so changes go in the header only
+- Since CrankNicolson<> inherits from MixedScheme<>, it automatically gets
+  the method
+- For FiniteDifferenceModel::rollbackImpl(), add a call to
+  evolver_.notifyDiscontinuity() after each stopping time application
+- Since all evolvers now have the method (as no-op default), no SFINAE needed
