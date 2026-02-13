@@ -1,0 +1,1057 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>cmsspreadcoupon.cpp</source>
+    <document_content><![CDATA[/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+
+ This program is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ or FITNESS FOR A PARTICULAR PURPOSE. See the license for more details.
+*/
+
+#include <ql/cashflows/capflooredcoupon.hpp>
+#include <ql/cashflows/cashflowvectors.hpp>
+#include <ql/experimental/coupons/cmsspreadcoupon.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    CmsSpreadCoupon::CmsSpreadCoupon(
+        const Date &paymentDate, Real nominal, const Date &startDate,
+        const Date &endDate, Natural fixingDays,
+        const ext::shared_ptr<SwapSpreadIndex> &index, Real gearing,
+        Spread spread, const Date &refPeriodStart,
+        const Date &refPeriodEnd,
+        const DayCounter &dayCounter, bool isInArrears, const Date &exCouponDate)
+        : FloatingRateCoupon(paymentDate, nominal, startDate, endDate,
+                             fixingDays, index, gearing, spread,
+                             refPeriodStart, refPeriodEnd, dayCounter,
+                             isInArrears, exCouponDate),
+          index_(index) {}
+
+    void CmsSpreadCoupon::accept(AcyclicVisitor &v) {
+        auto* v1 = dynamic_cast<Visitor<CmsSpreadCoupon>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            FloatingRateCoupon::accept(v);
+    }
+
+    CmsSpreadLeg::CmsSpreadLeg(Schedule schedule, ext::shared_ptr<SwapSpreadIndex> index)
+    : schedule_(std::move(schedule)), swapSpreadIndex_(std::move(index)) {
+        QL_REQUIRE(swapSpreadIndex_, "no index provided");
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withNotionals(Real notional) {
+        notionals_ = std::vector<Real>(1, notional);
+        return *this;
+    }
+
+    CmsSpreadLeg &
+    CmsSpreadLeg::withNotionals(const std::vector<Real> &notionals) {
+        notionals_ = notionals;
+        return *this;
+    }
+
+    CmsSpreadLeg &
+    CmsSpreadLeg::withPaymentDayCounter(const DayCounter &dayCounter) {
+        paymentDayCounter_ = dayCounter;
+        return *this;
+    }
+
+    CmsSpreadLeg &
+    CmsSpreadLeg::withPaymentAdjustment(BusinessDayConvention convention) {
+        paymentAdjustment_ = convention;
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withFixingDays(Natural fixingDays) {
+        fixingDays_ = std::vector<Natural>(1, fixingDays);
+        return *this;
+    }
+
+    CmsSpreadLeg &
+    CmsSpreadLeg::withFixingDays(const std::vector<Natural> &fixingDays) {
+        fixingDays_ = fixingDays;
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withGearings(Real gearing) {
+        gearings_ = std::vector<Real>(1, gearing);
+        return *this;
+    }
+
+    CmsSpreadLeg &
+    CmsSpreadLeg::withGearings(const std::vector<Real> &gearings) {
+        gearings_ = gearings;
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withSpreads(Spread spread) {
+        spreads_ = std::vector<Spread>(1, spread);
+        return *this;
+    }
+
+    CmsSpreadLeg &
+    CmsSpreadLeg::withSpreads(const std::vector<Spread> &spreads) {
+        spreads_ = spreads;
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withCaps(Rate cap) {
+        caps_ = std::vector<Rate>(1, cap);
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withCaps(const std::vector<Rate> &caps) {
+        caps_ = caps;
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withFloors(Rate floor) {
+        floors_ = std::vector<Rate>(1, floor);
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withFloors(const std::vector<Rate> &floors) {
+        floors_ = floors;
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::inArrears(bool flag) {
+        inArrears_ = flag;
+        return *this;
+    }
+
+    CmsSpreadLeg &CmsSpreadLeg::withZeroPayments(bool flag) {
+        zeroPayments_ = flag;
+        return *this;
+    }
+
+    CmsSpreadLeg::operator Leg() const {
+        return FloatingLeg<SwapSpreadIndex, CmsSpreadCoupon,
+                           CappedFlooredCmsSpreadCoupon>(
+            schedule_, notionals_, swapSpreadIndex_, paymentDayCounter_,
+            paymentAdjustment_, fixingDays_, gearings_, spreads_, caps_,
+            floors_, inArrears_, zeroPayments_);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>digitalcmsspreadcoupon.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/cashflowvectors.hpp>
+#include <ql/experimental/coupons/digitalcmsspreadcoupon.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    DigitalCmsSpreadCoupon::DigitalCmsSpreadCoupon(
+                      const ext::shared_ptr<CmsSpreadCoupon>& underlying,
+                      Rate callStrike,
+                      Position::Type callPosition,
+                      bool isCallATMIncluded,
+                      Rate callDigitalPayoff,
+                      Rate putStrike,
+                      Position::Type putPosition,
+                      bool isPutATMIncluded,
+                      Rate putDigitalPayoff,
+                      const ext::shared_ptr<DigitalReplication>& replication,
+                      bool nakedOption)
+    : DigitalCoupon(underlying, callStrike, callPosition, isCallATMIncluded,
+                    callDigitalPayoff, putStrike, putPosition,
+                    isPutATMIncluded, putDigitalPayoff, replication, nakedOption) {}
+
+    void DigitalCmsSpreadCoupon::accept(AcyclicVisitor& v) {
+        typedef DigitalCoupon super;
+        auto* v1 = dynamic_cast<Visitor<DigitalCmsSpreadCoupon>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            super::accept(v);
+    }
+
+
+    DigitalCmsSpreadLeg::DigitalCmsSpreadLeg(Schedule schedule,
+                                             ext::shared_ptr<SwapSpreadIndex> index)
+    : schedule_(std::move(schedule)), index_(std::move(index)) {}
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withNotionals(Real notional) {
+        notionals_ = std::vector<Real>(1,notional);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withNotionals(
+                                         const std::vector<Real>& notionals) {
+        notionals_ = notionals;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withPaymentDayCounter(
+                                               const DayCounter& dayCounter) {
+        paymentDayCounter_ = dayCounter;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withPaymentAdjustment(
+                                           BusinessDayConvention convention) {
+        paymentAdjustment_ = convention;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withFixingDays(Natural fixingDays) {
+        fixingDays_ = std::vector<Natural>(1,fixingDays);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withFixingDays(
+                                     const std::vector<Natural>& fixingDays) {
+        fixingDays_ = fixingDays;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withGearings(Real gearing) {
+        gearings_ = std::vector<Real>(1,gearing);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withGearings(
+                                          const std::vector<Real>& gearings) {
+        gearings_ = gearings;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withSpreads(Spread spread) {
+        spreads_ = std::vector<Spread>(1,spread);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withSpreads(
+                                         const std::vector<Spread>& spreads) {
+        spreads_ = spreads;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::inArrears(bool flag) {
+        inArrears_ = flag;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withCallStrikes(Rate strike) {
+        callStrikes_ = std::vector<Rate>(1,strike);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withCallStrikes(
+                                           const std::vector<Rate>& strikes) {
+        callStrikes_ = strikes;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withLongCallOption(Position::Type type) {
+        longCallOption_ = type;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withCallATM(bool flag) {
+        callATM_ = flag;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withCallPayoffs(Rate payoff) {
+        callPayoffs_ = std::vector<Rate>(1,payoff);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withCallPayoffs(
+                                           const std::vector<Rate>& payoffs) {
+        callPayoffs_ = payoffs;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withPutStrikes(Rate strike) {
+        putStrikes_ = std::vector<Rate>(1,strike);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withPutStrikes(
+                                           const std::vector<Rate>& strikes) {
+        putStrikes_ = strikes;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withLongPutOption(Position::Type type) {
+        longPutOption_ = type;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withPutATM(bool flag) {
+        putATM_ = flag;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withPutPayoffs(Rate payoff) {
+        putPayoffs_ = std::vector<Rate>(1,payoff);
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withPutPayoffs(
+                                           const std::vector<Rate>& payoffs) {
+        putPayoffs_ = payoffs;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withReplication(
+                   const ext::shared_ptr<DigitalReplication>& replication) {
+        replication_ = replication;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg& DigitalCmsSpreadLeg::withNakedOption(bool nakedOption) {
+        nakedOption_ = nakedOption;
+        return *this;
+    }
+
+    DigitalCmsSpreadLeg::operator Leg() const {
+        return FloatingDigitalLeg<SwapSpreadIndex, CmsSpreadCoupon, DigitalCmsSpreadCoupon>(
+                            schedule_, notionals_, index_, paymentDayCounter_,
+                            paymentAdjustment_, fixingDays_,
+                            gearings_, spreads_, inArrears_,
+                            callStrikes_, longCallOption_,
+                            callATM_, callPayoffs_,
+                            putStrikes_, longPutOption_,
+                            putATM_, putPayoffs_,
+                            replication_, nakedOption_);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>lognormalcmsspreadpricer.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/*
+  Copyright (C) 2014, 2015, 2018 Peter Caspers
+
+  This file is part of QuantLib, a free-software/open-source library
+  for financial quantitative analysts and developers - http://quantlib.org/
+
+  QuantLib is free software: you can redistribute it and/or modify it
+  under the terms of the QuantLib license.  You should have received a
+  copy of the license along with this program; if not, please email
+  <quantlib-dev@lists.sf.net>. The license is also available online at
+  <https://www.quantlib.org/license.shtml>.
+
+
+  This program is distributed in the hope that it will be useful, but
+  WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  or FITNESS FOR A PARTICULAR PURPOSE. See the license for more details.
+*/
+
+/*! \file lognormalcmsspreadpricer.cpp
+*/
+
+#include <ql/experimental/coupons/cmsspreadcoupon.hpp>
+#include <ql/experimental/coupons/lognormalcmsspreadpricer.hpp>
+#include <ql/math/integrals/kronrodintegral.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <ql/termstructures/volatility/swaption/swaptionvolcube.hpp>
+#include <ql/optional.hpp>
+#include <utility>
+
+using std::sqrt;
+
+namespace QuantLib {
+
+    class LognormalCmsSpreadPricer::integrand_f {
+        const LognormalCmsSpreadPricer* pricer;
+      public:
+        explicit integrand_f(const LognormalCmsSpreadPricer* pricer)
+        : pricer(pricer) {}
+        Real operator()(Real x) const {
+            return pricer->integrand(x);
+        }
+    };
+
+    LognormalCmsSpreadPricer::LognormalCmsSpreadPricer(
+        const ext::shared_ptr<CmsCouponPricer>& cmsPricer,
+        const Handle<Quote>& correlation,
+        Handle<YieldTermStructure> couponDiscountCurve,
+        const Size integrationPoints,
+        const ext::optional<VolatilityType>& volatilityType,
+        const Real shift1,
+        const Real shift2)
+    : CmsSpreadCouponPricer(correlation), cmsPricer_(cmsPricer),
+      couponDiscountCurve_(std::move(couponDiscountCurve)) {
+
+        registerWith(correlation);
+        if (!couponDiscountCurve_.empty())
+            registerWith(couponDiscountCurve_);
+        registerWith(cmsPricer_);
+
+        QL_REQUIRE(integrationPoints >= 4,
+                   "at least 4 integration points should be used ("
+                       << integrationPoints << ")");
+        integrator_ =
+            ext::make_shared<GaussHermiteIntegration>(integrationPoints);
+
+        cnd_ = ext::make_shared<CumulativeNormalDistribution>(0.0, 1.0);
+
+        if (!volatilityType) {
+            QL_REQUIRE(shift1 == Null<Real>() && shift2 == Null<Real>(),
+                       "if volatility type is inherited, no shifts should be "
+                       "specified");
+            inheritedVolatilityType_ = true;
+            volType_ = cmsPricer->swaptionVolatility()->volatilityType();
+        } else {
+            shift1_ = shift1 == Null<Real>() ? 0.0 : shift1;
+            shift2_ = shift2 == Null<Real>() ? 0.0 : shift2;
+            inheritedVolatilityType_ = false;
+            volType_ = *volatilityType;
+        }
+    }
+
+    Real LognormalCmsSpreadPricer::integrand(const Real x) const {
+
+        // this is Brigo, 13.16.2 with x = v / sqrt(2)
+
+        Real v = M_SQRT2 * x;
+        Real h =
+            k_ - b_ * s2_ * std::exp((m2_ - 0.5 * v2_ * v2_) * fixingTime_ +
+                                     v2_ * std::sqrt(fixingTime_) * v);
+        Real phi1, phi2;
+        phi1 = (*cnd_)(
+            phi_ * (std::log(a_ * s1_ / h) +
+                    (m1_ + (0.5 - rho_ * rho_) * v1_ * v1_) * fixingTime_ +
+                    rho_ * v1_ * std::sqrt(fixingTime_) * v) /
+            (v1_ * std::sqrt(fixingTime_ * (1.0 - rho_ * rho_))));
+        phi2 = (*cnd_)(
+            phi_ * (std::log(a_ * s1_ / h) +
+                    (m1_ - 0.5 * v1_ * v1_) * fixingTime_ +
+                    rho_ * v1_ * std::sqrt(fixingTime_) * v) /
+            (v1_ * std::sqrt(fixingTime_ * (1.0 - rho_ * rho_))));
+        Real f = a_ * phi_ * s1_ *
+                     std::exp(m1_ * fixingTime_ -
+                              0.5 * rho_ * rho_ * v1_ * v1_ * fixingTime_ +
+                              rho_ * v1_ * std::sqrt(fixingTime_) * v) *
+                     phi1 -
+                 phi_ * h * phi2;
+        return std::exp(-x * x) * f;
+    }
+
+    Real LognormalCmsSpreadPricer::integrand_normal(const Real x) const {
+
+        // this is http://ssrn.com/abstract=2686998, 3.20 with x = s / sqrt(2)
+
+        Real s = M_SQRT2 * x;
+
+        Real beta =
+            phi_ *
+            (gearing1_ * adjustedRate1_ + gearing2_ * adjustedRate2_ - k_ +
+             std::sqrt(fixingTime_) *
+                 (rho_ * gearing1_ * vol1_ + gearing2_ * vol2_) * s);
+        Real f =
+            close_enough(alpha_, 0.0)
+                ? Real(std::max(beta, 0.0))
+                : psi_ * alpha_ / (M_SQRTPI * M_SQRT2) *
+                          std::exp(-beta * beta / (2.0 * alpha_ * alpha_)) +
+                      beta * (1.0 - (*cnd_)(-psi_ * beta / alpha_));
+        return std::exp(-x * x) * f;
+    }
+
+    void
+    LognormalCmsSpreadPricer::initialize(const FloatingRateCoupon &coupon) {
+
+        coupon_ = dynamic_cast<const CmsSpreadCoupon *>(&coupon);
+        QL_REQUIRE(coupon_, "CMS spread coupon needed");
+        index_ = coupon_->swapSpreadIndex();
+        gearing_ = coupon_->gearing();
+        spread_ = coupon_->spread();
+
+        fixingDate_ = coupon_->fixingDate();
+        paymentDate_ = coupon_->date();
+
+        // if no coupon discount curve is given just use the discounting curve
+        // from the _first_ swap index.
+        // for rate calculation this curve cancels out in the computation, so
+        // e.g. the discounting
+        // swap engine will produce correct results, even if the
+        // couponDiscountCurve is not set here.
+        // only the price member function in this class will be dependent on the
+        // coupon discount curve.
+
+        today_ = QuantLib::Settings::instance().evaluationDate();
+
+        if (couponDiscountCurve_.empty())
+            couponDiscountCurve_ =
+                index_->swapIndex1()->exogenousDiscount()
+                    ? index_->swapIndex1()->discountingTermStructure()
+                    : index_->swapIndex1()->forwardingTermStructure();
+
+        discount_ = paymentDate_ > couponDiscountCurve_->referenceDate()
+                        ? couponDiscountCurve_->discount(paymentDate_)
+                        : 1.0;
+
+        spreadLegValue_ = spread_ * coupon_->accrualPeriod() * discount_;
+
+        gearing1_ = index_->gearing1();
+        gearing2_ = index_->gearing2();
+
+        QL_REQUIRE(gearing1_ > 0.0 && gearing2_ < 0.0,
+                   "gearing1 (" << gearing1_
+                                << ") should be positive while gearing2 ("
+                                << gearing2_ << ") should be negative");
+
+        c1_ = ext::make_shared<CmsCoupon>(
+            coupon_->date(), coupon_->nominal(), coupon_->accrualStartDate(),
+            coupon_->accrualEndDate(), coupon_->fixingDays(),
+            index_->swapIndex1(), 1.0, 0.0, coupon_->referencePeriodStart(),
+            coupon_->referencePeriodEnd(), coupon_->dayCounter(),
+            coupon_->isInArrears());
+
+        c2_ = ext::make_shared<CmsCoupon>(
+            coupon_->date(), coupon_->nominal(), coupon_->accrualStartDate(),
+            coupon_->accrualEndDate(), coupon_->fixingDays(),
+            index_->swapIndex2(), 1.0, 0.0, coupon_->referencePeriodStart(),
+            coupon_->referencePeriodEnd(), coupon_->dayCounter(),
+            coupon_->isInArrears());
+
+        c1_->setPricer(cmsPricer_);
+        c2_->setPricer(cmsPricer_);
+
+        if (fixingDate_ > today_) {
+
+            fixingTime_ = cmsPricer_->swaptionVolatility()->timeFromReference(
+                fixingDate_);
+
+            swapRate1_ = c1_->indexFixing();
+            swapRate2_ = c2_->indexFixing();
+
+            adjustedRate1_ = c1_->adjustedFixing();
+            adjustedRate2_ = c2_->adjustedFixing();
+
+            ext::shared_ptr<SwaptionVolatilityStructure> swvol =
+                *cmsPricer_->swaptionVolatility();
+            ext::shared_ptr<SwaptionVolatilityCube> swcub =
+                ext::dynamic_pointer_cast<SwaptionVolatilityCube>(swvol);
+
+            if(inheritedVolatilityType_ && volType_ == ShiftedLognormal) {
+                shift1_ =
+                    swvol->shift(fixingDate_, index_->swapIndex1()->tenor());
+                shift2_ =
+                    swvol->shift(fixingDate_, index_->swapIndex2()->tenor());
+            }
+
+            if (swcub == nullptr) {
+                // not a cube, just an atm surface given, so we can
+                // not easily convert volatilities and just forbid it
+                QL_REQUIRE(inheritedVolatilityType_,
+                           "if only an atm surface is given, the volatility "
+                           "type must be inherited");
+                vol1_ = swvol->volatility(
+                    fixingDate_, index_->swapIndex1()->tenor(), swapRate1_);
+                vol2_ = swvol->volatility(
+                    fixingDate_, index_->swapIndex2()->tenor(), swapRate2_);
+            } else {
+                vol1_ = swcub->smileSection(fixingDate_,
+                                            index_->swapIndex1()->tenor())
+                            ->volatility(swapRate1_, volType_, shift1_);
+                vol2_ = swcub->smileSection(fixingDate_,
+                                            index_->swapIndex2()->tenor())
+                            ->volatility(swapRate2_, volType_, shift2_);
+            }
+
+            if(volType_ == ShiftedLognormal) {
+                mu1_ = 1.0 / fixingTime_ * std::log((adjustedRate1_ + shift1_) /
+                                                    (swapRate1_ + shift1_));
+                mu2_ = 1.0 / fixingTime_ * std::log((adjustedRate2_ + shift2_) /
+                                                    (swapRate2_ + shift2_));
+            }
+            // for the normal volatility case we do not need the drifts
+            // but rather use adjusted rates directly in the integrand
+
+            rho_ = std::max(std::min(correlation()->value(), 0.9999),
+                            -0.9999); // avoid division by zero in integrand
+        } else {
+            // fixing is in the past or today
+            adjustedRate1_ = c1_->indexFixing();
+            adjustedRate2_ = c2_->indexFixing();
+        }
+    }
+
+    Real LognormalCmsSpreadPricer::optionletPrice(Option::Type optionType,
+                                                  Real strike) const {
+        // this method is only called for future fixings
+        optionType_ = optionType;
+        phi_ = optionType == Option::Call ? 1.0 : -1.0;
+        Real res = 0.0;
+        if (volType_ == ShiftedLognormal) {
+            // (shifted) lognormal volatility
+            if (strike >= 0.0) {
+                a_ = gearing1_;
+                b_ = gearing2_;
+                s1_ = swapRate1_ + shift1_;
+                s2_ = swapRate2_ + shift2_;
+                m1_ = mu1_;
+                m2_ = mu2_;
+                v1_ = vol1_;
+                v2_ = vol2_;
+                k_ = strike + gearing1_ * shift1_ + gearing2_ * shift2_;
+            } else {
+                a_ = -gearing2_;
+                b_ = -gearing1_;
+                s1_ = swapRate2_ + shift1_;
+                s2_ = swapRate1_ + shift2_;
+                m1_ = mu2_;
+                m2_ = mu1_;
+                v1_ = vol2_;
+                v2_ = vol1_;
+                k_ = -strike - gearing1_ * shift1_ - gearing2_ * shift2_;
+                res += phi_ * (gearing1_ * adjustedRate1_ +
+                               gearing2_ * adjustedRate2_ - strike);
+            }
+            res +=
+                1.0 / M_SQRTPI * (*integrator_)(integrand_f(this));
+        } else {
+            // normal volatility
+            Real forward = gearing1_ * adjustedRate1_ +
+                gearing2_ * adjustedRate2_;
+            Real stddev =
+                std::sqrt(fixingTime_ *
+                          (gearing1_ * gearing1_ * vol1_ * vol1_ +
+                           gearing2_ * gearing2_ * vol2_ * vol2_ +
+                           2.0 * gearing1_ * gearing2_ * rho_ * vol1_ * vol2_));
+            res =
+                bachelierBlackFormula(optionType_, strike, forward, stddev, 1.0);
+        }
+        return res * discount_ * coupon_->accrualPeriod();
+    }
+
+    Rate LognormalCmsSpreadPricer::swapletRate() const {
+        return swapletPrice() / (coupon_->accrualPeriod() * discount_);
+    }
+
+    Real LognormalCmsSpreadPricer::capletPrice(Rate effectiveCap) const {
+        // caplet is equivalent to call option on fixing
+        if (fixingDate_ <= today_) {
+            // the fixing is determined
+            const Rate Rs = std::max(
+                coupon_->index()->fixing(fixingDate_) - effectiveCap, 0.);
+            Rate price = gearing_ * Rs * coupon_->accrualPeriod() * discount_;
+            return price;
+        } else {
+            Real capletPrice = optionletPrice(Option::Call, effectiveCap);
+            return gearing_ * capletPrice;
+        }
+    }
+
+    Rate LognormalCmsSpreadPricer::capletRate(Rate effectiveCap) const {
+        return capletPrice(effectiveCap) /
+               (coupon_->accrualPeriod() * discount_);
+    }
+
+    Real LognormalCmsSpreadPricer::floorletPrice(Rate effectiveFloor) const {
+        // floorlet is equivalent to put option on fixing
+        if (fixingDate_ <= today_) {
+            // the fixing is determined
+            const Rate Rs = std::max(
+                effectiveFloor - coupon_->index()->fixing(fixingDate_), 0.);
+            Rate price = gearing_ * Rs * coupon_->accrualPeriod() * discount_;
+            return price;
+        } else {
+            Real floorletPrice = optionletPrice(Option::Put, effectiveFloor);
+            return gearing_ * floorletPrice;
+        }
+    }
+
+    Rate LognormalCmsSpreadPricer::floorletRate(Rate effectiveFloor) const {
+        return floorletPrice(effectiveFloor) /
+               (coupon_->accrualPeriod() * discount_);
+    }
+
+    Real LognormalCmsSpreadPricer::swapletPrice() const {
+        return gearing_ * coupon_->accrualPeriod() * discount_ *
+                   (gearing1_ * adjustedRate1_ + gearing2_ * adjustedRate2_) +
+               spreadLegValue_;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>proxyibor.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/coupons/proxyibor.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    ProxyIbor::ProxyIbor(const std::string& familyName,
+                         const Period& tenor,
+                         Natural settlementDays,
+                         const Currency& currency,
+                         const Calendar& fixingCalendar,
+                         BusinessDayConvention convention,
+                         bool endOfMonth,
+                         const DayCounter& dayCounter,
+                         Handle<Quote> gearing,
+                         ext::shared_ptr<IborIndex> iborIndex,
+                         Handle<Quote> spread)
+    : IborIndex(familyName,
+                tenor,
+                settlementDays,
+                currency,
+                fixingCalendar,
+                convention,
+                endOfMonth,
+                dayCounter),
+      gearing_(std::move(gearing)), iborIndex_(std::move(iborIndex)), spread_(std::move(spread)) {
+        registerWith(iborIndex_);
+    }
+}
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>quantocouponpricer.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Toyin Akin
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/coupons/quantocouponpricer.hpp>
+#include <ql/cashflows/capflooredcoupon.hpp>
+#include <ql/cashflows/digitalcoupon.hpp>
+#include <ql/cashflows/digitalcmscoupon.hpp>
+#include <ql/cashflows/digitaliborcoupon.hpp>
+#include <ql/cashflows/rangeaccrual.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <ql/indexes/interestrateindex.hpp>
+
+namespace QuantLib {
+
+    Rate BlackIborQuantoCouponPricer::adjustedFixing(Real fixing) const {
+
+        if (fixing == Null<Rate>())
+            fixing = coupon_->indexFixing();
+
+        // Here we apply the quanto adjustment first, then delegate to
+        // the parent class
+        Date d1 = coupon_->fixingDate(),
+             referenceDate = capletVolatility()->referenceDate();
+
+        if (d1 > referenceDate) {
+            Time t1 =
+                capletVolatility()->timeFromReference(d1);
+            Volatility fxsigma =
+                fxRateBlackVolatility_->blackVol(d1, fixing, true);
+            Volatility sigma = capletVolatility()->volatility(d1, fixing);
+            Real rho = underlyingFxCorrelation_->value();
+
+            // Apply Quanto Adjustment.
+            // Hull 6th Edition, page 642, generalised to
+            // shifted lognormal and normal volatilities
+            if(capletVolatility()->volatilityType() == ShiftedLognormal) {
+                Real dQuantoAdj = std::exp(sigma*fxsigma*rho*t1);
+                Real shift = capletVolatility()->displacement();
+                fixing = (fixing+shift)*dQuantoAdj-shift;
+            }
+            else {
+                Real dQuantoAdj = sigma*fxsigma*rho*t1;
+                fixing += dQuantoAdj;
+            }
+        }
+
+        return BlackIborCouponPricer::adjustedFixing(fixing);
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>strippedcapflooredcoupon.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/couponpricer.hpp>
+#include <ql/experimental/coupons/strippedcapflooredcoupon.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    StrippedCappedFlooredCoupon::StrippedCappedFlooredCoupon(
+        const ext::shared_ptr<CappedFlooredCoupon> &underlying)
+        : FloatingRateCoupon(
+              underlying->date(), underlying->nominal(),
+              underlying->accrualStartDate(), underlying->accrualEndDate(),
+              underlying->fixingDays(), underlying->index(),
+              underlying->gearing(), underlying->spread(),
+              underlying->referencePeriodStart(),
+              underlying->referencePeriodEnd(), underlying->dayCounter(),
+              underlying->isInArrears()),
+          underlying_(underlying) {
+        registerWith(underlying_);
+    }
+
+    void StrippedCappedFlooredCoupon::deepUpdate() {
+        update();
+        underlying_->deepUpdate();
+    }
+
+    void StrippedCappedFlooredCoupon::performCalculations() const {
+        QL_REQUIRE(underlying_->underlying()->pricer() != nullptr, "pricer not set");
+        underlying_->underlying()->pricer()->initialize(*underlying_->underlying());
+        Rate floorletRate = 0.0;
+        if (underlying_->isFloored())
+            floorletRate = underlying_->underlying()->pricer()->floorletRate(
+                underlying_->effectiveFloor());
+        Rate capletRate = 0.0;
+        if (underlying_->isCapped())
+            capletRate =
+                underlying_->underlying()->pricer()->capletRate(underlying_->effectiveCap());
+
+        // if the underlying is collared we return the value of the embedded
+        // collar, otherwise the value of a long floor or a long cap respectively
+
+        rate_ = (underlying_->isFloored() && underlying_->isCapped()) ?
+                    Real(floorletRate - capletRate) :
+                    Real(floorletRate + capletRate);
+    }
+
+    Rate StrippedCappedFlooredCoupon::rate() const {
+        calculate();
+        return rate_;
+    }
+
+    Rate StrippedCappedFlooredCoupon::convexityAdjustment() const {
+        return underlying_->convexityAdjustment();
+    }
+
+    Rate StrippedCappedFlooredCoupon::cap() const { return underlying_->cap(); }
+
+    Rate StrippedCappedFlooredCoupon::floor() const {
+        return underlying_->floor();
+    }
+
+    Rate StrippedCappedFlooredCoupon::effectiveCap() const {
+        return underlying_->effectiveCap();
+    }
+
+    Rate StrippedCappedFlooredCoupon::effectiveFloor() const {
+        return underlying_->effectiveFloor();
+    }
+
+    void StrippedCappedFlooredCoupon::accept(AcyclicVisitor &v) {
+        underlying_->accept(v);
+        auto* v1 = dynamic_cast<Visitor<StrippedCappedFlooredCoupon>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            FloatingRateCoupon::accept(v);
+    }
+
+    bool StrippedCappedFlooredCoupon::isCap() const {
+        return underlying_->isCapped();
+    }
+
+    bool StrippedCappedFlooredCoupon::isFloor() const {
+        return underlying_->isFloored();
+    }
+
+    bool StrippedCappedFlooredCoupon::isCollar() const {
+        return isCap() && isFloor();
+    }
+
+    void StrippedCappedFlooredCoupon::setPricer(
+        const ext::shared_ptr<FloatingRateCouponPricer> &pricer) {
+        FloatingRateCoupon::setPricer(pricer);
+        underlying_->setPricer(pricer);
+    }
+
+    StrippedCappedFlooredCouponLeg::StrippedCappedFlooredCouponLeg(Leg underlyingLeg)
+    : underlyingLeg_(std::move(underlyingLeg)) {}
+
+    StrippedCappedFlooredCouponLeg::operator Leg() const {
+        Leg resultLeg;
+        resultLeg.reserve(underlyingLeg_.size());
+        ext::shared_ptr<CappedFlooredCoupon> c;
+        for (const auto& i : underlyingLeg_) {
+            if ((c = ext::dynamic_pointer_cast<CappedFlooredCoupon>(i)) != nullptr) {
+                resultLeg.push_back(
+                    ext::make_shared<StrippedCappedFlooredCoupon>(c));
+            } else {
+                resultLeg.push_back(i);
+            }
+        }
+        return resultLeg;
+    }
+}
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>swapspreadindex.cpp</source>
+    <document_content><![CDATA[/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+
+ This program is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ or FITNESS FOR A PARTICULAR PURPOSE. See the license for more details. */
+
+#include <ql/experimental/coupons/swapspreadindex.hpp>
+#include <iomanip>
+#include <sstream>
+#include <utility>
+
+namespace QuantLib {
+
+    SwapSpreadIndex::SwapSpreadIndex(const std::string& familyName,
+                                     const ext::shared_ptr<SwapIndex>& swapIndex1,
+                                     ext::shared_ptr<SwapIndex> swapIndex2,
+                                     const Real gearing1,
+                                     const Real gearing2)
+    : InterestRateIndex(familyName,
+                        swapIndex1->tenor(), // does not make sense, but we have to provide one
+                        swapIndex1->fixingDays(),
+                        swapIndex1->currency(),
+                        swapIndex1->fixingCalendar(),
+                        swapIndex1->dayCounter()),
+      swapIndex1_(swapIndex1), swapIndex2_(std::move(swapIndex2)), gearing1_(gearing1),
+      gearing2_(gearing2) {
+
+        registerWith(swapIndex1_);
+        registerWith(swapIndex2_);
+
+        std::ostringstream name;
+        name << std::setprecision(4) << std::fixed << swapIndex1_->name() << "("
+             << gearing1 << ") + " << swapIndex2_->name() << "(" << gearing2
+             << ")";
+        name_ = name.str();
+
+        QL_REQUIRE(swapIndex1_->fixingDays() == swapIndex2_->fixingDays(),
+                   "index1 fixing days ("
+                       << swapIndex1_->fixingDays() << ")"
+                       << "must be equal to index2 fixing days ("
+                       << swapIndex2_->fixingDays() << ")");
+
+        QL_REQUIRE(swapIndex1_->fixingCalendar() ==
+                       swapIndex2_->fixingCalendar(),
+                   "index1 fixingCalendar ("
+                       << swapIndex1_->fixingCalendar() << ")"
+                       << "must be equal to index2 fixingCalendar ("
+                       << swapIndex2_->fixingCalendar() << ")");
+
+        QL_REQUIRE(swapIndex1_->currency() == swapIndex2_->currency(),
+                   "index1 currency (" << swapIndex1_->currency() << ")"
+                                       << "must be equal to index2 currency ("
+                                       << swapIndex2_->currency() << ")");
+
+        QL_REQUIRE(swapIndex1_->dayCounter() == swapIndex2_->dayCounter(),
+                   "index1 dayCounter ("
+                       << swapIndex1_->dayCounter() << ")"
+                       << "must be equal to index2 dayCounter ("
+                       << swapIndex2_->dayCounter() << ")");
+
+        QL_REQUIRE(swapIndex1_->fixedLegTenor() == swapIndex2_->fixedLegTenor(),
+                   "index1 fixedLegTenor ("
+                       << swapIndex1_->fixedLegTenor() << ")"
+                       << "must be equal to index2 fixedLegTenor ("
+                       << swapIndex2_->fixedLegTenor());
+
+        QL_REQUIRE(swapIndex1_->fixedLegConvention() ==
+                       swapIndex2_->fixedLegConvention(),
+                   "index1 fixedLegConvention ("
+                       << swapIndex1_->fixedLegConvention() << ")"
+                       << "must be equal to index2 fixedLegConvention ("
+                       << swapIndex2_->fixedLegConvention());
+    }
+}
+]]></document_content>
+  </document>
+</documents>

@@ -1,0 +1,756 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>haganirregularswaptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011, 2012, 2013, 2023 Andre Miemiec
+ Copyright (C) 2012 Samuel Tebege
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/cashflows.hpp>
+#include <ql/cashflows/couponpricer.hpp>
+#include <ql/exercise.hpp>
+#include <ql/experimental/swaptions/haganirregularswaptionengine.hpp>
+#include <ql/instruments/swaption.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/interpolations/linearinterpolation.hpp>
+#include <ql/math/matrixutilities/svd.hpp>
+#include <ql/math/solvers1d/bisection.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <ql/pricingengines/swap/discountingswapengine.hpp>
+#include <ql/pricingengines/swaption/blackswaptionengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    //////////////////////////////////////////////////////////////////////////
+    // Implementation of helper class HaganIrregularSwaptionEngine::Basket  //
+    //////////////////////////////////////////////////////////////////////////
+
+    HaganIrregularSwaptionEngine::Basket::Basket(
+        ext::shared_ptr<IrregularSwap> swap,
+        Handle<YieldTermStructure> termStructure,
+        Handle<SwaptionVolatilityStructure> volatilityStructure)
+    : swap_(std::move(swap)), termStructure_(std::move(termStructure)),
+      volatilityStructure_(std::move(volatilityStructure)) {
+
+        engine_ = ext::shared_ptr<PricingEngine>(new DiscountingSwapEngine(termStructure_));
+
+        // store swap npv
+        swap_->setPricingEngine(engine_);
+        targetNPV_ = swap_->NPV();
+
+        // build standard swaps
+
+        const Leg& fixedLeg = swap_->fixedLeg();
+        const Leg& floatLeg = swap_->floatingLeg();
+
+        Leg fixedCFS, floatCFS;
+
+        for (Size i = 0; i < fixedLeg.size(); ++i) {
+            // retrieve fixed rate coupon from fixed leg
+            ext::shared_ptr<FixedRateCoupon> coupon =
+                ext::dynamic_pointer_cast<FixedRateCoupon>(fixedLeg[i]);
+            QL_REQUIRE(coupon, "dynamic cast of fixed leg coupon failed.");
+
+            expiries_.push_back(coupon->date());
+
+            ext::shared_ptr<FixedRateCoupon> newCpn = ext::make_shared<FixedRateCoupon>(
+                coupon->date(), 1.0, coupon->rate(), coupon->dayCounter(),
+                coupon->accrualStartDate(), coupon->accrualEndDate(),
+                coupon->referencePeriodStart(), coupon->referencePeriodEnd());
+
+            fixedCFS.push_back(newCpn);
+
+            annuities_.push_back(10000 * CashFlows::bps(fixedCFS, **termStructure_, true));
+
+            floatCFS.clear();
+
+            for (const auto& j : floatLeg) {
+                // retrieve ibor coupon from floating leg
+                ext::shared_ptr<IborCoupon> coupon = ext::dynamic_pointer_cast<IborCoupon>(j);
+                QL_REQUIRE(coupon, "dynamic cast of float leg coupon failed.");
+
+                if (coupon->date() <= expiries_[i]) {
+                    ext::shared_ptr<IborCoupon> newCpn = ext::make_shared<IborCoupon>(
+                        coupon->date(), 1.0, coupon->accrualStartDate(), coupon->accrualEndDate(),
+                        coupon->fixingDays(), coupon->iborIndex(), 1.0, coupon->spread(),
+                        coupon->referencePeriodStart(), coupon->referencePeriodEnd(),
+                        coupon->dayCounter(), coupon->isInArrears());
+
+
+                    if (!newCpn->isInArrears())
+                        newCpn->setPricer(
+                            ext::shared_ptr<FloatingRateCouponPricer>(new BlackIborCouponPricer()));
+
+                    floatCFS.push_back(newCpn);
+                }
+            }
+
+            Real floatLegNPV = CashFlows::npv(floatCFS, **termStructure_, true);
+
+            fairRates_.push_back(floatLegNPV / annuities_[i]);
+        }
+    }
+
+
+    // computes a replication of the swap in terms of a basket of vanilla swaps
+    // by solving a linear system of equation
+    Array HaganIrregularSwaptionEngine::Basket::compute(Rate lambda) const {
+
+        // update members
+        lambda_ = lambda;
+
+        Size n = swap_->fixedLeg().size();
+
+        // build linear system of equations
+        Matrix arr(n, n, 0.0);
+        Array rhs(n);
+
+
+        // fill the matrix describing the linear system of equations by looping over rows
+        for (Size r = 0; r < n; ++r) {
+
+            ext::shared_ptr<FixedRateCoupon> cpn_r =
+                ext::dynamic_pointer_cast<FixedRateCoupon>(swap_->fixedLeg()[r]);
+            QL_REQUIRE(cpn_r, "Cast to fixed rate coupon failed.");
+
+            // looping over columns
+            for (Size c = r; c < n; ++c) {
+
+                // set homogenous part of lse
+                arr[r][c] = (fairRates_[c] + lambda_) * cpn_r->accrualPeriod();
+            }
+
+            // add nominal repayment for i-th swap
+            arr[r][r] += 1;
+        }
+
+
+        for (Size r = 0; r < n; ++r) {
+            ext::shared_ptr<FixedRateCoupon> cpn_r =
+                ext::dynamic_pointer_cast<FixedRateCoupon>(swap_->fixedLeg()[r]);
+
+            // set inhomogenity of lse
+            Real N_r = cpn_r->nominal();
+
+            if (r < n - 1) {
+
+                ext::shared_ptr<FixedRateCoupon> cpn_rp1 =
+                    ext::dynamic_pointer_cast<FixedRateCoupon>(swap_->fixedLeg()[r + 1]);
+
+                Real N_rp1 = cpn_rp1->nominal();
+
+                rhs[r] = N_r * (cpn_r->rate()) * cpn_r->accrualPeriod() + (N_r - N_rp1);
+
+            } else {
+
+                rhs[r] = N_r * (cpn_r->rate()) * cpn_r->accrualPeriod() + N_r;
+            }
+        }
+
+
+        SVD svd(arr);
+
+        return svd.solveFor(rhs);
+    }
+
+
+    Real HaganIrregularSwaptionEngine::Basket::operator()(Rate lambda) const {
+
+        Array weights = compute(lambda);
+
+        Real defect = -targetNPV_;
+
+        for (Size i = 0; i < weights.size(); ++i)
+            defect -= Integer(swap_->type()) * lambda * weights[i] * annuities_[i];
+
+        return defect;
+    }
+
+
+    // creates a standard swap by deducing its conventions from market data objects
+    ext::shared_ptr<VanillaSwap> HaganIrregularSwaptionEngine::Basket::component(Size i) const {
+
+        ext::shared_ptr<IborCoupon> iborCpn =
+            ext::dynamic_pointer_cast<IborCoupon>(swap_->floatingLeg()[0]);
+        QL_REQUIRE(iborCpn, "dynamic cast of float leg coupon failed. Can't find index.");
+        ext::shared_ptr<IborIndex> iborIndex = iborCpn->iborIndex();
+
+
+        Period dummySwapLength = Period(1, Years);
+
+        ext::shared_ptr<VanillaSwap> memberSwap_ =
+            MakeVanillaSwap(dummySwapLength, iborIndex)
+                .withType(swap_->type())
+                .withEffectiveDate(swap_->startDate())
+                .withTerminationDate(expiries_[i])
+                .withRule(DateGeneration::Backward)
+                .withDiscountingTermStructure(termStructure_);
+
+        Real stdAnnuity = 10000 * CashFlows::bps(memberSwap_->fixedLeg(), **termStructure_, true);
+
+        // compute annuity transformed rate
+        Rate transformedRate = (fairRates_[i] + lambda_) * annuities_[i] / stdAnnuity;
+
+        memberSwap_ = MakeVanillaSwap(dummySwapLength, iborIndex, transformedRate)
+                          .withType(swap_->type())
+                          .withEffectiveDate(swap_->startDate())
+                          .withTerminationDate(expiries_[i])
+                          .withRule(DateGeneration::Backward)
+                          .withDiscountingTermStructure(termStructure_);
+
+
+        return memberSwap_;
+    }
+
+
+    ///////////////////////////////////////////////////////////
+    // Implementation of class HaganIrregularSwaptionEngine  //
+    ///////////////////////////////////////////////////////////
+
+
+    HaganIrregularSwaptionEngine::HaganIrregularSwaptionEngine(
+        Handle<SwaptionVolatilityStructure> volatilityStructure,
+        Handle<YieldTermStructure> termStructure)
+    : termStructure_(std::move(termStructure)),
+      volatilityStructure_(std::move(volatilityStructure)) {
+        registerWith(termStructure_);
+        registerWith(volatilityStructure_);
+    }
+
+
+    void HaganIrregularSwaptionEngine::calculate() const {
+
+        // check exercise type
+        ext::shared_ptr<Exercise> exercise_ = this->arguments_.exercise;
+        QL_REQUIRE(exercise_->type() == QuantLib::Exercise::European, "swaption must be european");
+
+        // extract the underlying irregular swap
+        ext::shared_ptr<IrregularSwap> swap_ = this->arguments_.swap;
+
+
+        // Reshuffle spread from float to fixed (, i.e. remove spread from float side by finding the
+        // adjusted fixed coupon such that the NPV of the swap stays constant).
+        Leg fixedLeg = swap_->fixedLeg();
+        Real fxdLgBPS = CashFlows::bps(fixedLeg, **termStructure_, true);
+
+        Leg floatLeg = swap_->floatingLeg();
+        Real fltLgNPV = CashFlows::npv(floatLeg, **termStructure_, true);
+        Real fltLgBPS = CashFlows::bps(floatLeg, **termStructure_, true);
+
+
+        Leg floatCFS, fixedCFS;
+
+        floatCFS.clear();
+
+        for (auto& j : floatLeg) {
+            // retrieve ibor coupon from floating leg
+            ext::shared_ptr<IborCoupon> coupon = ext::dynamic_pointer_cast<IborCoupon>(j);
+            QL_REQUIRE(coupon, "dynamic cast of float leg coupon failed.");
+
+            ext::shared_ptr<IborCoupon> newCpn = ext::make_shared<IborCoupon>(
+                coupon->date(), coupon->nominal(), coupon->accrualStartDate(),
+                coupon->accrualEndDate(), coupon->fixingDays(), coupon->iborIndex(),
+                coupon->gearing(), 0.0, coupon->referencePeriodStart(),
+                coupon->referencePeriodEnd(), coupon->dayCounter(), coupon->isInArrears());
+
+
+            if (!newCpn->isInArrears())
+                newCpn->setPricer(
+                    ext::shared_ptr<FloatingRateCouponPricer>(new BlackIborCouponPricer()));
+
+            floatCFS.push_back(newCpn);
+        }
+
+
+        Real sprdLgNPV = fltLgNPV - CashFlows::npv(floatCFS, **termStructure_, true);
+        Rate avgSpread = sprdLgNPV / fltLgBPS / 10000;
+
+        Rate cpn_adjustment = avgSpread * fltLgBPS / fxdLgBPS;
+
+        fixedCFS.clear();
+
+        for (auto& i : fixedLeg) {
+            // retrieve fixed rate coupon from fixed leg
+            ext::shared_ptr<FixedRateCoupon> coupon = ext::dynamic_pointer_cast<FixedRateCoupon>(i);
+            QL_REQUIRE(coupon, "dynamic cast of fixed leg coupon failed.");
+
+            ext::shared_ptr<FixedRateCoupon> newCpn = ext::make_shared<FixedRateCoupon>(
+                coupon->date(), coupon->nominal(), coupon->rate() - cpn_adjustment,
+                coupon->dayCounter(), coupon->accrualStartDate(), coupon->accrualEndDate(),
+                coupon->referencePeriodStart(), coupon->referencePeriodEnd());
+
+            fixedCFS.push_back(newCpn);
+        }
+
+
+        // this is the irregular swap with spread removed
+        swap_ = ext::make_shared<IrregularSwap>(arguments_.swap->type(), fixedCFS, floatCFS);
+
+
+        // Sets up the basket by implementing the methodology described in
+        // P.S.Hagan "Callable Swaps and Bermudan 'Exercise into Swaptions'"
+        Basket basket(swap_, termStructure_, volatilityStructure_);
+
+
+        ///////////////////////////////////////////////////////////////////////////////////////////////////
+        // find lambda //
+        ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+        Bisection s1d;
+
+        Rate minLambda = -0.5;
+        Rate maxLambda = 0.5;
+        s1d.setMaxEvaluations(10000);
+        s1d.setLowerBound(minLambda);
+        s1d.setUpperBound(maxLambda);
+        s1d.solve(basket, 1.0e-8, 0.01, minLambda, maxLambda);
+
+
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+        //  compute the price of the irreg swaption as the sum of the prices of the regular
+        //  swaptions  //
+        /////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+        results_.value = HKPrice(basket, exercise_);
+    }
+
+
+    /////////////////////////////////////////////////////////////////////////////////////////
+    // Computes irregular swaption price according to P.J. Hunt, J.E. Kennedy:             //
+    // "Implied interest rate pricing models", Finance Stochast. 2, 275-293 (1998)         //
+    /////////////////////////////////////////////////////////////////////////////////////////
+
+    Real HaganIrregularSwaptionEngine::HKPrice(Basket& basket,
+                                               ext::shared_ptr<Exercise>& exercise) const {
+
+        // Swaption Engine: assumes that the swaptions exercise date equals the swap start date
+        QL_REQUIRE((volatilityStructure_->volatilityType() == Normal),
+                   "swaptionEngine: only normal volatility implemented.");
+
+
+        ext::shared_ptr<PricingEngine> swaptionEngine = ext::shared_ptr<PricingEngine>(
+            new BachelierSwaptionEngine(termStructure_, volatilityStructure_));
+
+
+        // retrieve weights of underlying swaps
+        Array weights = basket.weights();
+
+        Real npv = 0.0;
+
+        for (Size i = 0; i < weights.size(); ++i) {
+            ext::shared_ptr<VanillaSwap> pvSwap_ = basket.component(i);
+            Swaption swaption = Swaption(pvSwap_, exercise);
+            swaption.setPricingEngine(swaptionEngine);
+            npv += weights[i] * swaption.NPV();
+        }
+
+        return npv;
+    }
+
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>irregularswap.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+ Copyright (C) 2003, 2004, 2005, 2006, 2007 StatPro Italia srl
+ Copyright (C) 2007 Ferdinando Ametrano
+ Copyright (C) 2010 Andre Miemiec
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/swaptions/irregularswap.hpp>
+#include <ql/cashflows/fixedratecoupon.hpp>
+#include <ql/cashflows/iborcoupon.hpp>
+#include <ql/cashflows/cashflowvectors.hpp>
+#include <ql/cashflows/cashflows.hpp>
+#include <ql/cashflows/couponpricer.hpp>
+#include <ql/indexes/iborindex.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+
+namespace QuantLib {
+
+    IrregularSwap::IrregularSwap(
+                     Type type,
+                     const Leg& fixLeg,
+                     const Leg& floatLeg)
+    : Swap(2), type_(type) {
+
+
+        switch (type_) {
+          case Payer:
+            payer_[0] = -1.0;
+            payer_[1] = +1.0;
+            break;
+          case Receiver:
+            payer_[0] = +1.0;
+            payer_[1] = -1.0;
+            break;
+          default:
+            QL_FAIL("Unknown Irregular-swap type");
+        }
+
+        //Fixed leg
+        legs_[0] = fixLeg;
+
+        for (auto i = legs_[0].begin(); i < legs_[0].end(); ++i)
+            registerWith(*i);
+        
+        //Floating Leg
+        legs_[1] = floatLeg;
+
+        for (auto i = legs_[1].begin(); i < legs_[1].end(); ++i)
+            registerWith(*i);
+
+    }
+
+
+    void IrregularSwap::setupArguments(PricingEngine::arguments* args) const {
+
+    //Debug: to be done
+
+        Swap::setupArguments(args);
+
+        auto* arguments = dynamic_cast<IrregularSwap::arguments*>(args);
+
+        if (arguments == nullptr) // it's a swap engine...
+            return;
+
+        arguments->type = type_;
+        //arguments->nominal = nominal_;
+
+        
+        const Leg& fixedCoupons = fixedLeg();
+
+        arguments->fixedResetDates = arguments->fixedPayDates = std::vector<Date>(fixedCoupons.size());
+        arguments->fixedNominals   = arguments->fixedCoupons  = std::vector<Real>(fixedCoupons.size());
+
+
+        for (Size i=0; i<fixedCoupons.size(); ++i) {
+            ext::shared_ptr<FixedRateCoupon> coupon =
+                ext::dynamic_pointer_cast<FixedRateCoupon>(fixedCoupons[i]);
+
+            arguments->fixedPayDates[i]   = coupon->date();
+            arguments->fixedResetDates[i] = coupon->accrualStartDate();
+            arguments->fixedCoupons[i]    = coupon->amount();
+            arguments->fixedNominals[i]   = coupon->nominal(); 
+        }
+
+
+        const Leg& floatingCoupons = floatingLeg();
+
+        arguments->floatingResetDates   = arguments->floatingPayDates 
+                                        = arguments->floatingFixingDates = std::vector<Date>(floatingCoupons.size());
+        arguments->floatingAccrualTimes = std::vector<Time>(floatingCoupons.size());
+        arguments->floatingSpreads      = std::vector<Spread>(floatingCoupons.size());
+        arguments->floatingNominals     = arguments->floatingCoupons = std::vector<Real>(floatingCoupons.size());
+
+        for (Size i=0; i<floatingCoupons.size(); ++i) {
+            ext::shared_ptr<IborCoupon> coupon =
+                ext::dynamic_pointer_cast<IborCoupon>(floatingCoupons[i]);
+
+            arguments->floatingResetDates[i]   = coupon->accrualStartDate();
+            arguments->floatingPayDates[i]     = coupon->date();
+
+            arguments->floatingFixingDates[i]  = coupon->fixingDate();
+            arguments->floatingAccrualTimes[i] = coupon->accrualPeriod();
+            arguments->floatingSpreads[i]      = coupon->spread();
+            arguments->floatingNominals[i]     = coupon->nominal();
+
+            try {
+                arguments->floatingCoupons[i] = coupon->amount();
+            } catch (Error&) {
+                arguments->floatingCoupons[i] = Null<Real>();
+            }
+        }
+        
+    }
+
+
+    Rate IrregularSwap::fairRate() const {
+        calculate();
+        QL_REQUIRE(fairRate_ != Null<Rate>(), "result not available");
+        return fairRate_;
+    }
+
+    Spread IrregularSwap::fairSpread() const {
+        calculate();
+        QL_REQUIRE(fairSpread_ != Null<Spread>(), "result not available");
+        return fairSpread_;
+    }
+
+    Real IrregularSwap::fixedLegBPS() const {
+        calculate();
+        QL_REQUIRE(legBPS_[0] != Null<Real>(), "result not available");
+        return legBPS_[0];
+    }
+
+    Real IrregularSwap::floatingLegBPS() const {
+        calculate();
+        QL_REQUIRE(legBPS_[1] != Null<Real>(), "result not available");
+        return legBPS_[1];
+    }
+
+    Real IrregularSwap::fixedLegNPV() const {
+        calculate();
+        QL_REQUIRE(legNPV_[0] != Null<Real>(), "result not available");
+        return legNPV_[0];
+    }
+
+    Real IrregularSwap::floatingLegNPV() const {
+        calculate();
+        QL_REQUIRE(legNPV_[1] != Null<Real>(), "result not available");
+        return legNPV_[1];
+    }
+
+    void IrregularSwap::setupExpired() const {
+        Swap::setupExpired();
+        legBPS_[0] = legBPS_[1] = 0.0;
+        fairRate_ = Null<Rate>();
+        fairSpread_ = Null<Spread>();
+    }
+
+    void IrregularSwap::fetchResults(const PricingEngine::results* r) const {
+        Swap::fetchResults(r);
+
+        const auto* results = dynamic_cast<const IrregularSwap::results*>(r);
+        if (results != nullptr) { // might be a swap engine, so no error is thrown
+            fairRate_ = results->fairRate;
+            fairSpread_ = results->fairSpread;
+        } else {
+            fairRate_ = Null<Rate>();
+            fairSpread_ = Null<Spread>();
+        }
+
+        if (fairRate_ == Null<Rate>()) {
+            // calculate it from other results
+            if (legBPS_[0] != Null<Real>()) 
+                fairRate_ = 0.0; // Debug: legs_[0]->fixedRate_ - NPV_/(legBPS_[0]/basisPoint);
+        }
+        if (fairSpread_ == Null<Spread>()) {
+            // ditto
+            if (legBPS_[1] != Null<Real>())
+                fairSpread_ = 0.0; //DEBUG: spread_ - NPV_/(legBPS_[1]/basisPoint);
+        }
+    }
+
+    void IrregularSwap::arguments::validate() const {
+
+        Swap::arguments::validate();
+
+        QL_REQUIRE(fixedResetDates.size() == fixedPayDates.size(),
+                   "number of fixed start dates different from "
+                   "number of fixed payment dates");
+        QL_REQUIRE(fixedPayDates.size() == fixedCoupons.size(),
+                   "number of fixed payment dates different from "
+                   "number of fixed coupon amounts");
+        QL_REQUIRE(floatingResetDates.size() == floatingPayDates.size(),
+                   "number of floating start dates different from "
+                   "number of floating payment dates");
+        QL_REQUIRE(floatingFixingDates.size() == floatingPayDates.size(),
+                   "number of floating fixing dates different from "
+                   "number of floating payment dates");
+        QL_REQUIRE(floatingAccrualTimes.size() == floatingPayDates.size(),
+                   "number of floating accrual Times different from "
+                   "number of floating payment dates");
+        QL_REQUIRE(floatingSpreads.size() == floatingPayDates.size(),
+                   "number of floating spreads different from "
+                   "number of floating payment dates");
+        QL_REQUIRE(floatingPayDates.size() == floatingCoupons.size(),
+                   "number of floating payment dates different from "
+                   "number of floating coupon amounts");
+    }
+
+    void IrregularSwap::results::reset() {
+        Swap::results::reset();
+        fairRate = Null<Rate>();
+        fairSpread = Null<Spread>();
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>irregularswaption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2001, 2002, 2003 Sadruddin Rejeb
+ Copyright (C) 2006 Cristina Duminuco
+ Copyright (C) 2006 Marco Bianchetti
+ Copyright (C) 2007 StatPro Italia srl
+ Copyright (C) 2010 Andre Miemiec
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/any.hpp>
+#include <ql/exercise.hpp>
+#include <ql/experimental/swaptions/irregularswaption.hpp>
+#include <ql/math/solvers1d/newtonsafe.hpp>
+#include <ql/pricingengines/swaption/blackswaptionengine.hpp>
+#include <ql/quotes/simplequote.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    namespace {
+
+        class IrregularImpliedVolHelper {
+          public:
+            IrregularImpliedVolHelper(const IrregularSwaption&,
+                                      Handle<YieldTermStructure> discountCurve,
+                                      Real targetValue);
+            Real operator()(Volatility x) const;
+            Real derivative(Volatility x) const;
+          private:
+            ext::shared_ptr<PricingEngine> engine_;
+            Handle<YieldTermStructure> discountCurve_;
+            Real targetValue_;
+            ext::shared_ptr<SimpleQuote> vol_;
+            const Instrument::results* results_;
+        };
+
+        IrregularImpliedVolHelper::IrregularImpliedVolHelper(
+            const IrregularSwaption& swaption,
+            Handle<YieldTermStructure> discountCurve,
+            Real targetValue)
+        : discountCurve_(std::move(discountCurve)), targetValue_(targetValue),
+          vol_(ext::make_shared<SimpleQuote>(-1.0)) {
+
+            Handle<Quote> h(vol_);
+            engine_ = ext::shared_ptr<PricingEngine>(new
+                                    BlackSwaptionEngine(discountCurve_, h));
+            swaption.setupArguments(engine_->getArguments());
+
+            results_ =
+                dynamic_cast<const Instrument::results*>(engine_->getResults());
+        }
+
+        Real IrregularImpliedVolHelper::operator()(Volatility x) const {
+            if (x!=vol_->value()) {
+                vol_->setValue(x);
+                engine_->calculate();
+            }
+            return results_->value-targetValue_;
+        }
+
+        Real IrregularImpliedVolHelper::derivative(Volatility x) const {
+            if (x!=vol_->value()) {
+                vol_->setValue(x);
+                engine_->calculate();
+            }
+            auto vega_ = results_->additionalResults.find("vega");
+            QL_REQUIRE(vega_ != results_->additionalResults.end(),
+                       "vega not provided");
+            return ext::any_cast<Real>(vega_->second);
+        }
+    }
+
+    std::ostream& operator<<(std::ostream& out,
+                             IrregularSettlement::Type t) {
+        switch (t) {
+          case IrregularSettlement::Physical:
+            return out << "Delivery";
+          case IrregularSettlement::Cash:
+            return out << "Cash";
+          default:
+            QL_FAIL("unknown IrregularSettlement::Type(" << Integer(t) << ")");
+        }
+    }
+
+    IrregularSwaption::IrregularSwaption(ext::shared_ptr<IrregularSwap> swap,
+                                         const ext::shared_ptr<Exercise>& exercise,
+                                         IrregularSettlement::Type delivery)
+    : Option(ext::shared_ptr<Payoff>(), exercise), swap_(std::move(swap)),
+      settlementType_(delivery) {
+        registerWith(swap_);
+    }
+
+    bool IrregularSwaption::isExpired() const {
+        return detail::simple_event(exercise_->dates().back()).hasOccurred();
+    }
+
+    void IrregularSwaption::setupArguments(PricingEngine::arguments* args) const {
+
+        swap_->setupArguments(args);
+
+        auto* arguments = dynamic_cast<IrregularSwaption::arguments*>(args);
+
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->swap = swap_;
+        arguments->settlementType = settlementType_;
+        arguments->exercise = exercise_;
+    }
+
+    void IrregularSwaption::arguments::validate() const {
+        IrregularSwap::arguments::validate();
+        QL_REQUIRE(swap, "Irregular swap not set");
+        QL_REQUIRE(exercise, "exercise not set");
+    }
+
+    Volatility IrregularSwaption::impliedVolatility(
+                              Real targetValue,
+                              const Handle<YieldTermStructure>& discountCurve,
+                              Volatility guess,
+                              Real accuracy,
+                              Natural maxEvaluations,
+                              Volatility minVol,
+                              Volatility maxVol) const {
+        calculate();
+        QL_REQUIRE(!isExpired(), "instrument expired");
+
+        IrregularImpliedVolHelper f(*this, discountCurve, targetValue);
+        //Brent solver;
+        NewtonSafe solver;
+        solver.setMaxEvaluations(maxEvaluations);
+        return solver.solve(f, accuracy, guess, minVol, maxVol);
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

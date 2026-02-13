@@ -1,0 +1,1588 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>convolvedstudentt.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/convolvedstudentt.hpp>
+#include <ql/errors.hpp>
+#include <ql/math/factorial.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <ql/math/functional.hpp>
+#include <boost/math/distributions/students_t.hpp>
+
+namespace QuantLib {
+
+    CumulativeBehrensFisher::CumulativeBehrensFisher(const std::vector<Integer>& degreesFreedom,
+                                                     const std::vector<Real>& factors)
+    : degreesFreedom_(degreesFreedom), factors_(factors), polyConvolved_(std::vector<Real>(1, 1.))
+
+    {
+        QL_REQUIRE(degreesFreedom.size() == factors.size(),
+            "Incompatible sizes in convolution.");
+        for (int i : degreesFreedom) {
+            QL_REQUIRE(i % 2 != 0, "Even degree of freedom not allowed");
+            QL_REQUIRE(i >= 0, "Negative degree of freedom not allowed");
+        }
+        for(Size i=0; i<degreesFreedom_.size(); i++)
+            polynCharFnc_.push_back(polynCharactT((degreesFreedom[i]-1)/2));
+        // adjust the polynomial coefficients by the factors in the linear
+        //   combination:
+        for(Size i=0; i<degreesFreedom_.size(); i++) {
+            Real multiplier = 1.;
+            for(Size k=1; k<polynCharFnc_[i].size(); k++) {
+                multiplier *= std::abs(factors_[i]);
+                polynCharFnc_[i][k] *= multiplier;
+            }
+        }
+        //convolution, here it is a product of polynomials and exponentials
+        for (auto& i : polynCharFnc_)
+            polyConvolved_ = convolveVectorPolynomials(polyConvolved_, i);
+        // trim possible zeros that might have arised:
+        auto it = polyConvolved_.rbegin();
+        while (it != polyConvolved_.rend()) {
+            if (*it == 0.) {
+                polyConvolved_.pop_back();
+                it = polyConvolved_.rbegin();
+              }else{
+                  break;
+              }
+          }
+          // cache 'a' value (the exponent)
+          for(Size i=0; i<degreesFreedom_.size(); i++)
+              a_ += std::sqrt(static_cast<Real>(degreesFreedom_[i]))
+                * std::abs(factors_[i]);
+          a2_ = a_ * a_;
+    }
+
+    std::vector<Real> CumulativeBehrensFisher::polynCharactT(Natural n) const {
+        Natural nu = 2 * n +1;
+        std::vector<Real> low(1,1.), high(1,1.);
+        high.push_back(std::sqrt(static_cast<Real>(nu)));
+        if(n==0) return low;
+        if(n==1) return high;
+
+        for(Size k=1; k<n; k++) {
+            std::vector<Real> recursionFactor(1,0.); // 0 coef
+            recursionFactor.push_back(0.); // 1 coef
+            recursionFactor.push_back(nu/((2.*k+1.)*(2.*k-1.))); // 2 coef
+            std::vector<Real> lowUp =
+                convolveVectorPolynomials(recursionFactor, low);
+            //add them up:
+            for(Size i=0; i<high.size(); i++)
+                lowUp[i] += high[i];
+            low = high;
+            high = lowUp;
+        }
+        return high;
+    }
+
+    std::vector<Real> CumulativeBehrensFisher::convolveVectorPolynomials(
+        const std::vector<Real>& v1,
+        const std::vector<Real>& v2) const {
+    #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(!v1.empty() && !v2.empty(),
+            "Incorrect vectors in polynomial.");
+    #endif
+
+        const std::vector<Real>& shorter = v1.size() < v2.size() ? v1 : v2;
+        const std::vector<Real>& longer = (v1 == shorter) ? v2 : v1;
+
+        Size newDegree = v1.size()+v2.size()-2;
+        std::vector<Real> resultB(newDegree+1, 0.);
+        for(Size polyOrdr=0; polyOrdr<resultB.size(); polyOrdr++) {
+            for(Size i=std::max<Integer>(0, polyOrdr-longer.size()+1);
+                i<=std::min(polyOrdr, shorter.size()-1); i++)
+                resultB[polyOrdr] += shorter[i]*longer[polyOrdr-i];
+        }
+        return resultB;
+    }
+
+    Probability CumulativeBehrensFisher::operator()(const Real x) const {
+        // 1st & 0th terms with the table integration
+        Real integral = polyConvolved_[0] * std::atan(x/a_);
+        Real squared = a2_ + x*x;
+        Real rootsqr = std::sqrt(squared);
+        Real atan2xa = std::atan2(-x,a_);
+        if(polyConvolved_.size()>1)
+            integral += polyConvolved_[1] * x/squared;
+
+        for(Size exponent = 2; exponent <polyConvolved_.size(); exponent++) {
+            integral -= polyConvolved_[exponent] *
+                Factorial::get(exponent-1) * std::sin((exponent)*atan2xa)
+                    /std::pow(rootsqr, static_cast<Real>(exponent));
+         }
+        return .5 + integral / M_PI;
+    }
+
+    Probability
+    CumulativeBehrensFisher::density(const Real x) const {
+        Real squared = a2_ + x*x;
+        Real integral = polyConvolved_[0] * a_ / squared;
+        Real rootsqr = std::sqrt(squared);
+        Real atan2xa = std::atan2(-x,a_);
+        for(Size exponent=1; exponent <polyConvolved_.size(); exponent++) {
+            integral += polyConvolved_[exponent] *
+                Factorial::get(exponent) * std::cos((exponent+1)*atan2xa)
+                    /std::pow(rootsqr, static_cast<Real>(exponent+1) );
+        }
+        return integral / M_PI;
+    }
+
+
+
+    InverseCumulativeBehrensFisher::InverseCumulativeBehrensFisher(
+        const std::vector<Integer>& degreesFreedom,
+        const std::vector<Real>& factors,
+        Real accuracy)
+    : normSqr_(std::inner_product(factors.begin(), factors.end(),
+        factors.begin(), Real(0.))),
+      accuracy_(accuracy), distrib_(degreesFreedom, factors) { }
+
+    Real InverseCumulativeBehrensFisher::operator()(const Probability q) const {
+        Probability effectiveq;
+        Real sign;
+        // since the distrib is symmetric solve only on the right side:
+        if(q==0.5) {
+            return 0.;
+        }else if(q < 0.5) {
+            sign = -1.;
+            effectiveq = 1.-q;
+        }else{
+            sign = 1.;
+            effectiveq = q;
+        }
+        Real xMin =
+            InverseCumulativeNormal::standard_value(effectiveq) * normSqr_;
+        // inversion will fail at the Brent's bounds-check if this is not enough
+        // (q is very close to 1.), in a bad combination fails around 1.-1.e-7
+        Real xMax = 1.e6;
+        return sign *
+            Brent().solve([&](Real x) -> Real { return distrib_(x) - effectiveq; },
+                          accuracy_, (xMin+xMax)/2., xMin, xMax);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>fireflyalgorithm.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2015 Andres Hernandez
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<https://www.quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/fireflyalgorithm.hpp>
+#include <ql/math/randomnumbers/sobolrsg.hpp>
+#include <algorithm>
+#include <cmath>
+#include <utility>
+
+namespace QuantLib {
+    FireflyAlgorithm::FireflyAlgorithm(Size M,
+                                       ext::shared_ptr<Intensity> intensity,
+                                       ext::shared_ptr<RandomWalk> randomWalk,
+                                       Size Mde,
+                                       Real mutation,
+                                       Real crossover,
+                                       unsigned long seed)
+    : mutation_(mutation), crossover_(crossover), M_(M), Mde_(Mde), Mfa_(M_ - Mde_),
+      intensity_(std::move(intensity)), randomWalk_(std::move(randomWalk)),
+      generator_(seed), distribution_(Mfa_, Mde > 0 ? M_ - 1 : M_),
+      rng_(seed) {
+        QL_REQUIRE(M_ >= Mde_,
+            "Differential Evolution subpopulation cannot be larger than total population");
+    }
+
+    void FireflyAlgorithm::startState(Problem &P, const EndCriteria &endCriteria) {
+        N_ = P.currentValue().size();
+        x_.reserve(M_);
+        xI_.reserve(M_);
+        xRW_.reserve(M_);
+        values_.reserve(M_);
+        uX_ = P.constraint().upperBound(P.currentValue());
+        lX_ = P.constraint().lowerBound(P.currentValue());
+        Array bounds = uX_ - lX_;
+
+        //Random initialization is done by Sobol sequence
+        SobolRsg sobol(N_);
+
+        //Prepare containers
+        for (Size i = 0; i < M_; i++) {
+            const SobolRsg::sample_type::value_type &sample = sobol.nextSequence().value;
+            x_.emplace_back(N_, 0.0);
+            xI_.emplace_back(N_, 0.0);
+            xRW_.emplace_back(N_, 0.0);
+            Array& x = x_.back();
+            for (Size j = 0; j < N_; j++) {
+                //Assign X=lb+(ub-lb)*random
+                x[j] = lX_[j] + bounds[j] * sample[j];
+            }
+            //Evaluate point
+            values_.emplace_back(P.value(x), i);
+        }
+
+        //init intensity & randomWalk
+        intensity_->init(this);
+        randomWalk_->init(this);
+    }
+
+    EndCriteria::Type FireflyAlgorithm::minimize(Problem &P, const EndCriteria &endCriteria) {
+        QL_REQUIRE(!P.constraint().empty(), "Firefly Algorithm is a constrained optimizer");
+        EndCriteria::Type ecType = EndCriteria::None;
+        P.reset();
+        Size iteration = 0;
+        Size iterationStat = 0;
+        Size maxIteration = endCriteria.maxIterations();
+        Size maxIStationary = endCriteria.maxStationaryStateIterations();
+        
+        startState(P, endCriteria);
+
+        bool isFA = Mfa_ > 0;
+        //Variables for DE
+        Array z(N_, 0.0);
+        Size indexR1, indexR2;
+        decltype(distribution_)::param_type nParam(0, N_ - 1);
+
+        //Set best value & position
+        Real bestValue = values_[0].first;
+        Size bestPosition = 0;
+        for (Size i = 1; i < M_; i++) {
+            if (values_[i].first < bestValue) {
+                bestPosition = i;
+                bestValue = values_[i].first;
+            }
+        }
+        Array bestX = x_[bestPosition];
+
+        //Run optimization
+        do {
+            iteration++;
+            iterationStat++;
+            //Check if stopping criteria is met
+            if (iteration > maxIteration || iterationStat > maxIStationary)
+                break;
+
+            //Divide into two subpopulations
+            //First sort values
+            std::sort(values_.begin(), values_.end());
+
+            //Differential evolution
+            if(Mfa_ < M_){
+                Size indexBest = values_[0].second;
+                Array& xBest = x_[indexBest];
+                for (Size i = Mfa_; i < M_; i++) { 
+                    if (!isFA) {
+                        //Pure DE requires random index
+                        indexBest = distribution_(generator_);
+                        xBest = x_[indexBest];
+                    }
+                    do { 
+                        indexR1 = distribution_(generator_);
+                    } while(indexR1 == indexBest);
+                    do { 
+                        indexR2 = distribution_(generator_);
+                    } while(indexR2 == indexBest || indexR2 == indexR1);
+                    
+                    Size index = values_[i].second;
+                    Array& x   = x_[index];
+                    Array& xR1 = x_[indexR1];
+                    Array& xR2 = x_[indexR2];
+					Size rIndex = distribution_(generator_, nParam);
+                    for (Size j = 0; j < N_; j++) {
+                        if (j == rIndex || rng_.nextReal() <= crossover_) {
+                            //Change x[j] according to crossover
+                            z[j] = xBest[j] + mutation_*(xR1[j] - xR2[j]);
+                        } else {
+                            z[j] = x[j];
+                        }
+                        //Enforce bounds on positions
+                        if (z[j] < lX_[j]) {
+                            z[j] = lX_[j];
+                        }
+                        else if (z[j] > uX_[j]) {
+                            z[j] = uX_[j];
+                        }
+                    }
+                    Real val = P.value(z);
+                    if (val < values_[index].first) {
+                        //Accept new point
+                        x = z;
+                        values_[index].first = val;
+                        //mark best
+                        if (val < bestValue) {
+                            bestValue = val;
+                            bestX = x;
+                            iterationStat = 0;
+                        }
+                    }
+                }
+            }
+                
+            //Firefly algorithm
+            if(isFA){
+                //According to the intensity, determine best global position
+                intensity_->findBrightest();
+
+                //Prepare random walk
+                randomWalk_->walk();
+
+                //Loop over particles
+                for (Size i = 0; i < Mfa_; i++) {
+                    Size index = values_[i].second;
+                    Array& x   = x_[index];
+                    Array& xI  = xI_[index];
+                    Array& xRW = xRW_[index];
+
+                    //Loop over dimensions
+                    for (Size j = 0; j < N_; j++) {
+                        //Update position
+                        z[j] = x[j] + xI[j] + xRW[j];
+                        //Enforce bounds on positions
+                        if (z[j] < lX_[j]) {
+                            z[j] = lX_[j];
+                        }
+                        else if (z[j] > uX_[j]) {
+                            z[j] = uX_[j];
+                        }
+                    }
+                    Real val = P.value(z);
+                    if(!std::isnan(val))
+					{
+						//Accept new point
+                        x = z;
+                        values_[index].first = val;
+                        //mark best
+                        if (val < bestValue) {
+                            bestValue = val;
+                            bestX = x;
+                            iterationStat = 0;
+                        }
+					}
+                }
+            }
+        } while (true);
+        if (iteration > maxIteration)
+            ecType = EndCriteria::MaxIterations;
+        else
+            ecType = EndCriteria::StationaryPoint;
+
+        //Set result to best point
+        P.setCurrentValue(bestX);
+        P.setFunctionValue(bestValue);
+        return ecType;
+    }
+
+    void FireflyAlgorithm::Intensity::findBrightest() {
+        //Brightest ignores all others
+        Array& xI = (*xI_)[(*values_)[0].second];
+        for (Size j = 0; j < N_; j++) {
+            xI[j] = 0.0;
+        }
+
+        for (Size i = 1; i < Mfa_; i++) {
+            //values_ is already sorted
+            Size index = (*values_)[i].second;
+            const Array& x = (*x_)[index];
+            Array& xI = (*xI_)[index];
+            for (Size j = 0; j < N_; j++) {
+                xI[j] = 0.0;
+            }
+            Real valueX = (*values_)[i].first;
+            for (Size k = 0; k < i - 1; k++){
+                const Array& y = (*x_)[(*values_)[k].second];
+                Real valueY = (*values_)[k].first;
+                Real intensity = intensityImpl(valueX, valueY, distance(x, y));
+                xI += intensity*(y - x);
+            }
+        }
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>gaussiancopulapolicy.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/gaussiancopulapolicy.hpp>
+
+namespace QuantLib {
+
+    const NormalDistribution GaussianCopulaPolicy::density_ = 
+        NormalDistribution();
+    const CumulativeNormalDistribution GaussianCopulaPolicy::cumulative_ = 
+        CumulativeNormalDistribution();
+
+}
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>laplaceinterpolation.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015, 2024 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file laplaceinterpolation.hpp
+    \brief Laplace interpolation of missing values
+*/
+
+#include <ql/experimental/math/laplaceinterpolation.hpp>
+#include <ql/math/matrix.hpp>
+#include <ql/math/matrixutilities/bicgstab.hpp>
+#include <ql/math/matrixutilities/sparsematrix.hpp>
+#include <ql/methods/finitedifferences/meshers/fdm1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/meshers/predefined1dmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
+
+namespace QuantLib {
+
+    LaplaceInterpolation::LaplaceInterpolation(std::function<Real(const std::vector<Size>&)> y,
+                                               std::vector<std::vector<Real>> x,
+                                               Real relTol,
+                                               Size maxIterMultiplier)
+    : y_(std::move(y)), x_(std::move(x)), relTol_(relTol), maxIterMultiplier_(maxIterMultiplier) {
+
+        // set up the mesher
+
+        std::vector<Size> dim;
+        coordinateIncluded_.resize(x_.size());
+        for (Size i = 0; i < x_.size(); ++i) {
+            coordinateIncluded_[i] = x_[i].size() > 1;
+            if (coordinateIncluded_[i])
+                dim.push_back(x_[i].size());
+        }
+
+        numberOfCoordinatesIncluded_ = dim.size();
+
+        if (numberOfCoordinatesIncluded_ == 0) {
+            return;
+        }
+
+        QL_REQUIRE(!dim.empty(), "LaplaceInterpolation: singular point or no points given");
+
+        layout_ = ext::make_shared<FdmLinearOpLayout>(dim);
+
+        std::vector<ext::shared_ptr<Fdm1dMesher>> meshers;
+        for (auto & i : x_) {
+            if (i.size() > 1)
+                meshers.push_back(ext::make_shared<Predefined1dMesher>(i));
+        }
+
+        auto mesher = ext::make_shared<FdmMesherComposite>(layout_, meshers);
+
+        // set up the Laplace operator and convert it to matrix
+
+        struct LaplaceOp : public FdmLinearOpComposite {
+            explicit LaplaceOp(const ext::shared_ptr<FdmMesher>& mesher) {
+                for (Size direction = 0; direction < mesher->layout()->dim().size(); ++direction) {
+                    if (mesher->layout()->dim()[direction] > 1)
+                        map_.push_back(SecondDerivativeOp(direction, mesher));
+                }
+            }
+            std::vector<TripleBandLinearOp> map_;
+
+            Size size() const override { QL_FAIL("no impl"); }
+            void setTime(Time t1, Time t2) override { QL_FAIL("no impl"); }
+            Array apply(const array_type& r) const override { QL_FAIL("no impl"); }
+            Array apply_mixed(const Array& r) const override { QL_FAIL("no impl"); }
+            Array apply_direction(Size direction, const Array& r) const override {
+                QL_FAIL("no impl");
+            }
+            Array solve_splitting(Size direction, const Array& r, Real s) const override {
+                QL_FAIL("no impl");
+            }
+            Array preconditioner(const Array& r, Real s) const override { QL_FAIL("no impl"); }
+            std::vector<SparseMatrix> toMatrixDecomp() const override {
+                std::vector<SparseMatrix> decomp;
+                decomp.reserve(map_.size());
+for (auto const& m : map_)
+                    decomp.push_back(m.toMatrix());
+                return decomp;
+            }
+        };
+
+        SparseMatrix op = LaplaceOp(mesher).toMatrix();
+
+        // set up the linear system to solve
+
+        Size N = layout_->size();
+
+        SparseMatrix g(N, N, 5 * N);
+        Array rhs(N, 0.0), guess(N, 0.0);
+        Real guessTmp = 0.0;
+
+        struct f_A {
+            const SparseMatrix& g;
+            explicit f_A(const SparseMatrix& g) : g(g) {}
+            Array operator()(const Array& x) const { return prod(g, x); }
+        };
+
+        auto rowit = op.begin1();
+        Size count = 0;
+        std::vector<Real> corner_h(dim.size());
+        std::vector<Size> corner_neighbour_index(dim.size());
+        for (auto const& pos : *layout_) {
+            const auto& coord = pos.coordinates();
+            Real val =
+                y_(numberOfCoordinatesIncluded_ == x_.size() ? coord : fullCoordinates(coord));
+            QL_REQUIRE(rowit != op.end1() && rowit.index1() == count,
+                       "LaplaceInterpolation: op matrix row iterator ("
+                           << (rowit != op.end1() ? std::to_string(rowit.index1()) : "na")
+                           << ") does not match expected row count (" << count << ")");
+            if (val == Null<Real>()) {
+                bool isCorner = true;
+                for (Size d = 0; d < dim.size() && isCorner; ++d) {
+                    if (coord[d] == 0) {
+                        corner_h[d] = meshers[d]->dplus(0);
+                        corner_neighbour_index[d] = 1;
+                    } else if (coord[d] == layout_->dim()[d] - 1) {
+                        corner_h[d] = meshers[d]->dminus(dim[d] - 1);
+                        corner_neighbour_index[d] = dim[d] - 2;
+                    } else {
+                        isCorner = false;
+                    }
+                }
+                if (isCorner) {
+                    // handling of the "corners", all second derivs are zero in the op
+                    // this directly generalizes Numerical Recipes, 3rd ed, eq 3.8.6
+                    Real sum_corner_h =
+                        std::accumulate(corner_h.begin(), corner_h.end(), Real(0.0), std::plus<>());
+                    for (Size j = 0; j < dim.size(); ++j) {
+                        std::vector<Size> coord_j(coord);
+                        coord_j[j] = corner_neighbour_index[j];
+                        Real weight = 0.0;
+                        for (Size i = 0; i < dim.size(); ++i) {
+                            if (i != j)
+                                weight += corner_h[i];
+                        }
+                        weight = dim.size() == 1 ? Real(1.0) : Real(weight / sum_corner_h);
+                        g(count, layout_->index(coord_j)) = -weight;
+                    }
+                    g(count, count) = 1.0;
+                } else {
+                    // point with at least one dimension with non-trivial second derivative
+                    for (auto colit = rowit.begin(); colit != rowit.end(); ++colit)
+                        g(count, colit.index2()) = *colit;
+                }
+                rhs[count] = 0.0;
+                guess[count] = guessTmp;
+            } else {
+                g(count, count) = 1;
+                rhs[count] = val;
+                guess[count] = guessTmp = val;
+            }
+            ++count;
+            ++rowit;
+        }
+
+        interpolatedValues_ = BiCGstab(f_A(g), maxIterMultiplier_ * N, relTol_).solve(rhs, guess).x;
+    }
+
+    std::vector<Size>
+    LaplaceInterpolation::projectedCoordinates(const std::vector<Size>& coordinates) const {
+        std::vector<Size> tmp;
+        for (Size i = 0; i < coordinates.size(); ++i) {
+            if (coordinateIncluded_[i])
+                tmp.push_back(coordinates[i]);
+        }
+        return tmp;
+    }
+
+    std::vector<Size>
+    LaplaceInterpolation::fullCoordinates(const std::vector<Size>& projectedCoordinates) const {
+        std::vector<Size> tmp(coordinateIncluded_.size(), 0);
+        for (Size i = 0, count = 0; i < coordinateIncluded_.size(); ++i) {
+            if (coordinateIncluded_[i])
+                tmp[i] = projectedCoordinates[count++];
+        }
+        return tmp;
+    }
+
+    Real LaplaceInterpolation::operator()(const std::vector<Size>& coordinates) const {
+        QL_REQUIRE(coordinates.size() == x_.size(), "LaplaceInterpolation::operator(): expected "
+                                                        << x_.size() << " coordinates, got "
+                                                        << coordinates.size());
+        if (numberOfCoordinatesIncluded_ == 0) {
+            Real val = y_(coordinates);
+            return val == Null<Real>() ? 0.0 : val;
+        } else {
+            return interpolatedValues_[layout_->index(numberOfCoordinatesIncluded_ == x_.size() ?
+                                                          coordinates :
+                                                          projectedCoordinates(coordinates))];
+        }
+    }
+
+    void laplaceInterpolation(Matrix& A,
+                              const std::vector<Real>& x,
+                              const std::vector<Real>& y,
+                              Real relTol,
+                              Size maxIterMultiplier) {
+
+        std::vector<std::vector<Real>> tmp;
+        tmp.push_back(y);
+        tmp.push_back(x);
+
+        if (y.empty()) {
+            tmp[0].resize(A.rows());
+            std::iota(tmp[0].begin(), tmp[0].end(), 0.0);
+        }
+
+        if (x.empty()) {
+            tmp[1].resize(A.columns());
+            std::iota(tmp[1].begin(), tmp[1].end(), 0.0);
+        }
+
+        LaplaceInterpolation interpolation(
+            [&A](const std::vector<Size>& coordinates) {
+                return A(coordinates[0], coordinates[1]);
+            },
+            tmp, relTol, maxIterMultiplier);
+
+        for (Size i = 0; i < A.rows(); ++i) {
+            for (Size j = 0; j < A.columns(); ++j) {
+                if (A(i, j) == Null<Real>())
+                    A(i, j) = interpolation({i, j});
+            }
+        }
+    }
+
+} // namespace QuantLib
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>multidimintegrator.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/multidimintegrator.hpp>
+
+namespace QuantLib {
+
+    MultidimIntegral::MultidimIntegral(
+            const std::vector<ext::shared_ptr<Integrator> >& integrators)
+    : integrators_(integrators), 
+      integrationLevelEntries_(maxDimensions_),
+      varBuffer_(integrators.size(), 0.) {
+        QL_REQUIRE(integrators.size() <= maxDimensions_, 
+            "Too many dimensions in integration.");
+        spawnFcts<maxDimensions_>();
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>multidimquadrature.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/multidimquadrature.hpp>
+
+#ifndef QL_PATCH_SOLARIS
+
+namespace QuantLib {
+
+    GaussianQuadMultidimIntegrator::GaussianQuadMultidimIntegrator(
+        Size dimension, Size quadOrder, Real mu) 
+        : integral_(quadOrder, mu),
+          integralV_(quadOrder, mu),
+          integrationEntries_(maxDimensions_),
+          integrationEntriesVR_(maxDimensions_),
+          dimension_(dimension),
+          varBuffer_(dimension_, 0.)
+    {
+        spawnFcts<maxDimensions_>();
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>particleswarmoptimization.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+Copyright (C) 2015 Andres Hernandez
+
+This file is part of QuantLib, a free-software/open-source library
+for financial quantitative analysts and developers - http://quantlib.org/
+
+QuantLib is free software: you can redistribute it and/or modify it
+under the terms of the QuantLib license.  You should have received a
+copy of the license along with this program; if not, please email
+<quantlib-dev@lists.sf.net>. The license is also available online at
+<https://www.quantlib.org/license.shtml>.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/particleswarmoptimization.hpp>
+#include <ql/math/randomnumbers/sobolrsg.hpp>
+#include <cmath>
+#include <utility>
+
+using std::sqrt;
+
+namespace QuantLib {
+    ParticleSwarmOptimization::ParticleSwarmOptimization(Size M,
+                                                         ext::shared_ptr<Topology> topology,
+                                                         ext::shared_ptr<Inertia> inertia,
+                                                         Real c1,
+                                                         Real c2,
+                                                         unsigned long seed)
+    : M_(M), rng_(seed), topology_(std::move(topology)), inertia_(std::move(inertia)) {
+        Real phi = c1 + c2;
+        QL_ENSURE(phi*phi - 4 * phi != 0.0, "Invalid phi");
+        c0_ = 2.0 / std::abs(2.0 - phi - sqrt(phi*phi - 4 * phi));
+        c1_ = c0_*c1;
+        c2_ = c0_*c2;
+    }
+
+    ParticleSwarmOptimization::ParticleSwarmOptimization(Size M,
+                                                         ext::shared_ptr<Topology> topology,
+                                                         ext::shared_ptr<Inertia> inertia,
+                                                         Real omega,
+                                                         Real c1,
+                                                         Real c2,
+                                                         unsigned long seed)
+    : M_(M), c0_(omega), c1_(c1), c2_(c2), rng_(seed), topology_(std::move(topology)),
+      inertia_(std::move(inertia)) {}
+
+    void ParticleSwarmOptimization::startState(Problem &P, const EndCriteria &endCriteria) {
+        QL_REQUIRE(topology_, "Invalid topology");
+        QL_REQUIRE(inertia_, "Invalid inertia");
+        N_ = P.currentValue().size();
+        topology_->setSize(M_);
+        inertia_->setSize(M_, N_, c0_, endCriteria);
+        X_.reserve(M_);
+        V_.reserve(M_);
+        pBX_.reserve(M_);
+        pBF_ = Array(M_);
+        gBX_.reserve(M_);
+        gBF_ = Array(M_);
+        uX_ = P.constraint().upperBound(P.currentValue());
+        lX_ = P.constraint().lowerBound(P.currentValue());
+        Array bounds = uX_ - lX_;
+
+        //Random initialization is done by Sobol sequence
+        SobolRsg sobol(N_ * 2);
+
+        //Prepare containers
+        for (Size i = 0; i < M_; i++) {
+            const SobolRsg::sample_type::value_type &sample = sobol.nextSequence().value;
+            X_.emplace_back(N_, 0.0);
+            Array& x = X_.back();
+            V_.emplace_back(N_, 0.0);
+            Array& v = V_.back();
+            gBX_.emplace_back(N_, 0.0);
+            for (Size j = 0; j < N_; j++) {
+                //Assign X=lb+(ub-lb)*random
+                x[j] = lX_[j] + bounds[j] * sample[2 * j];
+                //Assign V=(ub-lb)*2*random-(ub-lb) -> between (lb-ub) and (ub-lb)
+                v[j] = bounds[j] * (2.0*sample[2 * j + 1] - 1.0);
+            }
+            //Evaluate X and assign as personal best
+            pBX_.push_back(X_.back());
+            pBF_[i] = P.value(X_.back());
+        }
+
+        //init topology & inertia
+        topology_->init(this);
+        inertia_->init(this);
+    }
+
+    EndCriteria::Type ParticleSwarmOptimization::minimize(Problem &P, const EndCriteria &endCriteria) {
+        QL_REQUIRE(!P.constraint().empty(), "PSO is a constrained optimizer");
+
+        EndCriteria::Type ecType = EndCriteria::None;
+        P.reset();
+        Size iteration = 0;
+        Size iterationStat = 0;
+        Size maxIteration = endCriteria.maxIterations();
+        Size maxIStationary = endCriteria.maxStationaryStateIterations();
+        Real bestValue = QL_MAX_REAL;
+        Size bestPosition = 0;
+
+        startState(P, endCriteria);
+        //Set best value & position
+        for (Size i = 0; i < M_; i++) {
+            if (pBF_[i] < bestValue) {
+                bestValue = pBF_[i];
+                bestPosition = i;
+            }
+        }
+
+        //Run optimization
+        do {
+            iteration++;
+            iterationStat++;
+            //Check if stopping criteria is met
+            if (iteration > maxIteration || iterationStat > maxIStationary)
+                break;
+
+            //According to the topology, determine best global position
+            topology_->findSocialBest();
+
+            //Call inertia to change internal state
+            inertia_->setValues();
+
+            //Loop over particles
+            for (Size i = 0; i < M_; i++) {
+                Array& x = X_[i];
+                Array& pB = pBX_[i];
+                const Array& gB = gBX_[i];
+                Array& v = V_[i];
+
+                //Loop over dimensions
+                for (Size j = 0; j < N_; j++) {
+                    //Update velocity
+                    v[j] += c1_*rng_.nextReal()*(pB[j] - x[j]) + c2_*rng_.nextReal()*(gB[j] - x[j]);
+                    //Update position
+                    x[j] += v[j];
+                    //Enforce bounds on positions
+                    if (x[j] < lX_[j]) {
+                        x[j] = lX_[j];
+                        v[j] = 0.0;
+                    }
+                    else if (x[j] > uX_[j]) {
+                        x[j] = uX_[j];
+                        v[j] = 0.0;
+                    }
+                }
+                //Evaluate x
+                Real f = P.value(x);
+                if (f < pBF_[i]) {
+                    //Update personal best
+                    pBF_[i] = f;
+                    pB = x;
+                    //Check stationary condition
+                    if (f < bestValue) {
+                        bestValue = f;
+                        bestPosition = i;
+                        iterationStat = 0;
+                    }
+                }
+            }
+        } while (true);
+        if (iteration > maxIteration)
+            ecType = EndCriteria::MaxIterations;
+        else
+            ecType = EndCriteria::StationaryPoint;
+
+        //Set result to best point
+        P.setCurrentValue(pBX_[bestPosition]);
+        P.setFunctionValue(bestValue);
+        return ecType;
+    }
+
+    void AdaptiveInertia::setValues() {
+        Real currBest = (*pBF_)[0];
+        for (Size i = 1; i < M_; i++) {
+            if (currBest >(*pBF_)[i]) currBest = (*pBF_)[i];
+        }
+        if (started_) { //First iteration leaves inertia unchanged
+            if (currBest < best_) {
+                best_ = currBest;
+                adaptiveCounter--;
+            }
+            else {
+                adaptiveCounter++;
+            }
+            if (adaptiveCounter > sh_) {
+                c0_ = std::max(minInertia_, std::min(maxInertia_, c0_*0.5));
+            }
+            else if (adaptiveCounter < sl_) {
+                c0_ = std::max(minInertia_, std::min(maxInertia_, c0_*2.0));
+            }
+        }
+        else {
+            best_ = currBest;
+            started_ = true;
+        }
+        for (Size i = 0; i < M_; i++) {
+            (*V_)[i] *= c0_;
+        }
+    }
+
+    void KNeighbors::findSocialBest() {
+        for (Size i = 0; i < M_; i++) {
+            Real bestF = (*pBF_)[i];
+            Size bestX = 0;
+            //Search K_ neightbors upwards
+            Size upper = std::min(i + K_, M_);
+            //Search K_ neighbors downwards
+            Size lower = std::max(i, K_ + 1) - K_ - 1;
+            for (Size j = lower; j < upper; j++) {
+                if ((*pBF_)[j] < bestF) {
+                    bestF = (*pBF_)[j];
+                    bestX = j;
+                }
+            }
+            if (i + K_ >= M_) { //loop around if i+K >= M_
+                for (Size j = 0; j < i + K_ - M_; j++) {
+                    if ((*pBF_)[j] < bestF) {
+                        bestF = (*pBF_)[j];
+                        bestX = j;
+                    }
+                }
+            }
+            else if (i < K_) {//loop around from above
+                for (Size j = M_ - (K_ - i) - 1; j < M_; j++) {
+                    if ((*pBF_)[j] < bestF) {
+                        bestF = (*pBF_)[j];
+                        bestX = j;
+                    }
+                }
+            }
+            (*gBX_)[i] = (*pBX_)[bestX];
+            (*gBF_)[i] = bestF;
+        }
+    }
+
+    ClubsTopology::ClubsTopology(Size defaultClubs,
+                                 Size totalClubs,
+                                 Size maxClubs,
+                                 Size minClubs,
+                                 Size resetIteration,
+                                 unsigned long seed)
+    : totalClubs_(totalClubs), maxClubs_(maxClubs), minClubs_(minClubs),
+      defaultClubs_(defaultClubs), resetIteration_(resetIteration), bestByClub_(totalClubs, 0),
+      worstByClub_(totalClubs, 0), generator_(seed), distribution_(1, totalClubs_) {
+        QL_REQUIRE(totalClubs_ >= defaultClubs_,
+            "Total number of clubs must be larger or equal than default clubs");
+        QL_REQUIRE(defaultClubs_ >= minClubs_,
+            "Number of default clubs must be larger or equal than minimum clubs");
+        QL_REQUIRE(maxClubs_ >= defaultClubs_,
+            "Number of maximum clubs must be larger or equal than default clubs");
+        QL_REQUIRE(totalClubs_ >= maxClubs_,
+            "Total number of clubs must be larger or equal than maximum clubs");
+    }
+
+    void ClubsTopology::setSize(Size M) {
+        M_ = M;
+
+        if (defaultClubs_ < totalClubs_) {
+            clubs4particles_ = std::vector<std::vector<bool> >(M_, std::vector<bool>(totalClubs_, false));
+            particles4clubs_ = std::vector<std::vector<bool> >(totalClubs_, std::vector<bool>(M_, false));
+            //Assign particles to clubs randomly
+            for (Size i = 0; i < M_; i++) {
+                std::vector<bool> &clubSet = clubs4particles_[i];
+                for (Size j = 0; j < defaultClubs_; j++) {
+                    Size index = distribution_(generator_);
+                    while (clubSet[index]) { index = distribution_(generator_); }
+                    clubSet[index] = true;
+                    particles4clubs_[index][i] = true;
+                }
+            }
+        }
+        else {
+            //Since totalClubs_ == defaultClubs_, then just initialize to true
+            clubs4particles_ = std::vector<std::vector<bool> >(M_, std::vector<bool>(totalClubs_, true));
+            particles4clubs_ = std::vector<std::vector<bool> >(totalClubs_, std::vector<bool>(M_, true));
+        }
+    }
+
+    void ClubsTopology::findSocialBest() {
+        //Update iteration
+        iteration_++;
+        bool reset = false;
+        if (iteration_ == resetIteration_) {
+            iteration_ = 0;
+            reset = true;
+        }
+
+        //Find best by current club
+        for (Size i = 0; i < totalClubs_; i++) {
+            Real bestByClub = QL_MAX_REAL;
+            Real worstByClub = -QL_MAX_REAL;
+            Size bestP = 0;
+            Size worstP = 0;
+            const std::vector<bool> &particlesSet = particles4clubs_[i];
+            for (Size j = 0; j < M_; j++) {
+                if (particlesSet[j]) {
+                    if (bestByClub >(*pBF_)[j]) {
+                        bestByClub = (*pBF_)[j];
+                        bestP = j;
+                    }
+                    else if (worstByClub < (*pBF_)[j]) {
+                        worstByClub = (*pBF_)[j];
+                        worstP = j;
+                    }
+                }
+            }
+            bestByClub_[i] = bestP;
+            worstByClub_[i] = worstP;
+        }
+
+        //Update clubs && global best
+        for (Size i = 0; i < M_; i++) {
+            std::vector<bool> &clubSet = clubs4particles_[i];
+            bool best = true;
+            bool worst = true;
+            Size currentClubs = 0;
+            for (Size j = 0; j < totalClubs_; j++) {
+                if (clubSet[j]) {
+                    //If still thought of the best, check if best in club j
+                    if (best && i != bestByClub_[j]) best = false;
+                    //If still thought of the worst, check if worst in club j
+                    if (worst && i != worstByClub_[j]) worst = false;
+                    //Update currentClubs
+                    currentClubs++;
+                }
+            }
+            //Update clubs
+            if (best) {
+                //Leave random club
+                leaveRandomClub(i, currentClubs);
+            }
+            else if (worst) {
+                //Join random club
+                joinRandomClub(i, currentClubs);
+            }
+            else if (reset && currentClubs != defaultClubs_) {
+                //If membership != defaultClubs_, then leave or join accordingly
+                if (currentClubs < defaultClubs_) {
+                    //Join random club
+                    joinRandomClub(i, currentClubs);
+                }
+                else {
+                    //Leave random club
+                    leaveRandomClub(i, currentClubs);
+                }
+            }
+
+            //Update global best
+            Real bestNeighborF = QL_MAX_REAL;
+            Size bestNeighborX = 0;
+            for (Size j = 0; j < totalClubs_; j++) {
+                if (clubSet[j] && bestNeighborF >(*pBF_)[bestByClub_[j]]) {
+                    bestNeighborF = (*pBF_)[bestByClub_[j]];
+                    bestNeighborX = j;
+                }
+            }
+            (*gBX_)[i] = (*pBX_)[bestNeighborX];
+            (*gBF_)[i] = bestNeighborF;
+        }
+    }
+
+    void ClubsTopology::leaveRandomClub(Size particle, Size currentClubs) {
+        Size randIndex = distribution_(generator_, param_type(1, currentClubs));
+        Size index = 1;
+        std::vector<bool> &clubSet = clubs4particles_[particle];
+        for (Size j = 0; j < totalClubs_; j++) {
+            if (clubSet[j]) {
+                if (index == randIndex) {
+                    clubSet[j] = false;
+                    particles4clubs_[j][particle] = false;
+                    break;
+                }
+                index++;
+            }
+        }
+    }
+
+    void ClubsTopology::joinRandomClub(Size particle, Size currentClubs) {
+        Size randIndex = totalClubs_ == currentClubs ? 1 :
+            distribution_(generator_, param_type(1, totalClubs_ - currentClubs));
+        Size index = 1;
+        std::vector<bool> &clubSet = clubs4particles_[particle];
+        for (Size j = 0; j < totalClubs_; j++) {
+            if (!clubSet[j]) {
+                if (index == randIndex) {
+                    clubSet[j] = true;
+                    particles4clubs_[j][particle] = true;
+                    break;
+                }
+                index++;
+            }
+        }
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>piecewiseintegral.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2015 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/piecewiseintegral.hpp>
+#include <algorithm>
+#include <utility>
+
+namespace QuantLib {
+
+    PiecewiseIntegral::PiecewiseIntegral(ext::shared_ptr<Integrator> integrator,
+                                         std::vector<Real> criticalPoints,
+                                         const bool avoidCriticalPoints)
+    : Integrator(1.0, 1), integrator_(std::move(integrator)),
+      criticalPoints_(std::move(criticalPoints)),
+      eps_(avoidCriticalPoints ? (1.0 + QL_EPSILON) : 1.0) {
+
+        std::sort(criticalPoints_.begin(), criticalPoints_.end());
+        auto end =
+            std::unique(criticalPoints_.begin(), criticalPoints_.end(),
+                        static_cast<bool (*)(Real, Real)>(close_enough));
+        criticalPoints_.resize(end - criticalPoints_.begin());
+    }
+
+} // namespace QuantLib
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>tcopulapolicy.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Jose Aparicio
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/tcopulapolicy.hpp>
+#include <numeric>
+#include <algorithm>
+
+namespace QuantLib {
+
+    TCopulaPolicy::TCopulaPolicy(
+        const std::vector<std::vector<Real> >& factorWeights, 
+        const initTraits& vals)
+    {
+        for (int tOrder : vals.tOrders) {
+            // require no T is of order 2 (finite variance)
+            QL_REQUIRE(tOrder > 2, "Non finite variance T in latent model.");
+
+            distributions_.emplace_back(tOrder);
+            // inverses T variaces used in normalization of the random factors
+            // For low values of the T order this number is very close to zero 
+            // and it enters the expressions dividing them, which introduces 
+            // numerical errors.
+            varianceFactors_.push_back(std::sqrt((tOrder - 2.) / tOrder));
+        }
+
+        for (const auto& factorWeight : factorWeights) {
+            // This ensures the latent model is 'canonical'
+            QL_REQUIRE(vals.tOrders.size() == factorWeight.size() + 1,
+                       // num factors plus one
+                       "Incompatible number of T functions and number of factors.");
+
+            Real factorsNorm = std::inner_product(factorWeight.begin(), factorWeight.end(),
+                                                  factorWeight.begin(), Real(0.));
+            QL_REQUIRE(factorsNorm < 1., 
+                "Non normal random factor combination.");
+            Real idiosyncFctr = std::sqrt(1.-factorsNorm);
+
+            // linear comb factors ajusted for the variance renormalization:
+            std::vector<Real> normFactorWeights;
+            normFactorWeights.reserve(factorWeight.size());
+            for (Size iFactor = 0; iFactor < factorWeight.size(); iFactor++)
+                normFactorWeights.push_back(factorWeight[iFactor] * varianceFactors_[iFactor]);
+            // idiosincratic term, all Z factors are assumed identical.
+            normFactorWeights.push_back(idiosyncFctr * varianceFactors_.back());
+            latentVarsCumul_.emplace_back(vals.tOrders, normFactorWeights);
+            latentVarsInverters_.emplace_back(vals.tOrders, normFactorWeights);
+        }
+    }
+
+    std::vector<Real> TCopulaPolicy::allFactorCumulInverter(
+        const std::vector<Real>& probs) const 
+    {
+    #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(probs.size()-latentVarsCumul_.size() 
+            == distributions_.size()-1, 
+            "Incompatible sample and latent model sizes");
+    #endif
+
+        std::vector<Real> result(probs.size());
+        Size indexSystemic = 0;
+        std::transform(probs.begin(), probs.begin() + varianceFactors_.size()-1,
+                       result.begin(),
+                       [&](Probability p) { return inverseCumulativeDensity(p, indexSystemic++); });
+        std::transform(probs.begin() + varianceFactors_.size()-1, probs.end(),
+                       result.begin()+ varianceFactors_.size()-1,
+                       [&](Probability p) { return inverseCumulativeZ(p); });
+        return result;
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>zigguratrng.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2010 Kakhkhor Abdijalilov
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/math/zigguratrng.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <cmath>
+
+namespace QuantLib {
+
+    namespace {
+
+        // tail probability
+        const Real p_ = 2.880541027242713E-004;
+        const Real q_ = 1.0 - p_;
+
+        /* The tabulated values were calculated following Marsaglia
+           and Tsang (2000). */
+
+        // values of exp(-0.5*x*x)
+        const Real f_ [128] = {
+            1.000000000000000E+000, 9.635996931557717E-001,
+            9.362826817083744E-001, 9.130436479920410E-001,
+            8.922816508023054E-001, 8.732430489268560E-001,
+            8.555006078850665E-001, 8.387836053106493E-001,
+            8.229072113952640E-001, 8.077382946961230E-001,
+            7.931770117838610E-001, 7.791460859417049E-001,
+            7.655841739092376E-001, 7.524415591857053E-001,
+            7.396772436833397E-001, 7.272569183545073E-001,
+            7.151515074204785E-001, 7.033360990258188E-001,
+            6.917891434460373E-001, 6.804918410064157E-001,
+            6.694276673577075E-001, 6.585820000586550E-001,
+            6.479418211185520E-001, 6.374954773431460E-001,
+            6.272324852578157E-001, 6.171433708265636E-001,
+            6.072195366326060E-001, 5.974531509518134E-001,
+            5.878370544418217E-001, 5.783646811267034E-001,
+            5.690299910747226E-001, 5.598274127106959E-001,
+            5.507517931210564E-001, 5.417983550317252E-001,
+            5.329626593899887E-001, 5.242405726789938E-001,
+            5.156282382498731E-001, 5.071220510813057E-001,
+            4.987186354765854E-001, 4.904148252893227E-001,
+            4.822076463348397E-001, 4.740943006982505E-001,
+            4.660721526945719E-001, 4.581387162728729E-001,
+            4.502916436869279E-001, 4.425287152802475E-001,
+            4.348478302546628E-001, 4.272469983095633E-001,
+            4.197243320540391E-001, 4.122780401070255E-001,
+            4.049064208114891E-001, 3.976078564980433E-001,
+            3.903808082413902E-001, 3.832238110598844E-001,
+            3.761354695144552E-001, 3.691144536682758E-001,
+            3.621594953730338E-001, 3.552693848515477E-001,
+            3.484429675498729E-001, 3.416791412350141E-001,
+            3.349768533169716E-001, 3.283350983761528E-001,
+            3.217529158792090E-001, 3.152293880681579E-001,
+            3.087636380092523E-001, 3.023548277894802E-001,
+            2.960021568498564E-001, 2.897048604458110E-001,
+            2.834622082260129E-001, 2.772735029218981E-001,
+            2.711380791410257E-001, 2.650553022581624E-001,
+            2.590245673987112E-001, 2.530452985097663E-001,
+            2.471169475146971E-001, 2.412389935477517E-001,
+            2.354109422657280E-001, 2.296323252343031E-001,
+            2.239026993871343E-001, 2.182216465563709E-001,
+            2.125887730737364E-001, 2.070037094418741E-001,
+            2.014661100762035E-001, 1.959756531181106E-001,
+            1.905320403209139E-001, 1.851349970107136E-001,
+            1.797842721249623E-001, 1.744796383324025E-001,
+            1.692208922389250E-001, 1.640078546849280E-001,
+            1.588403711409353E-001, 1.537183122095867E-001,
+            1.486415742436971E-001, 1.436100800919331E-001,
+            1.386237799858510E-001, 1.336826525846477E-001,
+            1.287867061971040E-001, 1.239359802039816E-001,
+            1.191305467087186E-001, 1.143705124498883E-001,
+            1.096560210158178E-001, 1.049872554103546E-001,
+            1.003644410295456E-001, 9.578784912257826E-002,
+            9.125780082763474E-002, 8.677467189554304E-002,
+            8.233889824295743E-002, 7.795098251465470E-002,
+            7.361150188475492E-002, 6.932111739418027E-002,
+            6.508058521363191E-002, 6.089077034856640E-002,
+            5.675266348153862E-002, 5.266740190350321E-002,
+            4.863629586028410E-002, 4.466086220087247E-002,
+            4.074286807479065E-002, 3.688438878696881E-002,
+            3.308788614650520E-002, 2.935631744025387E-002,
+            2.569329193614964E-002, 2.210330461611161E-002,
+            1.859210273716583E-002, 1.516729801067205E-002,
+            1.183947865798232E-002, 8.624484412930473E-003,
+            5.548995220816476E-003, 2.669629083902507E-003
+        };
+
+        // acceptance thresholds 2^24*x[i]/x[i+1]. k_[0] is special
+        const Size k_[128] = {
+            15555141,        0, 12590647, 14272656,
+            14988942, 15384587, 15635012, 15807564,
+            15933580, 16029597, 16105158, 16166150,
+            16216402, 16258511, 16294298, 16325081,
+            16351834, 16375294, 16396029, 16414482,
+            16431005, 16445883, 16459346, 16471581,
+            16482747, 16492974, 16502372, 16511034,
+            16519042, 16526462, 16533356, 16539772,
+            16545758, 16551351, 16556587, 16561496,
+            16566104, 16570437, 16574515, 16578357,
+            16581980, 16585401, 16588633, 16591688,
+            16594579, 16597314, 16599905, 16602358,
+            16604682, 16606885, 16608972, 16610949,
+            16612822, 16614597, 16616276, 16617865,
+            16619367, 16620786, 16622125, 16623387,
+            16624575, 16625690, 16626735, 16627713,
+            16628624, 16629470, 16630253, 16630974,
+            16631634, 16632233, 16632773, 16633254,
+            16633677, 16634041, 16634346, 16634593,
+            16634781, 16634910, 16634979, 16634987,
+            16634934, 16634817, 16634637, 16634390,
+            16634075, 16633689, 16633231, 16632698,
+            16632085, 16631390, 16630609, 16629737,
+            16628768, 16627698, 16626520, 16625226,
+            16623808, 16622257, 16620563, 16618714,
+            16616696, 16614494, 16612091, 16609465,
+            16606593, 16603449, 16599999, 16596206,
+            16592025, 16587402, 16582273, 16576559,
+            16570163, 16562965, 16554812, 16545511,
+            16534809, 16522368, 16507733, 16490265,
+            16469045, 16442690, 16409026, 16364394,
+            16302111, 16208408, 16049219, 15707338
+        };
+
+        // values of 2^{-24}*x[i]. w_[0] is special.
+        const double w_[128] = {
+            2.213171867573477E-007, 1.623158840564778E-008,
+            2.162882274558596E-008, 2.542424120326624E-008,
+            2.845751269184242E-008, 3.103351823837397E-008,
+            3.330064883086164E-008, 3.534334554922425E-008,
+            3.721467240506913E-008, 3.895036212891571E-008,
+            4.057573787247544E-008, 4.210946627340346E-008,
+            4.356574479471913E-008, 4.495565083232566E-008,
+            4.628801273561392E-008, 4.756999377168848E-008,
+            4.880749623079987E-008, 5.000544871575862E-008,
+            5.116801519263080E-008, 5.229875022755345E-008,
+            5.340071633852936E-008, 5.447657412343023E-008,
+            5.552865246542405E-008, 5.655900391923845E-008,
+            5.756944891143612E-008, 5.856161138431779E-008,
+            5.953694781545649E-008, 6.049677105184184E-008,
+            6.144227004387700E-008, 6.237452630714050E-008,
+            6.329452775023089E-008, 6.420318036567782E-008,
+            6.510131817439508E-008, 6.598971173307500E-008,
+            6.686907545162751E-008, 6.774007391947947E-008,
+            6.860332740181531E-008, 6.945941663712532E-008,
+            7.030888704386109E-008, 7.115225242518010E-008,
+            7.198999824564194E-008, 7.282258454149729E-008,
+            7.365044851627824E-008, 7.447400686528278E-008,
+            7.529365786588351E-008, 7.610978326509584E-008,
+            7.692274999129007E-008, 7.773291171314836E-008,
+            7.854061026581177E-008, 7.934617696152180E-008,
+            8.014993379984568E-008, 8.095219459071287E-008,
+            8.175326600192373E-008, 8.255344854147119E-008,
+            8.335303748390705E-008, 8.415232374905104E-008,
+            8.495159474056128E-008, 8.575113515123489E-008,
+            8.655122774137352E-008, 8.735215409611426E-008,
+            8.815419536728245E-008, 8.895763300505963E-008,
+            8.976274948457178E-008, 9.056982903238356E-008,
+            9.137915835783214E-008, 9.219102739414587E-008,
+            9.300573005436895E-008, 9.382356500725440E-008,
+            9.464483647849558E-008, 9.546985508294559E-008,
+            9.629893869382930E-008, 9.713241335539087E-008,
+            9.797061424595009E-008, 9.881388669897357E-008,
+            9.966258729051657E-008, 1.005170850022725E-007,
+            1.013777624705017E-007, 1.022450173323223E-007,
+            1.031192636822607E-007, 1.040009336536155E-007,
+            1.048904791411299E-007, 1.057883736837368E-007,
+            1.066951145288121E-007, 1.076112249025135E-007,
+            1.085372565144899E-007, 1.094737923296323E-007,
+            1.104214496447496E-007, 1.113808835142578E-007,
+            1.123527905763905E-007, 1.133379133403490E-007,
+            1.143370450055439E-007, 1.153510348970830E-007,
+            1.163807946174674E-007, 1.174273050337859E-007,
+            1.184916242434419E-007, 1.195748966907839E-007,
+            1.206783636434635E-007, 1.218033752829236E-007,
+            1.229514047207811E-007, 1.241240643255547E-007,
+            1.253231248369812E-007, 1.265505378645533E-007,
+            1.278084625218070E-007, 1.290992971506620E-007,
+            1.304257173581136E-007, 1.317907219454484E-007,
+            1.331976887933646E-007, 1.346504434266883E-007,
+            1.361533438964878E-007, 1.377113869008423E-007,
+            1.393303418955523E-007, 1.410169225999109E-007,
+            1.427790092234294E-007, 1.446259406525023E-007,
+            1.465689049606532E-007, 1.486214710528821E-007,
+            1.508003278008381E-007, 1.531263366890930E-007,
+            1.556260733859904E-007, 1.583341605221148E-007,
+            1.612969382476045E-007, 1.645785196056458E-007,
+            1.682713836756925E-007, 1.725163463961286E-007,
+            1.775441320326934E-007, 1.837747608550914E-007,
+            1.921108355867039E-007, 2.051961336074264E-007
+        };
+
+    }
+
+    ZigguratRng::ZigguratRng(unsigned long seed)
+    : mt32_(seed) {}
+
+    Real ZigguratRng::nextGaussian() const {
+        static const int c[2] = {-1, 1};
+        Real x;
+
+        for (;;) {
+            unsigned long j = mt32_.nextInt32(); // generate 32 bits of randomness
+            int f = j & 1; // 1 bit to choose a tails
+            j >>= 1;
+            unsigned long i = j & 0x7f; // 7 bits to choose a strip
+            j >>= 7; // the last 24 bits for accepttion/rejection
+            x = (c[f]*static_cast<long>(j))*w_[i]; // x is uniform
+                                                   // within the i-th strip
+            if (j < k_[i]) // if true, accept x
+                break;
+
+            // handle rejections
+            if (i!=0) { // upper strips
+                if ((f_[i-1]-f_[i])*mt32_.nextReal() + f_[i] < std::exp(-0.5*x*x))
+                    break;
+            } else { // base strip, sample from the tail
+                x = c[f]*InverseCumulativeNormal::standard_value(
+                                                      p_*mt32_.nextReal()+q_);
+                break;
+            }
+        }
+
+        return x;
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

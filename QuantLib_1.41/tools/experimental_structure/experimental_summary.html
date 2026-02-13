@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Structure Discovery – experimental</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Helvetica, Arial, sans-serif;
+    margin: 0; padding: 0; line-height: 1.5; color: #24292f; background: #fff;
+  }
+  .container { max-width: 1020px; margin: 0 auto; padding: 1.5rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  h2 {
+    font-size: 1.15rem; margin: 1.5rem 0 0.5rem;
+    border-bottom: 1px solid #d0d7de; padding-bottom: 0.25rem;
+  }
+  .subtitle { color: #656d76; font-size: 0.92rem; margin-bottom: 1rem; }
+  .stats { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+  .stat-card {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 0.7rem 1rem; min-width: 130px; flex: 1;
+  }
+  .stat-card .label {
+    font-size: 0.78rem; color: #656d76;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .stat-card .value { font-size: 1.35rem; font-weight: 600; }
+  .stat-card.hdr  .value { color: #0969da; }
+  .stat-card.src  .value { color: #1a7f37; }
+  .stat-card.top  .value { color: #8250df; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-bottom: 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.75rem; border-bottom: 1px solid #d0d7de; }
+  th { background: #f6f8fa; font-weight: 600; }
+  td.r { text-align: right; }
+  tr:hover { background: #f6f8fa; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                 'Liberation Mono', 'Courier New', monospace;
+    font-size: 0.88em;
+  }
+  .note {
+    background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px;
+    padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem;
+  }
+  .note code { background: #fff; padding: 0.1rem 0.3rem; border-radius: 3px; }
+  .muted { color: #b0b8c0; }
+  .tree { margin: 1rem 0; }
+  .tree pre {
+    background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px;
+    padding: 1rem; overflow: auto; font-size: 0.85em; line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔍 C++ Structure Discovery</h1>
+  <div class="subtitle">
+    Source: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.41/ql/experimental</strong><br/>
+    Output: <strong>/home/jakeshea/Desktop/HTHK/QuantLib_1.41/tools/experimental_structure</strong>
+  </div>
+
+  <div class="note">
+    Header XMLs in <code>hpp/</code> &nbsp;·&nbsp;
+    Source XMLs in <code>cpp/</code> &nbsp;·&nbsp;
+    Top-level snapshot: <code>experimental_current.xml</code>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card hdr">
+      <div class="label">Header XMLs</div>
+      <div class="value">26</div>
+    </div>
+    <div class="stat-card hdr">
+      <div class="label">Header Files</div>
+      <div class="value">262</div>
+    </div>
+    <div class="stat-card src">
+      <div class="label">Source XMLs</div>
+      <div class="value">23</div>
+    </div>
+    <div class="stat-card src">
+      <div class="label">Source Files</div>
+      <div class="value">157</div>
+    </div>
+    <div class="stat-card top">
+      <div class="label">Top-level</div>
+      <div class="value">1</div>
+    </div>
+  </div>
+
+  <h2>📂 Per-Subdirectory Breakdown</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Subdirectory</th>
+        <th>Headers (.hpp/.h)</th>
+        <th>Sources (.cpp/.cc)</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><code>asian/</code></td><td>3 files (11.3 KiB)</td><td>2 files (25.2 KiB)</td><td>5</td></tr>
+<tr><td><code>averageois/</code></td><td>4 files (3.8 KiB)</td><td><span class="muted">—</span></td><td>4</td></tr>
+<tr><td><code>barrieroption/</code></td><td>10 files (61.4 KiB)</td><td>6 files (94.1 KiB)</td><td>16</td></tr>
+<tr><td><code>basismodels/</code></td><td>4 files (14.8 KiB)</td><td>3 files (18.8 KiB)</td><td>7</td></tr>
+<tr><td><code>callablebonds/</code></td><td>7 files (34.7 KiB)</td><td>6 files (46.1 KiB)</td><td>13</td></tr>
+<tr><td><code>catbonds/</code></td><td>5 files (16.2 KiB)</td><td>4 files (20.7 KiB)</td><td>9</td></tr>
+<tr><td><code>commodities/</code></td><td>23 files (80.6 KiB)</td><td>19 files (92.2 KiB)</td><td>42</td></tr>
+<tr><td><code>coupons/</code></td><td>8 files (25.8 KiB)</td><td>7 files (39.4 KiB)</td><td>15</td></tr>
+<tr><td><code>credit/</code></td><td>45 files (402.4 KiB)</td><td>27 files (162.7 KiB)</td><td>72</td></tr>
+<tr><td><code>exoticoptions/</code></td><td>22 files (59.2 KiB)</td><td>7 files (23.5 KiB)</td><td>29</td></tr>
+<tr><td><code>finitedifferences/</code></td><td>25 files (64.4 KiB)</td><td>18 files (81.6 KiB)</td><td>43</td></tr>
+<tr><td><code>forward/</code></td><td>2 files (5.3 KiB)</td><td>1 files (12.6 KiB)</td><td>3</td></tr>
+<tr><td><code>fx/</code></td><td>3 files (2.8 KiB)</td><td><span class="muted">—</span></td><td>3</td></tr>
+<tr><td><code>inflation/</code></td><td>12 files (93.3 KiB)</td><td>4 files (20.0 KiB)</td><td>16</td></tr>
+<tr><td><code>lattices/</code></td><td>2 files (8.6 KiB)</td><td>1 files (11.2 KiB)</td><td>3</td></tr>
+<tr><td><code>math/</code></td><td>23 files (163.1 KiB)</td><td>10 files (63.3 KiB)</td><td>33</td></tr>
+<tr><td><code>mcbasket/</code></td><td>8 files (45.2 KiB)</td><td>4 files (19.7 KiB)</td><td>12</td></tr>
+<tr><td><code>models/</code></td><td>3 files (7.8 KiB)</td><td>2 files (11.2 KiB)</td><td>5</td></tr>
+<tr><td><code>processes/</code></td><td>7 files (18.1 KiB)</td><td>6 files (23.6 KiB)</td><td>13</td></tr>
+<tr><td><code>risk/</code></td><td>3 files (2.6 KiB)</td><td><span class="muted">—</span></td><td>3</td></tr>
+<tr><td><code>shortrate/</code></td><td>3 files (17.9 KiB)</td><td>2 files (12.1 KiB)</td><td>5</td></tr>
+<tr><td><code>swaptions/</code></td><td>4 files (11.8 KiB)</td><td>3 files (27.8 KiB)</td><td>7</td></tr>
+<tr><td><code>termstructures/</code></td><td>3 files (15.2 KiB)</td><td>2 files (30.3 KiB)</td><td>5</td></tr>
+<tr><td><code>variancegamma/</code></td><td>7 files (14.5 KiB)</td><td>6 files (22.8 KiB)</td><td>13</td></tr>
+<tr><td><code>varianceoption/</code></td><td>3 files (5.5 KiB)</td><td>2 files (15.2 KiB)</td><td>5</td></tr>
+<tr><td><code>volatility/</code></td><td>23 files (123.3 KiB)</td><td>15 files (80.2 KiB)</td><td>38</td></tr>
+    </tbody>
+  </table>
+
+  <h2>⚙️ Settings</h2>
+  <table>
+    <tr><td><strong>Max file size</strong></td><td>60.0 KiB</td></tr>
+    <tr><td><strong>Ignore patterns</strong></td>
+        <td><code>.git, .am</code></td></tr>
+    <tr><td><strong>Header extensions</strong></td>
+        <td><code>.h, .h++, .hh, .hpp, .hxx</code></td></tr>
+    <tr><td><strong>Source extensions</strong></td>
+        <td><code>.c, .c++, .cc, .cpp, .cxx</code></td></tr>
+  </table>
+</div>
+</body>
+</html>

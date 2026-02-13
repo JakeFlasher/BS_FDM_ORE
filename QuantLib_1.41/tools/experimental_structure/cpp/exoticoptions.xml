@@ -1,0 +1,610 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>continuousarithmeticasianvecerengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+  Copyright (C) 2014 Bernd Lewerenz
+
+  This file is part of QuantLib, a free-software/open-source library
+  for financial quantitative analysts and developers - http://quantlib.org/
+
+  QuantLib is free software: you can redistribute it and/or modify it
+  under the terms of the QuantLib license.  You should have received a
+  copy of the license along with this program; if not, please email
+  <quantlib-dev@lists.sf.net>. The license is also available online at
+  <https://www.quantlib.org/license.shtml>.
+
+  This program is distributed in the hope that it will be useful, but WITHOUT
+  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+  FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/experimental/exoticoptions/continuousarithmeticasianvecerengine.hpp>
+#include <ql/instruments/vanillaoption.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/math/rounding.hpp>
+#include <ql/methods/finitedifferences/tridiagonaloperator.hpp>
+#include <ql/pricingengines/blackcalculator.hpp>
+#include <ql/pricingengines/vanilla/analyticeuropeanengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    ContinuousArithmeticAsianVecerEngine::ContinuousArithmeticAsianVecerEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Handle<Quote> currentAverage,
+        Date startDate,
+        Size timeSteps,
+        Size assetSteps,
+        Real z_min,
+        Real z_max)
+    : process_(std::move(process)), currentAverage_(std::move(currentAverage)),
+      startDate_(startDate), z_min_(z_min), z_max_(z_max), timeSteps_(timeSteps),
+      assetSteps_(assetSteps) {
+        registerWith(process_);
+        registerWith(currentAverage_);
+    }
+
+    void ContinuousArithmeticAsianVecerEngine::calculate() const {
+        Real expectedAverage;
+
+        QL_REQUIRE(arguments_.averageType == Average::Arithmetic,
+                   "not an Arithmetic average option");
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "not an European Option");
+
+        DayCounter rfdc  = process_->riskFreeRate()->dayCounter();
+        DayCounter divdc = process_->dividendYield()->dayCounter();
+        DayCounter voldc = process_->blackVolatility()->dayCounter();
+        Real S_0 = process_->stateVariable()->value();
+
+        // payoff
+        ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        QL_REQUIRE(payoff, "non-plain payoff given");
+
+        // original time to maturity
+        Date maturity = arguments_.exercise->lastDate();
+
+        Real X = payoff->strike();
+        QL_REQUIRE(z_min_<=0 && z_max_>=0,
+                   "strike (0 for vecer fixed strike asian)  not on Grid");
+
+        Volatility sigma =
+            process_->blackVolatility()->blackVol(maturity, X);
+
+        Rate r = process_->riskFreeRate()->
+            zeroRate(maturity, rfdc, Continuous, NoFrequency);
+        Rate q = process_->dividendYield()->
+            zeroRate(maturity, divdc, Continuous, NoFrequency);
+
+        Date today(Settings::instance().evaluationDate());
+
+        QL_REQUIRE(startDate_>=today,
+                   "Seasoned Asian not yet implemented");
+
+        // Expiry in Years
+        Time T = rfdc.yearFraction(today,
+                                   arguments_.exercise->lastDate());
+        Time T1 = rfdc.yearFraction(today,
+                                    startDate_ );            // Average Begin
+        Time T2 = T;            // Average End (In this version only Maturity...)
+
+        if ((T2 - T1) < 0.001) {
+            // its a vanilla option. Use vanilla engine
+            VanillaOption europeanOption(payoff, arguments_.exercise);
+            europeanOption.setPricingEngine(
+                        ext::make_shared<AnalyticEuropeanEngine>(process_));
+            results_.value = europeanOption.NPV();
+
+        } else {
+            Real Theta = 0.5;        // Mixed Scheme: 0.5 = Crank Nicolson
+            Real Z_0 = cont_strategy(0,T1,T2,q,r) - std::exp(-r*T) * X /S_0;
+
+            QL_REQUIRE(Z_0>=z_min_ && Z_0<=z_max_,
+                       "spot not on grid");
+
+            Real h = (z_max_ - z_min_) / assetSteps_; // Space step size
+            Real k = T / timeSteps_;         // Time Step size
+
+            Real sigma2 = sigma * sigma, vecerTerm;
+
+            Array SVec(assetSteps_+1),u_initial(assetSteps_+1),
+                  u(assetSteps_+1),rhs(assetSteps_+1);
+
+            for (Natural i= 0; i<= SVec.size()-1;i++) {
+                SVec[i] = z_min_ + i * h;     // Value of Underlying on the grid
+            }
+
+            // Begin gamma construction
+            TridiagonalOperator gammaOp(assetSteps_+1);
+            gammaOp.setFirstRow(0.0,0.0);
+            gammaOp.setMidRows(1/(h*h),-2/(h*h),1/(h*h));
+            gammaOp.setLastRow(0.0,0.0);
+
+            Array upperD = gammaOp.upperDiagonal();
+            Array lowerD = gammaOp.lowerDiagonal();
+            Array Dia    = gammaOp.diagonal();
+
+            // Construct Vecer operator
+            TridiagonalOperator explicit_part(gammaOp.size());
+            TridiagonalOperator implicit_part(gammaOp.size());
+
+            for (Natural i= 0; i<= SVec.size()-1;i++) {
+                u_initial[i] = std::max<Real>(SVec[i] , 0.0); // Call Payoff
+            }
+
+            u = u_initial;
+
+            // Start Time Loop
+
+            for (Natural j = 1; j<=timeSteps_;j++) {
+                if (Theta != 1.0) { // Explicit Part
+                    for (Natural i = 1; i<= SVec.size()-2;i++) {
+                        vecerTerm = SVec[i] - std::exp(-q * (T-(j-1)*k))
+                                  * cont_strategy(T-(j-1)*k,T1,T2,q,r);
+                        gammaOp.setMidRow(i,
+                            0.5 * sigma2 * vecerTerm * vecerTerm  * lowerD[i-1],
+                            0.5 * sigma2 * vecerTerm * vecerTerm  * Dia[i],
+                            0.5 * sigma2 *  vecerTerm * vecerTerm * upperD[i]);
+                    }
+                    explicit_part = TridiagonalOperator::identity(gammaOp.size()) +
+                                    (1 - Theta) * k * gammaOp;
+                    explicit_part.setFirstRow(1.0,0.0); // Apply before applying
+                    explicit_part.setLastRow(-1.0,1.0); // Neumann BC
+
+                    u = explicit_part.applyTo(u);
+
+                    // Apply after applying (Neumann BC)
+                    u[assetSteps_] = u[assetSteps_-1] + h;
+                    u[0] = 0;
+                } // End Explicit Part
+
+                if (Theta != 0.0) {  // Implicit Part
+                    for (Natural i = 1; i<= SVec.size()-2;i++) {
+                        vecerTerm = SVec[i] - std::exp(-q * (T-j*k)) *
+                                    cont_strategy(T-j*k,T1,T2,q,r);
+                        gammaOp.setMidRow(i,
+                            0.5 * sigma2 * vecerTerm * vecerTerm * lowerD[i-1],
+                            0.5 * sigma2 * vecerTerm * vecerTerm  * Dia[i],
+                            0.5 * sigma2 * vecerTerm * vecerTerm * upperD[i]);
+                    }
+
+                    implicit_part = TridiagonalOperator::identity(gammaOp.size()) -
+                                    Theta * k * gammaOp;
+
+                    // Apply before solving
+                    implicit_part.setFirstRow(1.0,0.0);
+                    implicit_part.setLastRow(-1.0,1.0);
+                    rhs = u;
+                    rhs[0] = 0; // Lower BC
+                    rhs[assetSteps_] = h; // Upper BC (Neumann) Delta=1
+                    u = implicit_part.solveFor(rhs);
+                } // End implicit Part
+            } // End Time Loop
+
+            DownRounding Rounding(0);
+            auto lowerI = Integer(Rounding((Z_0 - z_min_) / h));
+            // Interpolate solution
+            Real pv;
+
+            pv = u[lowerI] + (u[lowerI+1] - u[lowerI]) * (Z_0 - SVec[lowerI])/h;
+            results_.value = S_0 * pv;
+
+            if (payoff->optionType()==Option::Put) {
+                // Apply Call Put Parity for Asians
+                if (r == q) {
+                    expectedAverage = S_0;
+                } else {
+                    expectedAverage =
+                        S_0 * (std::exp( (r-q) * T2) -
+                               std::exp( (r-q) * T1)) / ((r-q) * (T2-T1));
+                }
+
+                Real asianForward = std::exp(-r * T2) * (expectedAverage -  X);
+                results_.value = results_.value - asianForward;
+            }
+        }
+    }
+
+    // Replication of Average by holding this amount in Assets
+    Real ContinuousArithmeticAsianVecerEngine::cont_strategy(Time t,
+                                                             Time T1,
+                                                             Time T2,
+                                                             Real v,
+                                                             Real r) const {
+        Real const eps= 0.00001;
+
+        QL_REQUIRE(T1 <= T2, "Average Start must be before Average End");
+        if (std::fabs(t-T2) < eps) {
+            return 0.0;
+        } else {
+            if (t<T1) {
+                if (std::fabs(r-v) >= eps) {
+                    return (std::exp(v * (t-T2)) *
+                           (1 - std::exp((v-r) * (T2-T1) ))  /
+                           (( r - v) * (T2 - T1) ));
+                } else {
+                    return std::exp(v*(t-T2));
+                } // end else v-r ==0
+            } else { // t<T1
+                if (std::fabs(r-v) >= eps) {
+                    return std::exp(v * (t-T2)) *
+                           (1 - std::exp( (v - r) * (T2-t) )) /
+                           (( r - v) * (T2 - T1)  );
+                } else {
+                    return std::exp(v * (t-T2)) * (T2 - t) / (T2 - T1);
+                }
+            }
+        }
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>everestoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/everestoption.hpp>
+#include <ql/instruments/payoffs.hpp>
+
+namespace QuantLib {
+
+    EverestOption::EverestOption(Real notional,
+                                 Rate guarantee,
+                                 const ext::shared_ptr<Exercise>& exercise)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(new NullPayoff), exercise),
+      notional_(notional), guarantee_(guarantee) {}
+
+    Rate EverestOption::yield() const {
+        calculate();
+        QL_REQUIRE(yield_ != Null<Rate>(), "yield not provided");
+        return yield_;
+    }
+
+    void EverestOption::setupArguments(PricingEngine::arguments* args) const {
+        MultiAssetOption::setupArguments(args);
+
+        auto* arguments = dynamic_cast<EverestOption::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->notional = notional_;
+        arguments->guarantee= guarantee_;
+    }
+
+    void EverestOption::fetchResults(const PricingEngine::results* r) const {
+        MultiAssetOption::fetchResults(r);
+        const auto* results = dynamic_cast<const EverestOption::results*>(r);
+        QL_ENSURE(results != nullptr, "no results returned from pricing engine");
+        yield_ = results->yield;
+    }
+
+
+    EverestOption::arguments::arguments()
+    : notional(Null<Real>()), guarantee(Null<Rate>()) {}
+
+    void EverestOption::arguments::validate() const {
+        MultiAssetOption::arguments::validate();
+        QL_REQUIRE(notional != Null<Rate>(), "no notional given");
+        QL_REQUIRE(notional != 0.0, "null notional given");
+        QL_REQUIRE(guarantee != Null<Rate>(), "no guarantee given");
+    }
+
+
+    void EverestOption::results::reset() {
+        MultiAssetOption::results::reset();
+        yield = Null<Rate>();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>himalayaoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/himalayaoption.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    HimalayaOption::HimalayaOption(const std::vector<Date>& fixingDates,
+                                   Real strike)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(
+                                new PlainVanillaPayoff(Option::Call, strike)),
+                       ext::shared_ptr<Exercise>(
+                                   new EuropeanExercise(fixingDates.back()))),
+      fixingDates_(fixingDates) {}
+
+    void HimalayaOption::setupArguments(PricingEngine::arguments* args) const {
+        MultiAssetOption::setupArguments(args);
+
+        auto* arguments = dynamic_cast<HimalayaOption::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->fixingDates = fixingDates_;
+    }
+
+    void HimalayaOption::arguments::validate() const {
+        MultiAssetOption::arguments::validate();
+        QL_REQUIRE(!fixingDates.empty(), "no fixing dates given");
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>mceverestengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/mceverestengine.hpp>
+
+namespace QuantLib {
+
+    EverestMultiPathPricer::EverestMultiPathPricer(Real notional,
+                                                   Real guarantee,
+                                                   DiscountFactor discount)
+    : notional_(notional), guarantee_(guarantee), discount_(discount) {}
+
+    Real EverestMultiPathPricer::operator()(const MultiPath& multiPath) const {
+
+        Size n = multiPath.pathSize();
+        QL_REQUIRE(n>0, "the path cannot be empty");
+
+        Size numAssets = multiPath.assetNumber();
+        QL_REQUIRE(numAssets>0, "there must be some paths");
+
+        // We search the yield min
+        Real minYield = multiPath[0].back() / multiPath[0].front() - 1.0;
+        for (Size j=1; j<numAssets; ++j) {
+            Rate yield = multiPath[j].back() / multiPath[j].front() - 1.0;
+            minYield = std::min(minYield, yield);
+        }
+        return (1.0 + minYield + guarantee_) * notional_ * discount_;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>mchimalayaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/mchimalayaengine.hpp>
+#include <ql/payoff.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    HimalayaMultiPathPricer::HimalayaMultiPathPricer(ext::shared_ptr<Payoff> payoff,
+                                                     DiscountFactor discount)
+    : payoff_(std::move(payoff)), discount_(discount) {}
+
+    Real HimalayaMultiPathPricer::operator()(const MultiPath& multiPath)
+                                                                      const {
+        Size numAssets = multiPath.assetNumber();
+        Size numNodes = multiPath.pathSize();
+        QL_REQUIRE(numAssets > 0, "no asset given");
+
+        std::vector<bool> remainingAssets(numAssets, true);
+        Real averagePrice = 0.0;
+        Size fixings = numNodes-1;
+        for (Size i = 1; i < numNodes; i++) {
+            Real bestPrice = 0.0;
+            Real bestYield = QL_MIN_REAL;
+            // dummy assignement to avoid compiler warning
+            Size removeAsset = 0;
+            for (Size j = 0; j < numAssets; j++) {
+                if (remainingAssets[j]) {
+                    Real price = multiPath[j][i];
+                    Real yield = price/multiPath[j].front();
+                    if (yield >= bestYield) {
+                        bestPrice = price;
+                        bestYield = yield;
+                        removeAsset = j;
+                    }
+                }
+            }
+            remainingAssets[removeAsset] = false;
+            averagePrice += bestPrice;
+        }
+        averagePrice /= std::min(fixings, numAssets);
+
+        Real payoff = (*payoff_)(averagePrice);
+        return payoff * discount_;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>mcpagodaengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/mcpagodaengine.hpp>
+
+namespace QuantLib {
+
+    PagodaMultiPathPricer::PagodaMultiPathPricer(Real roof, Real fraction,
+                                                 DiscountFactor discount)
+    : discount_(discount), roof_(roof), fraction_(fraction) {}
+
+    Real PagodaMultiPathPricer::operator()(const MultiPath& multiPath) const {
+
+        Size numAssets = multiPath.assetNumber();
+        Size numSteps = multiPath.pathSize();
+
+        Real averagePerformance = 0.0;
+        for (Size i = 1; i < numSteps; i++) {
+            for (Size j = 0; j < numAssets; j++) {
+                averagePerformance +=
+                    multiPath[j].front() *
+                    (multiPath[j][i]/multiPath[j][i-1] - 1.0);
+            }
+        }
+        averagePerformance /= numAssets;
+
+        return discount_ * fraction_
+            * std::max<Real>(0.0, std::min(roof_, averagePerformance));
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>pagodaoption.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Master IMAFA - Polytech'Nice Sophia - Université de Nice Sophia Antipolis
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/experimental/exoticoptions/pagodaoption.hpp>
+#include <ql/instruments/payoffs.hpp>
+#include <ql/exercise.hpp>
+
+namespace QuantLib {
+
+    PagodaOption::PagodaOption(const std::vector<Date>& fixingDates,
+                               Real roof,
+                               Real fraction)
+    : MultiAssetOption(ext::shared_ptr<Payoff>(new NullPayoff),
+                       ext::shared_ptr<Exercise>(
+                                   new EuropeanExercise(fixingDates.back()))),
+      fixingDates_(fixingDates), roof_(roof), fraction_(fraction) {}
+
+
+    void PagodaOption::setupArguments(PricingEngine::arguments* args) const {
+        MultiAssetOption::setupArguments(args);
+
+        auto* arguments = dynamic_cast<PagodaOption::arguments*>(args);
+        QL_REQUIRE(arguments != nullptr, "wrong argument type");
+
+        arguments->fixingDates = fixingDates_;
+        arguments->roof = roof_;
+        arguments->fraction = fraction_;
+    }
+
+
+    PagodaOption::arguments::arguments()
+    : roof(Null<Real>()), fraction(Null<Real>()) {}
+
+    void PagodaOption::arguments::validate() const {
+        MultiAssetOption::arguments::validate();
+        QL_REQUIRE(!fixingDates.empty(), "no fixingDates given");
+        QL_REQUIRE(roof != Null<Real>(), "no roof given");
+        QL_REQUIRE(fraction != Null<Real>(), "no fraction given");
+    }
+
+}
+]]></document_content>
+  </document>
+</documents>

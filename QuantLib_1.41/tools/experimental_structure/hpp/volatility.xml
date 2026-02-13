@@ -1,0 +1,3440 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>abcdatmvolcurve.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Cristina Duminuco
+ Copyright (C) 2007 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file abcdatmvolcurve.hpp
+    \brief Abcd-interpolated at-the-money (no-smile) interest rate vol curve
+*/
+
+#ifndef quantlib_abcd_atm_vol_curve_hpp
+#define quantlib_abcd_atm_vol_curve_hpp
+
+#include <ql/experimental/volatility/blackatmvolcurve.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/math/interpolations/abcdinterpolation.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+
+namespace QuantLib {
+
+    class Quote;
+
+    //! Abcd-interpolated at-the-money (no-smile) volatility curve
+    /*! blah blah
+    */
+    class AbcdAtmVolCurve : public BlackAtmVolCurve,
+                            public LazyObject {
+      public:
+        //! floating reference date, floating market data
+        AbcdAtmVolCurve(Natural settlementDays,
+                        const Calendar& cal,
+                        const std::vector<Period>& optionTenors,
+                        const std::vector<Handle<Quote> >& volsHandles,
+                        std::vector<bool> inclusionInInterpolationFlag = std::vector<bool>(1, true),
+                        BusinessDayConvention bdc = Following,
+                        const DayCounter& dc = Actual365Fixed());
+        //! Returns k adjustment factors for option tenors used in interpolation
+        std::vector<Real> k() const;
+        //! Returns k adjustment factor at time t
+        Real k(Time t) const;
+        Real a() const;
+        Real b() const;
+        Real c() const;
+        Real d() const;
+        Real rmsError() const;
+        Real maxError() const;
+        EndCriteria::Type endCriteria() const;
+        //! \name TermStructure interface
+        //@{
+        Date maxDate() const override;
+        //@}
+        //! \name VolatilityTermStructure interface
+        //@{
+        Real minStrike() const override;
+        Real maxStrike() const override;
+        //@}
+        //! \name LazyObject interface
+        //@{
+        void update() override;
+        void performCalculations() const override;
+        //@}
+        //! \name some inspectors
+        //@{
+        const std::vector<Period>& optionTenors() const;
+        const std::vector<Period>& optionTenorsInInterpolation() const;
+        const std::vector<Date>& optionDates() const;
+        const std::vector<Time>& optionTimes() const;
+        //@}
+        //! \name Visitability
+        //@{
+        void accept(AcyclicVisitor&) override;
+        //@}
+      protected:
+        //! \name BlackAtmVolCurve interface
+        //@{
+        //! spot at-the-money variance calculation (k adjusted)
+        Real atmVarianceImpl(Time t) const override;
+        //! spot at-the-money volatility calculation (k adjusted)
+        Volatility atmVolImpl(Time t) const override;
+        //@}
+      private:
+        void checkInputs() const;
+        void initializeOptionDatesAndTimes() const;
+        void initializeVolatilities();
+        void registerWithMarketData();
+        void interpolate();
+
+        Size nOptionTenors_;
+        std::vector<Period> optionTenors_;
+        mutable std::vector<Period> actualOptionTenors_;
+        mutable std::vector<Date> optionDates_;
+        mutable std::vector<Time> optionTimes_;
+        mutable std::vector<Time> actualOptionTimes_;
+        Date evaluationDate_;
+
+        std::vector<Handle<Quote> > volHandles_;
+        mutable std::vector<Volatility> vols_;
+        mutable std::vector<Volatility> actualVols_;
+
+        mutable std::vector<bool> inclusionInInterpolation_;
+
+        ext::shared_ptr<AbcdInterpolation> interpolation_;
+    };
+
+    // inline
+
+    inline Date AbcdAtmVolCurve::maxDate() const {
+        calculate();
+        return optionDateFromTenor(optionTenors_.back());
+    }
+
+    inline Real AbcdAtmVolCurve::minStrike() const {
+        return QL_MIN_REAL;
+    }
+
+    inline Real AbcdAtmVolCurve::maxStrike() const {
+        return QL_MAX_REAL;
+    }
+
+    inline Real AbcdAtmVolCurve::atmVarianceImpl(Time t) const {
+        Volatility vol = atmVolImpl(t);
+        return vol*vol*t;
+    }
+
+    inline Volatility AbcdAtmVolCurve::atmVolImpl(Time t) const {
+        calculate();
+        return k(t) * (*interpolation_)(t, true);
+    }
+
+    inline const std::vector<Period>& AbcdAtmVolCurve::optionTenors() const {
+         return optionTenors_;
+    }
+
+    inline const std::vector<Period>& AbcdAtmVolCurve::optionTenorsInInterpolation() const {
+        return actualOptionTenors_;
+    }
+
+    inline
+    const std::vector<Date>& AbcdAtmVolCurve::optionDates() const {
+        return optionDates_;
+    }
+
+    inline
+    const std::vector<Time>& AbcdAtmVolCurve::optionTimes() const {
+        return optionTimes_;
+    }
+
+    inline
+    std::vector<Real> AbcdAtmVolCurve::k() const {
+        return interpolation_->k();
+    }
+
+    inline
+    Real AbcdAtmVolCurve::k(Time t) const {
+        return interpolation_->k(t,actualOptionTimes_.begin(),actualOptionTimes_.end());
+    }
+
+    inline Real AbcdAtmVolCurve::a() const {
+        return interpolation_->a();
+    }
+
+    inline Real AbcdAtmVolCurve::b() const {
+        return interpolation_->b();
+    }
+
+    inline Real AbcdAtmVolCurve::c() const {
+        return interpolation_->c();
+    }
+
+    inline Real AbcdAtmVolCurve::d() const {
+        return interpolation_->d();
+    }
+
+    inline Real AbcdAtmVolCurve::rmsError() const {
+        return interpolation_->rmsError();
+    }
+    inline Real AbcdAtmVolCurve::maxError() const {
+        return interpolation_->maxError();
+    }
+
+    inline EndCriteria::Type AbcdAtmVolCurve::endCriteria() const { 
+        return interpolation_->endCriteria();
+    }
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>all.hpp</source>
+    <document_content><![CDATA[/* This file is automatically generated; do not edit.     */
+/* Add the files to be included into Makefile.am instead. */
+
+#include <ql/experimental/volatility/abcdatmvolcurve.hpp>
+#include <ql/experimental/volatility/blackatmvolcurve.hpp>
+#include <ql/experimental/volatility/blackvolsurface.hpp>
+#include <ql/experimental/volatility/equityfxvolsurface.hpp>
+#include <ql/experimental/volatility/extendedblackvariancecurve.hpp>
+#include <ql/experimental/volatility/extendedblackvariancesurface.hpp>
+#include <ql/experimental/volatility/interestratevolsurface.hpp>
+#include <ql/experimental/volatility/noarbsabr.hpp>
+#include <ql/experimental/volatility/noarbsabrinterpolatedsmilesection.hpp>
+#include <ql/experimental/volatility/noarbsabrinterpolation.hpp>
+#include <ql/experimental/volatility/noarbsabrsmilesection.hpp>
+#include <ql/experimental/volatility/noarbsabrswaptionvolatilitycube.hpp>
+#include <ql/experimental/volatility/sabrvolsurface.hpp>
+#include <ql/experimental/volatility/sabrvoltermstructure.hpp>
+#include <ql/experimental/volatility/sviinterpolatedsmilesection.hpp>
+#include <ql/experimental/volatility/sviinterpolation.hpp>
+#include <ql/experimental/volatility/svismilesection.hpp>
+#include <ql/experimental/volatility/volcube.hpp>
+#include <ql/experimental/volatility/zabr.hpp>
+#include <ql/experimental/volatility/zabrinterpolatedsmilesection.hpp>
+#include <ql/experimental/volatility/zabrinterpolation.hpp>
+#include <ql/experimental/volatility/zabrsmilesection.hpp>
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>blackatmvolcurve.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2002, 2003 Ferdinando Ametrano
+ Copyright (C) 2003, 2004, 2005, 2006 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file blackatmvolcurve.hpp
+    \brief Black at-the-money (no-smile) volatility curve base class
+*/
+
+#ifndef quantlib_black_atm_vol_curve_hpp
+#define quantlib_black_atm_vol_curve_hpp
+
+#include <ql/termstructures/voltermstructure.hpp>
+#include <ql/patterns/visitor.hpp>
+
+namespace QuantLib {
+
+    //! Black at-the-money (no-smile) volatility curve
+    /*! This abstract class defines the interface of concrete
+        Black at-the-money (no-smile) volatility curves which will be
+        derived from this one.
+
+        Volatilities are assumed to be expressed on an annual basis.
+    */
+    class BlackAtmVolCurve : public VolatilityTermStructure {
+      public:
+        /*! \name Constructors
+            See the TermStructure documentation for issues regarding
+            constructors.
+        */
+        //@{
+        //! default constructor
+        /*! \warning term structures initialized by means of this
+                     constructor must manage their own reference date
+                     by overriding the referenceDate() method.
+        */
+        BlackAtmVolCurve(BusinessDayConvention bdc = Following,
+                         const DayCounter& dc = DayCounter());
+        //! initialize with a fixed reference date
+        BlackAtmVolCurve(const Date& referenceDate,
+                         const Calendar& cal = Calendar(),
+                         BusinessDayConvention bdc = Following,
+                         const DayCounter& dc = DayCounter());
+        //! calculate the reference date based on the global evaluation date
+        BlackAtmVolCurve(Natural settlementDays,
+                         const Calendar&,
+                         BusinessDayConvention bdc = Following,
+                         const DayCounter& dc = DayCounter());
+        //@}
+        ~BlackAtmVolCurve() override = default;
+        //! \name Black at-the-money spot volatility
+        //@{
+        //! spot at-the-money volatility
+        Volatility atmVol(const Period& optionTenor,
+                          bool extrapolate = false) const;
+        //! spot at-the-money volatility
+        Volatility atmVol(const Date& maturity,
+                          bool extrapolate = false) const;
+        //! spot at-the-money volatility
+        Volatility atmVol(Time maturity,
+                          bool extrapolate = false) const;
+        //! spot at-the-money variance
+        Real atmVariance(const Period& optionTenor,
+                         bool extrapolate = false) const;
+        //! spot at-the-money variance
+        Real atmVariance(const Date& maturity,
+                         bool extrapolate = false) const;
+        //! spot at-the-money variance
+        Real atmVariance(Time maturity,
+                         bool extrapolate = false) const;
+        //@}
+        //! \name Visitability
+        //@{
+        virtual void accept(AcyclicVisitor&);
+        //@}
+      protected:
+        /*! \name Calculations
+
+            These methods must be implemented in derived classes to perform
+            the actual volatility calculations. When they are called,
+            range check has already been performed; therefore, they must
+            assume that extrapolation is required.
+        */
+        //@{
+        //! spot at-the-money variance calculation
+        virtual Real atmVarianceImpl(Time t) const = 0;
+        //! spot at-the-money volatility calculation
+        virtual Volatility atmVolImpl(Time t) const = 0;
+        //@}
+    };
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>blackvolsurface.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2002, 2003 Ferdinando Ametrano
+ Copyright (C) 2003, 2004, 2005, 2006 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file blackvolsurface.hpp
+    \brief Black volatility (smile) surface
+*/
+
+#ifndef quantlib_black_vol_surface_hpp
+#define quantlib_black_vol_surface_hpp
+
+#include <ql/experimental/volatility/blackatmvolcurve.hpp>
+
+namespace QuantLib {
+
+    class SmileSection;
+
+    //! Black volatility (smile) surface
+    /*! This abstract class defines the interface of concrete
+        Black volatility (smile) surface which will
+        be derived from this one.
+
+        Volatilities are assumed to be expressed on an annual basis.
+
+    */
+    class BlackVolSurface : public BlackAtmVolCurve {
+      public:
+        /*! \name Constructors
+            See the TermStructure documentation for issues regarding
+            constructors.
+        */
+        //@{
+        //! default constructor
+        /*! \warning term structures initialized by means of this
+                     constructor must manage their own reference date
+                     by overriding the referenceDate() method.
+        */
+        BlackVolSurface(BusinessDayConvention bdc = Following,
+                        const DayCounter& dc = DayCounter());
+        //! initialize with a fixed reference date
+        BlackVolSurface(const Date& referenceDate,
+                        const Calendar& cal = Calendar(),
+                        BusinessDayConvention bdc = Following,
+                        const DayCounter& dc = DayCounter());
+        //! calculate the reference date based on the global evaluation date
+        BlackVolSurface(Natural settlementDays,
+                        const Calendar&,
+                        BusinessDayConvention bdc = Following,
+                        const DayCounter& dc = DayCounter());
+        //@}
+        //! \name Black spot volatility
+        //@{
+        //! returns the smile for a given option tenor
+        ext::shared_ptr<SmileSection> smileSection(const Period&,
+                                                     bool extrapolate) const;
+        //! returns the smile for a given option date
+        ext::shared_ptr<SmileSection> smileSection(const Date&,
+                                                     bool extrapolate) const;
+        //! returns the smile for a given option time
+        ext::shared_ptr<SmileSection> smileSection(Time,
+                                                     bool extrapolate) const;
+        //@}
+        //! \name Visitability
+        //@{
+        void accept(AcyclicVisitor&) override;
+        //@}
+      protected:
+        //! \name BlackAtmVolCurve interface
+        //@{
+        //! spot at-the-money variance calculation
+        Real atmVarianceImpl(Time t) const override;
+        //! spot at-the-money volatility calculation
+        Volatility atmVolImpl(Time t) const override;
+        //@}
+        /*! \name Calculations
+
+            This method must be implemented in derived classes to perform
+            the actual volatility calculations. When it is called,
+            time check has already been performed; therefore, it must
+            assume that time-extrapolation is allowed.
+        */
+        //@{
+        virtual ext::shared_ptr<SmileSection> smileSectionImpl(Time) const=0;
+        //@}
+    };
+
+    // inline definitions
+
+    inline ext::shared_ptr<SmileSection>
+    BlackVolSurface::smileSection(const Period& p,
+                                  bool extrapolate) const {
+        return smileSection(optionDateFromTenor(p), extrapolate);
+    }
+
+    inline ext::shared_ptr<SmileSection>
+    BlackVolSurface::smileSection(const Date& d,
+                                  bool extrapolate) const {
+        return smileSection(timeFromReference(d), extrapolate);
+    }
+
+    inline ext::shared_ptr<SmileSection>
+    BlackVolSurface::smileSection(Time t,
+                                  bool extrapolate) const {
+        checkRange(t, extrapolate);
+        return smileSectionImpl(t);
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>equityfxvolsurface.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2002, 2003 Ferdinando Ametrano
+ Copyright (C) 2003, 2004, 2005, 2006 StatPro Italia srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file equityfxvolsurface.hpp
+    \brief Equity/FX vol (smile) surface
+*/
+
+#ifndef quantlib_equity_fx_vol_surface_hpp
+#define quantlib_equity_fx_vol_surface_hpp
+
+#include <ql/experimental/volatility/blackvolsurface.hpp>
+
+namespace QuantLib {
+
+    //! Equity/FX volatility (smile) surface
+    /*! This abstract class defines the interface of concrete
+        Equity/FX volatility (smile) surfaces which will
+        be derived from this one.
+
+        Volatilities are assumed to be expressed on an annual basis.
+
+        It's only in absence of smile that the concept of (at-the-money)
+        forward volatility makes sense.
+    */
+    class EquityFXVolSurface : public BlackVolSurface {
+      public:
+        /*! \name Constructors
+            See the TermStructure documentation for issues regarding
+            constructors.
+        */
+        //@{
+        //! default constructor
+        /*! \warning term structures initialized by means of this
+                     constructor must manage their own reference date
+                     by overriding the referenceDate() method.
+        */
+        explicit EquityFXVolSurface(BusinessDayConvention bdc = Following,
+                                    const DayCounter& dc = DayCounter());
+        //! initialize with a fixed reference date
+        explicit EquityFXVolSurface(const Date& referenceDate,
+                                    const Calendar& cal = Calendar(),
+                                    BusinessDayConvention bdc = Following,
+                                    const DayCounter& dc = DayCounter());
+        //! calculate the reference date based on the global evaluation date
+        EquityFXVolSurface(Natural settlementDays,
+                           const Calendar&,
+                           BusinessDayConvention bdc = Following,
+                           const DayCounter& dc = DayCounter());
+        //@}
+        //! \name Black Volatility
+        //@{
+        //! forward (at-the-money) volatility
+        Volatility atmForwardVol(const Date& date1,
+                                 const Date& date2,
+                                 bool extrapolate = false) const;
+        //! forward (at-the-money) volatility
+        Volatility atmForwardVol(Time time1,
+                                 Time time2,
+                                 bool extrapolate = false) const;
+        //! forward (at-the-money) variance
+        Real atmForwardVariance(const Date& date1,
+                                const Date& date2,
+                                bool extrapolate = false) const;
+        //! forward (at-the-money) variance
+        Real atmForwardVariance(Time time1,
+                                Time time2,
+                                bool extrapolate = false) const;
+        //@}
+        //! \name Visitability
+        //@{
+        void accept(AcyclicVisitor&) override;
+        //@}
+    };
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>extendedblackvariancecurve.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Frank Hövermann
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file extendedblackvariancecurve.hpp
+    \brief Black volatility curve modelled as variance curve
+*/
+
+#ifndef quantlib_extended_black_variance_curve_hpp
+#define quantlib_extended_black_variance_curve_hpp
+
+#include <ql/termstructures/volatility/equityfx/blackvoltermstructure.hpp>
+#include <ql/math/interpolation.hpp>
+#include <ql/handle.hpp>
+#include <ql/quote.hpp>
+
+namespace QuantLib {
+
+    //! Black volatility curve modelled as variance curve
+    /*! This class is similar to BlackVarianceCurve, but extends it to
+        use quotes for the input volatilities.
+    */
+    class ExtendedBlackVarianceCurve : public BlackVarianceTermStructure {
+      public:
+        ExtendedBlackVarianceCurve(const Date& referenceDate,
+                                   const std::vector<Date>& dates,
+                                   std::vector<Handle<Quote> > volatilities,
+                                   DayCounter dayCounter,
+                                   bool forceMonotoneVariance = true);
+
+        DayCounter dayCounter() const override { return dayCounter_; }
+        Date maxDate() const override;
+        Real minStrike() const override;
+        Real maxStrike() const override;
+
+        template <class Interpolator>
+        void setInterpolation(const Interpolator& i = Interpolator()) {
+            varianceCurve_ = i.interpolate(times_.begin(), times_.end(),
+                                           variances_.begin());
+            varianceCurve_.update();
+            notifyObservers();
+        }
+
+        void accept(AcyclicVisitor&) override;
+        void update() override;
+
+      private:
+        Real blackVarianceImpl(Time t, Real) const override;
+        void setVariances();
+        DayCounter dayCounter_;
+        Date maxDate_;
+        std::vector<Handle<Quote> > volatilities_;
+        std::vector<Time> times_;
+        std::vector<Real> variances_;
+        Interpolation varianceCurve_;
+        bool forceMonotoneVariance_;
+    };
+
+    inline Date ExtendedBlackVarianceCurve::maxDate() const {
+        return maxDate_;
+    }
+
+    inline Real ExtendedBlackVarianceCurve::minStrike() const {
+        return QL_MIN_REAL;
+    }
+
+    inline Real ExtendedBlackVarianceCurve::maxStrike() const {
+        return QL_MAX_REAL;
+    }
+
+    inline void ExtendedBlackVarianceCurve::accept(AcyclicVisitor& v) {
+        auto* v1 = dynamic_cast<Visitor<ExtendedBlackVarianceCurve>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            BlackVarianceTermStructure::accept(v);
+    }
+}
+
+
+#endif
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>extendedblackvariancesurface.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Frank Hövermann
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file extendedblackvariancesurface.hpp
+    \brief Black volatility surface modelled as variance surface
+*/
+
+#ifndef quantlib_extended_black_variance_surface_hpp
+#define quantlib_extended_black_variance_surface_hpp
+
+#include <ql/termstructures/volatility/equityfx/blackvoltermstructure.hpp>
+#include <ql/math/matrix.hpp>
+#include <ql/math/interpolations/interpolation2d.hpp>
+#include <ql/handle.hpp>
+#include <ql/quote.hpp>
+
+namespace QuantLib {
+
+    //! Black volatility surface modelled as variance surface
+    /*! This class is similar to BlackVarianceSurface, but extends it
+        to use quotes for the input volatilities.
+    */
+    class ExtendedBlackVarianceSurface : public BlackVarianceTermStructure {
+      public:
+        enum Extrapolation { ConstantExtrapolation,
+                             InterpolatorDefaultExtrapolation };
+        ExtendedBlackVarianceSurface(
+            const Date& referenceDate,
+            const Calendar& calendar,
+            const std::vector<Date>& dates,
+            std::vector<Real> strikes,
+            const std::vector<Handle<Quote> >& volatilities,
+            DayCounter dayCounter,
+            Extrapolation lowerExtrapolation = InterpolatorDefaultExtrapolation,
+            Extrapolation upperExtrapolation = InterpolatorDefaultExtrapolation);
+        DayCounter dayCounter() const override { return dayCounter_; }
+        Date maxDate() const override { return maxDate_; }
+        Real minStrike() const override { return strikes_.front(); }
+        Real maxStrike() const override { return strikes_.back(); }
+        template <class Interpolator>
+        void setInterpolation(const Interpolator& i = Interpolator()) {
+            varianceSurface_ =
+                i.interpolate(times_.begin(), times_.end(),
+                              strikes_.begin(), strikes_.end(),
+                              variances_);
+            varianceSurface_.update();
+            notifyObservers();
+        }
+        void accept(AcyclicVisitor&) override;
+        void update() override;
+
+      private:
+        Real blackVarianceImpl(Time t, Real strike) const override;
+        void setVariances();
+        DayCounter dayCounter_;
+        Date maxDate_;
+        const std::vector<Handle<Quote> >& volatilities_;
+        std::vector<Real> strikes_;
+        std::vector<Time> times_;
+        Matrix variances_;
+        Interpolation2D varianceSurface_;
+        Extrapolation lowerExtrapolation_, upperExtrapolation_;
+    };
+
+    inline void ExtendedBlackVarianceSurface::accept(AcyclicVisitor& v) {
+        auto* v1 = dynamic_cast<Visitor<ExtendedBlackVarianceSurface>*>(&v);
+        if (v1 != nullptr)
+            v1->visit(*this);
+        else
+            BlackVarianceTermStructure::accept(v);
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>interestratevolsurface.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file interestratevolsurface.hpp
+    \brief Interest rate volatility (smile) surface
+*/
+
+#ifndef quantlib_interest_rate_vol_surface_hpp
+#define quantlib_interest_rate_vol_surface_hpp
+
+#include <ql/experimental/volatility/blackvolsurface.hpp>
+#include <ql/indexes/interestrateindex.hpp>
+
+namespace QuantLib {
+
+    //! Interest rate volatility (smile) surface
+    /*! This abstract class defines the interface of concrete
+        Interest rate volatility (smile) surfaces which will
+        be derived from this one.
+
+        Volatilities are assumed to be expressed on an annual basis.
+    */
+    class InterestRateVolSurface : public BlackVolSurface {
+      public:
+        /*! \name Constructors
+            See the TermStructure documentation for issues regarding
+            constructors.
+        */
+        //@{
+        /*! \warning term structures initialized by means of this
+                     constructor must manage their own reference date
+                     by overriding the referenceDate() method.
+        */
+        explicit InterestRateVolSurface(ext::shared_ptr<InterestRateIndex>,
+                                        BusinessDayConvention bdc = Following,
+                                        const DayCounter& dc = DayCounter());
+        //! initialize with a fixed reference date
+        InterestRateVolSurface(ext::shared_ptr<InterestRateIndex>,
+                               const Date& referenceDate,
+                               const Calendar& cal = Calendar(),
+                               BusinessDayConvention bdc = Following,
+                               const DayCounter& dc = DayCounter());
+        //! calculate the reference date based on the global evaluation date
+        InterestRateVolSurface(ext::shared_ptr<InterestRateIndex>,
+                               Natural settlementDays,
+                               const Calendar&,
+                               BusinessDayConvention bdc = Following,
+                               const DayCounter& dc = DayCounter());
+        //@}
+        //! \name VolatilityTermStructure interface
+        //@{
+        //! period/date conversion
+        Date optionDateFromTenor(const Period&) const;
+        //@}
+        const ext::shared_ptr<InterestRateIndex>& index() const;
+        //! \name Visitability
+        //@{
+        void accept(AcyclicVisitor&) override;
+        //@}
+      protected:
+        ext::shared_ptr<InterestRateIndex> index_;
+    };
+
+
+    // inline
+
+    inline const ext::shared_ptr<InterestRateIndex>&
+    InterestRateVolSurface::index() const {
+        return index_;
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>noarbsabr.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file noarbsabr.hpp
+    \brief No-arbitrage SABR
+
+    Reference: Paul Doust, No-arbitrage SABR,
+               The Journal of Computational Finance (3–31)
+               Volume 15/Number 3, Spring 2012
+
+    The parameters are bounded as follows (see also below)
+
+    beta [0.01, 0.99]
+    expiryTime (0.0, 30.0]
+    sigmaI = alpha*forward^(beta-1) [0.05, 1.0]
+    nu [0.0001, 0.8]
+    rho [-0.99, 0.99]
+
+    As suggested in the paper, d0 is interpolated (linearly)
+    in phi space. For beta > 0.9 phi is extrapolated to a
+    value corresponding to d0 = tiny_prob = 1E-5 at beta = 1.
+    For tau < 0.25 phi is extrapolated flat.
+    For rho outside [-0.75, 0.75] phi is extrapolated linearly.
+
+    There are some parameter sets that are admissable, yet do
+    not allow for the adjustment procedure as suggested in the
+    paper to force the model implied forward to the correct
+    value. In this case, no adjustment is done, leading to a
+    model implied forward different from the desired one.
+    This situation can be identified by comparing forward()
+    and numericalForward().
+*/
+
+#ifndef quantlib_noarb_sabr
+#define quantlib_noarb_sabr
+
+#include <ql/qldefines.hpp>
+#include <ql/types.hpp>
+#include <ql/math/integrals/gausslobattointegral.hpp>
+
+#include <vector>
+
+namespace QuantLib {
+
+namespace detail::NoArbSabrModel {
+// parameter bounds
+const Real beta_min = 0.01;
+const Real beta_max = 0.99;
+const Real expiryTime_max = 30.0;
+const Real sigmaI_min = 0.05;
+const Real sigmaI_max = 1.00;
+const Real nu_min = 0.01;
+const Real nu_max = 0.80;
+const Real rho_min = -0.99;
+const Real rho_max = 0.99;
+// cutoff for phi(d0) / tau
+// if beta = 0.99, d0 is below 1E-14 for
+// bigger values than this
+const Real phiByTau_cutoff = 124.587;
+// number of mc simulations in tabulated
+// absorption probabilities
+const Real nsim = 2500000.0;
+// small probability used for extrapolation
+// of beta towards 1
+const Real tiny_prob = 1E-5;
+// minimum strike used for normal case integration
+const Real strike_min = 1E-6;
+// accuracy and max iterations for
+// numerical integration
+const Real i_accuracy = 1E-7;
+const Size i_max_iterations = 10000;
+// accuracy when adjusting the model forward
+// to match the given forward
+const Real forward_accuracy = 1E-6;
+// step for searching the model forward
+// in newton algorithm
+const Real forward_search_step = 0.0010;
+// lower bound for density evaluation
+const Real density_lower_bound = 1E-50;
+// threshold to identify a zero density
+const Real density_threshold = 1E-100;
+}
+
+class NoArbSabrModel {
+
+  public:
+    NoArbSabrModel(Real expiryTime, Real forward, Real alpha, Real beta, Real nu, Real rho);
+
+    Real optionPrice(Real strike) const;
+    Real digitalOptionPrice(Real strike) const;
+    Real density(const Real strike) const {
+        return p(strike) * (1 - absProb_) / numericalIntegralOverP_;
+    }
+
+    Real forward() const { return externalForward_; }
+    Real numericalForward() const { return numericalForward_; }
+    Real expiryTime() const { return expiryTime_; }
+    Real alpha() const { return alpha_; }
+    Real beta() const { return beta_; }
+    Real nu() const { return nu_; }
+    Real rho() const { return rho_; }
+
+    Real absorptionProbability() const { return absProb_; }
+
+    private:
+      Real p(Real f) const;
+      Real forwardError(Real forward) const;
+      const Real expiryTime_, externalForward_;
+      const Real alpha_, beta_, nu_, rho_;
+      Real absProb_, fmin_, fmax_;
+      mutable Real forward_, numericalIntegralOverP_;
+      mutable Real numericalForward_;
+      ext::shared_ptr<GaussLobattoIntegral> integrator_;
+      class integrand;
+      class p_integrand;
+};
+
+namespace detail {
+
+extern "C" const unsigned long sabrabsprob[1209600];
+
+class D0Interpolator {
+  public:
+    D0Interpolator(Real forward, Real expiryTime, Real alpha, Real beta, Real nu, Real rho);
+    Real operator()() const;
+
+  private:
+    Real phi(Real d0) const;
+    Real d0(Real phi) const;
+    const Real forward_, expiryTime_, alpha_, beta_, nu_, rho_, gamma_;
+    Real sigmaI_;
+    std::vector<Real> tauG_, sigmaIG_, rhoG_, nuG_, betaG_;
+};
+
+} // namespace detail
+} // namespace QuantLib
+
+#endif
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>noarbsabrinterpolatedsmilesection.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file noarbsabrinterpolatedsmilesection.hpp
+    \brief noarb sabr interpolating smile section
+*/
+
+#ifndef quantlib_noarbsabr_interpolated_smile_section_hpp
+#define quantlib_noarbsabr_interpolated_smile_section_hpp
+
+#include <ql/handle.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/termstructures/volatility/smilesection.hpp>
+#include <ql/experimental/volatility/noarbsabrinterpolation.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+
+namespace QuantLib {
+
+    class Quote;
+    class NoArbSabrInterpolatedSmileSection : public SmileSection,
+                                         public LazyObject {
+      public:
+        //! \name Constructors
+        //@{
+        //! all market data are quotes
+        NoArbSabrInterpolatedSmileSection(
+            const Date& optionDate,
+            Handle<Quote> forward,
+            const std::vector<Rate>& strikes,
+            bool hasFloatingStrikes,
+            Handle<Quote> atmVolatility,
+            const std::vector<Handle<Quote> >& volHandles,
+            Real alpha,
+            Real beta,
+            Real nu,
+            Real rho,
+            bool isAlphaFixed = false,
+            bool isBetaFixed = false,
+            bool isNuFixed = false,
+            bool isRhoFixed = false,
+            bool vegaWeighted = true,
+            ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+            ext::shared_ptr<OptimizationMethod> method = ext::shared_ptr<OptimizationMethod>(),
+            const DayCounter& dc = Actual365Fixed());
+        //! no quotes
+        NoArbSabrInterpolatedSmileSection(
+            const Date& optionDate,
+            const Rate& forward,
+            const std::vector<Rate>& strikes,
+            bool hasFloatingStrikes,
+            const Volatility& atmVolatility,
+            const std::vector<Volatility>& vols,
+            Real alpha,
+            Real beta,
+            Real nu,
+            Real rho,
+            bool isAlphaFixed = false,
+            bool isBetaFixed = false,
+            bool isNuFixed = false,
+            bool isRhoFixed = false,
+            bool vegaWeighted = true,
+            ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+            ext::shared_ptr<OptimizationMethod> method = ext::shared_ptr<OptimizationMethod>(),
+            const DayCounter& dc = Actual365Fixed());
+        //@}
+        //! \name LazyObject interface
+        //@{
+        void performCalculations() const override;
+        void update() override;
+        //@}
+        //! \name SmileSection interface
+        //@{
+        Real minStrike() const override;
+        Real maxStrike() const override;
+        Real atmLevel() const override;
+        //@}
+        Real varianceImpl(Rate strike) const override;
+        Volatility volatilityImpl(Rate strike) const override;
+        //! \name Inspectors
+        //@{
+        Real alpha() const;
+        Real beta() const;
+        Real nu() const;
+        Real rho() const;
+        Real rmsError() const;
+        Real maxError() const;
+        EndCriteria::Type endCriteria() const;
+        //@}
+
+      protected:
+
+        //! Creates the mutable SABRInterpolation
+        void createInterpolation() const;
+        mutable ext::shared_ptr<NoArbSabrInterpolation> noArbSabrInterpolation_;
+
+        //! Market data
+        const Handle<Quote> forward_;
+        const Handle<Quote> atmVolatility_;
+        std::vector<Handle<Quote> > volHandles_;
+        mutable std::vector<Rate> strikes_;
+        //! Only strikes corresponding to valid market data
+        mutable std::vector<Rate> actualStrikes_;
+        bool hasFloatingStrikes_;
+
+        mutable Real forwardValue_;
+        mutable std::vector<Volatility> vols_;
+        //! Sabr parameters
+        Real alpha_, beta_, nu_, rho_;
+        //! Sabr interpolation settings
+        bool isAlphaFixed_, isBetaFixed_, isNuFixed_, isRhoFixed_;
+        bool vegaWeighted_;
+        const ext::shared_ptr<EndCriteria> endCriteria_;
+        const ext::shared_ptr<OptimizationMethod> method_;
+    };
+
+    inline void NoArbSabrInterpolatedSmileSection::update() {
+        LazyObject::update();
+        SmileSection::update();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::volatilityImpl(Rate strike) const {
+        calculate();
+        return (*noArbSabrInterpolation_)(strike, true);
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::alpha() const {
+        calculate();
+        return noArbSabrInterpolation_->alpha();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::beta() const {
+        calculate();
+        return noArbSabrInterpolation_->beta();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::nu() const {
+        calculate();
+        return noArbSabrInterpolation_->nu();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::rho() const {
+        calculate();
+        return noArbSabrInterpolation_->rho();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::rmsError() const {
+        calculate();
+        return noArbSabrInterpolation_->rmsError();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::maxError() const {
+        calculate();
+        return noArbSabrInterpolation_->maxError();
+    }
+
+    inline EndCriteria::Type NoArbSabrInterpolatedSmileSection::endCriteria() const {
+        calculate();
+        return noArbSabrInterpolation_->endCriteria();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::minStrike() const {
+        calculate();
+        return actualStrikes_.front();
+
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::maxStrike() const {
+        calculate();
+        return actualStrikes_.back();
+    }
+
+    inline Real NoArbSabrInterpolatedSmileSection::atmLevel() const {
+        calculate();
+        return forwardValue_;
+    }
+
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="11">
+    <source>noarbsabrinterpolation.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file noarbsabrinterpolation.hpp
+    \brief noabr sabr interpolation between discrete points
+*/
+
+#ifndef quantlib_noarbsabr_interpolation_hpp
+#define quantlib_noarbsabr_interpolation_hpp
+
+#include <ql/experimental/volatility/noarbsabrsmilesection.hpp>
+#include <ql/math/interpolations/sabrinterpolation.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+namespace detail {
+
+// we can directly use the smile section as the wrapper
+typedef NoArbSabrSmileSection NoArbSabrWrapper;
+
+struct NoArbSabrSpecs {
+    Size dimension() { return 4; }
+    Real eps() { return 0.000001; }
+    void defaultValues(std::vector<Real> &params,
+                       std::vector<bool> &paramIsFixed, const Real &forward,
+                       const Real expiryTime, const std::vector<Real> &addParams) {
+        SABRSpecs().defaultValues(params, paramIsFixed, forward, expiryTime, addParams);
+        // check if alpha / beta is admissable, otherwise adjust
+        // if possible (i.e. not fixed, otherwise an exception will
+        // be thrown from the model constructor anyway)
+        Real sigmaI = params[0] * std::pow(forward, params[1] - 1.0);
+        if (sigmaI < detail::NoArbSabrModel::sigmaI_min) {
+            if (!paramIsFixed[0])
+                params[0] = detail::NoArbSabrModel::sigmaI_min * (1.0 + eps()) /
+                            std::pow(forward, params[1] - 1.0);
+            else {
+                if (!paramIsFixed[1])
+                    params[1] = 1.0 +
+                                std::log(detail::NoArbSabrModel::sigmaI_min *
+                                         (1.0 + eps()) / params[0]) /
+                                    std::log(forward);
+            }
+        }
+        if (sigmaI > detail::NoArbSabrModel::sigmaI_max) {
+            if (!paramIsFixed[0])
+                params[0] = detail::NoArbSabrModel::sigmaI_max * (1.0 - eps()) /
+                            std::pow(forward, params[1] - 1.0);
+            else {
+                if (!paramIsFixed[1])
+                    params[1] = 1.0 +
+                                std::log(detail::NoArbSabrModel::sigmaI_max *
+                                         (1.0 - eps()) / params[0]) /
+                                    std::log(forward);
+            }
+        }
+    }
+    void guess(Array &values, const std::vector<bool> &paramIsFixed,
+               const Real &forward, const Real expiryTime,
+               const std::vector<Real> &r, const std::vector<Real> &) {
+        Size j = 0;
+        if (!paramIsFixed[1])
+            values[1] = detail::NoArbSabrModel::beta_min +
+                        (detail::NoArbSabrModel::beta_max -
+                         detail::NoArbSabrModel::beta_min) *
+                            r[j++];
+        if (!paramIsFixed[0]) {
+            Real sigmaI = detail::NoArbSabrModel::sigmaI_min +
+                          (detail::NoArbSabrModel::sigmaI_max -
+                           detail::NoArbSabrModel::sigmaI_min) *
+                              r[j++];
+            sigmaI *= (1.0 - eps());
+            sigmaI += eps() / 2.0;
+            values[0] = sigmaI / std::pow(forward, values[1] - 1.0);
+        }
+        if (!paramIsFixed[2])
+            values[2] = detail::NoArbSabrModel::nu_min +
+                        (detail::NoArbSabrModel::nu_max -
+                         detail::NoArbSabrModel::nu_min) *
+                            r[j++];
+        if (!paramIsFixed[3])
+            values[3] = detail::NoArbSabrModel::rho_min +
+                        (detail::NoArbSabrModel::rho_max -
+                         detail::NoArbSabrModel::rho_min) *
+                            r[j++];
+    }
+    Array inverse(const Array &y, const std::vector<bool> &paramIsFixed,
+                  const std::vector<Real> &params, const Real forward) {
+        Array x(4);
+        x[1] = std::tan((y[1] - detail::NoArbSabrModel::beta_min) /
+                            (detail::NoArbSabrModel::beta_max -
+                             detail::NoArbSabrModel::beta_min) *
+                            M_PI +
+                        M_PI / 2.0);
+        x[0] = std::tan((y[0] * std::pow(forward, y[1] - 1.0) -
+                         detail::NoArbSabrModel::sigmaI_min) /
+                            (detail::NoArbSabrModel::sigmaI_max -
+                             detail::NoArbSabrModel::sigmaI_min) *
+                            M_PI -
+                        M_PI / 2.0);
+        x[2] = std::tan((y[2] - detail::NoArbSabrModel::nu_min) /
+                            (detail::NoArbSabrModel::nu_max -
+                             detail::NoArbSabrModel::nu_min) *
+                            M_PI +
+                        M_PI / 2.0);
+        x[3] = std::tan((y[3] - detail::NoArbSabrModel::rho_min) /
+                            (detail::NoArbSabrModel::rho_max -
+                             detail::NoArbSabrModel::rho_min) *
+                            M_PI +
+                        M_PI / 2.0);
+        return x;
+    }
+    Array direct(const Array &x, const std::vector<bool> &paramIsFixed,
+                 const std::vector<Real> &params, const Real forward) {
+        Array y(4);
+        if (paramIsFixed[1])
+            y[1] = params[1];
+        else
+            y[1] = detail::NoArbSabrModel::beta_min +
+                   (detail::NoArbSabrModel::beta_max -
+                    detail::NoArbSabrModel::beta_min) *
+                       (std::atan(x[1]) + M_PI / 2.0) / M_PI;
+        // we compute alpha from sigmaI using beta
+        // if alpha is fixed we have to check if beta is admissable
+        // and adjust if need be
+        if (paramIsFixed[0]) {
+            y[0] = params[0];
+            Real sigmaI = y[0] * std::pow(forward, y[1] - 1.0);
+            if (sigmaI < detail::NoArbSabrModel::sigmaI_min) {
+                y[1] = (1.0 +
+                        std::log(detail::NoArbSabrModel::sigmaI_min *
+                                 (1.0 + eps()) / y[0]) /
+                            std::log(forward));
+            }
+            if (sigmaI > detail::NoArbSabrModel::sigmaI_max) {
+                y[1] = (1.0 +
+                        std::log(detail::NoArbSabrModel::sigmaI_max *
+                                 (1.0 - eps()) / y[0]) /
+                            std::log(forward));
+            }
+        } else {
+            Real sigmaI = detail::NoArbSabrModel::sigmaI_min +
+                          (detail::NoArbSabrModel::sigmaI_max -
+                           detail::NoArbSabrModel::sigmaI_min) *
+                              (std::atan(x[0]) + M_PI / 2.0) / M_PI;
+            y[0] = sigmaI / std::pow(forward, y[1] - 1.0);
+        }
+        if (paramIsFixed[2])
+            y[2] = params[2];
+        else
+            y[2] = detail::NoArbSabrModel::nu_min +
+                   (detail::NoArbSabrModel::nu_max -
+                    detail::NoArbSabrModel::nu_min) *
+                       (std::atan(x[2]) + M_PI / 2.0) / M_PI;
+        if (paramIsFixed[3])
+            y[3] = params[3];
+        else
+            y[3] = detail::NoArbSabrModel::rho_min +
+                   (detail::NoArbSabrModel::rho_max -
+                    detail::NoArbSabrModel::rho_min) *
+                       (std::atan(x[3]) + M_PI / 2.0) / M_PI;
+        return y;
+    }
+    Real weight(const Real strike, const Real forward, const Real stdDev,
+                const std::vector<Real> &addParams) {
+        return blackFormulaStdDevDerivative(strike, forward, stdDev, 1.0);
+    }
+    typedef NoArbSabrWrapper type;
+    ext::shared_ptr<type> instance(const Time t, const Real &forward,
+                                     const std::vector<Real> &params,
+                                     const std::vector<Real> &) {
+        return ext::make_shared<type>(t, forward, params);
+    }
+};
+}
+
+//! no arbitrage sabr smile interpolation between discrete volatility points.
+class NoArbSabrInterpolation : public Interpolation {
+  public:
+    template <class I1, class I2>
+    NoArbSabrInterpolation(
+        const I1 &xBegin, // x = strikes
+        const I1 &xEnd,
+        const I2 &yBegin, // y = volatilities
+        Time t,           // option expiry
+        const Real &forward, Real alpha, Real beta, Real nu, Real rho,
+        bool alphaIsFixed, bool betaIsFixed, bool nuIsFixed, bool rhoIsFixed,
+        bool vegaWeighted = true,
+        const ext::shared_ptr<EndCriteria> &endCriteria =
+            ext::shared_ptr<EndCriteria>(),
+        const ext::shared_ptr<OptimizationMethod> &optMethod =
+            ext::shared_ptr<OptimizationMethod>(),
+        const Real errorAccept = 0.0020, const bool useMaxError = false,
+        const Size maxGuesses = 50, const Real shift = 0.0) {
+
+        QL_REQUIRE(shift==0.0,"NoArbSabrInterpolation for non zero shift not implemented");
+        impl_ = ext::shared_ptr<Interpolation::Impl>(
+            new detail::XABRInterpolationImpl<I1, I2, detail::NoArbSabrSpecs>(
+                xBegin, xEnd, yBegin, t, forward,
+                {alpha, beta, nu, rho},
+                {alphaIsFixed, betaIsFixed, nuIsFixed, rhoIsFixed},
+                vegaWeighted, endCriteria, optMethod, errorAccept, useMaxError,
+                maxGuesses));
+    }
+    Real expiry() const { return coeffs().t_; }
+    Real forward() const { return coeffs().forward_; }
+    Real alpha() const { return coeffs().params_[0]; }
+    Real beta() const { return coeffs().params_[1]; }
+    Real nu() const { return coeffs().params_[2]; }
+    Real rho() const { return coeffs().params_[3]; }
+    Real rmsError() const { return coeffs().error_; }
+    Real maxError() const { return coeffs().maxError_; }
+    const std::vector<Real> &interpolationWeights() const {
+        return coeffs().weights_;
+    }
+    EndCriteria::Type endCriteria() { return coeffs().XABREndCriteria_; }
+
+  private:
+    const detail::XABRCoeffHolder<detail::NoArbSabrSpecs>& coeffs() const {
+        return *dynamic_cast<detail::XABRCoeffHolder<detail::NoArbSabrSpecs>*>(impl_.get());
+    }
+};
+
+//! no arbtrage sabr interpolation factory and traits
+class NoArbSabr {
+  public:
+    NoArbSabr(Time t,
+              Real forward,
+              Real alpha,
+              Real beta,
+              Real nu,
+              Real rho,
+              bool alphaIsFixed,
+              bool betaIsFixed,
+              bool nuIsFixed,
+              bool rhoIsFixed,
+              bool vegaWeighted = false,
+              ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+              ext::shared_ptr<OptimizationMethod> optMethod = ext::shared_ptr<OptimizationMethod>(),
+              const Real errorAccept = 0.0020,
+              const bool useMaxError = false,
+              const Size maxGuesses = 50)
+    : t_(t), forward_(forward), alpha_(alpha), beta_(beta), nu_(nu), rho_(rho),
+      alphaIsFixed_(alphaIsFixed), betaIsFixed_(betaIsFixed), nuIsFixed_(nuIsFixed),
+      rhoIsFixed_(rhoIsFixed), vegaWeighted_(vegaWeighted), endCriteria_(std::move(endCriteria)),
+      optMethod_(std::move(optMethod)), errorAccept_(errorAccept), useMaxError_(useMaxError),
+      maxGuesses_(maxGuesses) {}
+    template <class I1, class I2>
+    Interpolation interpolate(const I1 &xBegin, const I1 &xEnd,
+                              const I2 &yBegin) const {
+        return NoArbSabrInterpolation(
+            xBegin, xEnd, yBegin, t_, forward_, alpha_, beta_, nu_, rho_,
+            alphaIsFixed_, betaIsFixed_, nuIsFixed_, rhoIsFixed_, vegaWeighted_,
+            endCriteria_, optMethod_, errorAccept_, useMaxError_, maxGuesses_);
+    }
+    static const bool global = true;
+
+  private:
+    Time t_;
+    Real forward_;
+    Real alpha_, beta_, nu_, rho_;
+    bool alphaIsFixed_, betaIsFixed_, nuIsFixed_, rhoIsFixed_;
+    bool vegaWeighted_;
+    const ext::shared_ptr<EndCriteria> endCriteria_;
+    const ext::shared_ptr<OptimizationMethod> optMethod_;
+    const Real errorAccept_;
+    const bool useMaxError_;
+    const Size maxGuesses_;
+};
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="12">
+    <source>noarbsabrsmilesection.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file noarbsabrsmilesection.hpp
+    \brief no arbitrage sabr smile section
+*/
+
+#ifndef quantlib_noarbsabr_smile_section_hpp
+#define quantlib_noarbsabr_smile_section_hpp
+
+#include <ql/termstructures/volatility/smilesection.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <ql/experimental/volatility/noarbsabr.hpp>
+#include <vector>
+
+namespace QuantLib {
+
+class NoArbSabrSmileSection : public SmileSection {
+
+  public:
+    NoArbSabrSmileSection(Time timeToExpiry,
+                          Rate forward,
+                          std::vector<Real> sabrParameters,
+                          Real shift = 0.0,
+                          VolatilityType volatilityType = VolatilityType::ShiftedLognormal);
+    NoArbSabrSmileSection(const Date& d,
+                          Rate forward,
+                          std::vector<Real> sabrParameters,
+                          const DayCounter& dc = Actual365Fixed(),
+                          Real shift = 0.0,
+                          VolatilityType volatilityType = VolatilityType::ShiftedLognormal);
+    Real minStrike() const override { return 0.0; }
+    Real maxStrike() const override { return QL_MAX_REAL; }
+    Real atmLevel() const override { return forward_; }
+    Real
+    optionPrice(Rate strike, Option::Type type = Option::Call, Real discount = 1.0) const override;
+    Real digitalOptionPrice(Rate strike,
+                            Option::Type type = Option::Call,
+                            Real discount = 1.0,
+                            Real gap = 1.0e-5) const override;
+    Real density(Rate strike, Real discount = 1.0, Real gap = 1.0E-4) const override;
+
+    ext::shared_ptr<NoArbSabrModel> model() { return model_; }
+
+  protected:
+    Volatility volatilityImpl(Rate strike) const override;
+
+  private:
+    void init();
+    ext::shared_ptr<NoArbSabrModel> model_;
+    Rate forward_;
+    std::vector<Real> params_;
+    Real shift_;
+};
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="13">
+    <source>noarbsabrswaptionvolatilitycube.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+ Copyright (C) 2023 Ignacio Anguita
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file noarbsabrswaptionvolatilitycube.hpp
+    \brief Swaption volatility cube, fit-early-interpolate-later approach
+           using the No Arbitrage Sabr model (Doust)
+*/
+
+#ifndef quantlib_noarb_sabr_swaption_volatility_cube_hpp
+#define quantlib_noarb_sabr_swaption_volatility_cube_hpp
+
+#include <ql/termstructures/volatility/swaption/sabrswaptionvolatilitycube.hpp>
+#include <ql/experimental/volatility/noarbsabrinterpolation.hpp>
+
+namespace QuantLib {
+
+    struct SwaptionVolCubeNoArbSabrModel {
+        typedef NoArbSabrInterpolation Interpolation;
+        typedef NoArbSabrSmileSection SmileSection;
+    };
+
+    //! no-arbitrage SABR volatility cube for swaptions
+    typedef XabrSwaptionVolatilityCube<SwaptionVolCubeNoArbSabrModel> NoArbSabrSwaptionVolatilityCube;
+
+}
+
+#endif
+
+]]></document_content>
+  </document>
+  <document index="14">
+    <source>sabrvolsurface.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file sabrvolsurface.hpp
+    \brief SABR volatility (smile) surface
+*/
+
+#ifndef quantlib_sabr_vol_surface_hpp
+#define quantlib_sabr_vol_surface_hpp
+
+#include <ql/experimental/volatility/interestratevolsurface.hpp>
+#include <ql/experimental/volatility/blackatmvolcurve.hpp>
+#include <ql/quote.hpp>
+#include <ql/termstructures/volatility/sabrinterpolatedsmilesection.hpp>
+#include <array>
+
+namespace QuantLib {
+
+
+    //! SABR volatility (smile) surface
+    /*! blah blah
+    */
+    class SabrVolSurface : public InterestRateVolSurface {
+      public:
+        SabrVolSurface(const ext::shared_ptr<InterestRateIndex>&,
+                       Handle<BlackAtmVolCurve>,
+                       const std::vector<Period>& optionTenors,
+                       std::vector<Spread> atmRateSpreads,
+                       std::vector<std::vector<Handle<Quote> > > volSpreads);
+        //@}
+        // All virtual methods of base classes must be forwarded
+        //! \name TermStructure interface
+        //@{
+        DayCounter dayCounter() const override;
+        Date maxDate() const override;
+        Time maxTime() const override;
+        const Date& referenceDate() const override;
+        Calendar calendar() const override;
+        Natural settlementDays() const override;
+        //@}
+        //! \name VolatilityTermStructure interface
+        //@{
+        Real minStrike() const override;
+        Real maxStrike() const override;
+        //@}
+        const Handle<BlackAtmVolCurve>& atmCurve() const;
+        //! \name Visitability
+        //@{
+        void accept(AcyclicVisitor&) override;
+        //@}
+        std::vector<Volatility> volatilitySpreads(const Period&) const;
+        std::vector<Volatility> volatilitySpreads(const Date&) const;
+      protected:
+        std::array<Real, 4> sabrGuesses(const Date&) const;
+      public:
+        //@}
+        //! \name BlackVolSurface interface
+        //@{
+        ext::shared_ptr<SmileSection> smileSectionImpl(Time) const override;
+        //@}
+      protected:
+        //@}
+        //! \name LazyObject interface
+        //@{
+        void performCalculations () const;
+        void update() override;
+        //@}
+      private:
+        void registerWithMarketData();
+        void checkInputs() const;
+        void updateSabrGuesses(const Date& d, std::array<Real, 4> newGuesses) const;
+        Handle<BlackAtmVolCurve> atmCurve_;
+        std::vector<Period> optionTenors_;
+        std::vector<Time> optionTimes_;
+        std::vector<Date> optionDates_;
+        std::vector<Spread> atmRateSpreads_;
+        std::vector<std::vector<Handle<Quote> > > volSpreads_;
+        //
+        bool isAlphaFixed_;
+        bool isBetaFixed_;
+        bool isNuFixed_;
+        bool isRhoFixed_;
+        bool vegaWeighted_;
+        //
+        mutable std::vector<std::array<Real,4>> sabrGuesses_;
+    };
+
+    // inline
+
+    inline DayCounter SabrVolSurface::dayCounter() const {
+        return atmCurve_->dayCounter();
+    }
+
+    inline Date SabrVolSurface::maxDate() const {
+        return atmCurve_->maxDate();
+    }
+
+    inline Time SabrVolSurface::maxTime() const {
+        return atmCurve_->maxTime();
+    }
+
+    inline const Date& SabrVolSurface::referenceDate() const {
+        return atmCurve_->referenceDate();
+    }
+
+    inline Calendar SabrVolSurface::calendar() const {
+        return atmCurve_->calendar();
+    }
+
+    inline Natural SabrVolSurface::settlementDays() const {
+        return atmCurve_->settlementDays();
+    }
+
+    inline Real SabrVolSurface::minStrike() const {
+        return QL_MIN_REAL;
+    }
+
+    inline Real SabrVolSurface::maxStrike() const {
+        return QL_MAX_REAL;
+    }
+
+    inline const Handle<BlackAtmVolCurve>& SabrVolSurface::atmCurve() const {
+        return atmCurve_;
+    }
+
+    inline std::vector<Volatility>
+    SabrVolSurface::volatilitySpreads(const Period& p) const {
+        return volatilitySpreads(optionDateFromTenor(p));
+    }
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="15">
+    <source>sabrvoltermstructure.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2017 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file sabrvoltermstructure.hpp
+    \brief implied vol surface backed by a SABR model
+*/
+
+#ifndef quantlib_sabr_vol_termstructure_hpp
+#define quantlib_sabr_vol_termstructure_hpp
+
+
+#include <ql/termstructures/volatility/sabr.hpp>
+#include <ql/termstructures/volatility/equityfx/blackvoltermstructure.hpp>
+#include <ql/time/calendars/nullcalendar.hpp>
+
+namespace QuantLib {
+    class SABRVolTermStructure : public BlackVolatilityTermStructure {
+      public:
+        SABRVolTermStructure(Real alpha,
+                             Real beta,
+                             Real gamma,
+                             Real rho,
+                             Real s0,
+                             Real r,
+                             const Date& referenceDate,
+                             const DayCounter& dc)
+        : BlackVolatilityTermStructure(referenceDate, NullCalendar(), Following, dc), alpha_(alpha),
+          beta_(beta), gamma_(gamma), rho_(rho), s0_(s0), r_(r) {}
+
+        Date maxDate() const override { return Date::maxDate(); }
+        Rate minStrike() const override { return 0.0; }
+        Rate maxStrike() const override { return QL_MAX_REAL; }
+
+      protected:
+        Volatility blackVolImpl(Time t, Real strike) const override {
+            const Real fwd = s0_*std::exp(r_*t);
+            return sabrVolatility(strike, fwd, t, alpha_, beta_, gamma_, rho_);
+        }
+
+      private:
+        Real alpha_, beta_, gamma_, rho_, s0_, r_;
+    };
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="16">
+    <source>sviinterpolatedsmilesection.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file sviinterpolatedsmilesection.hpp
+    \brief svi interpolating smile section
+*/
+
+#ifndef quantlib_svi_interpolated_smile_section_hpp
+#define quantlib_svi_interpolated_smile_section_hpp
+
+#include <ql/handle.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/termstructures/volatility/smilesection.hpp>
+#include <ql/experimental/volatility/sviinterpolation.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+
+namespace QuantLib {
+
+class Quote;
+class SviInterpolatedSmileSection : public SmileSection, public LazyObject {
+  public:
+    //! \name Constructors
+    //@{
+    //! all market data are quotes
+    SviInterpolatedSmileSection(
+        const Date& optionDate,
+        Handle<Quote> forward,
+        const std::vector<Rate>& strikes,
+        bool hasFloatingStrikes,
+        Handle<Quote> atmVolatility,
+        const std::vector<Handle<Quote> >& volHandles,
+        Real a,
+        Real b,
+        Real sigma,
+        Real rho,
+        Real m,
+        bool aIsFixed,
+        bool bIsFixed,
+        bool sigmaIsFixed,
+        bool rhoIsFixed,
+        bool mIsFixed,
+        bool vegaWeighted = true,
+        ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+        ext::shared_ptr<OptimizationMethod> method = ext::shared_ptr<OptimizationMethod>(),
+        const DayCounter& dc = Actual365Fixed());
+    //! no quotes
+    SviInterpolatedSmileSection(
+        const Date& optionDate,
+        const Rate& forward,
+        const std::vector<Rate>& strikes,
+        bool hasFloatingStrikes,
+        const Volatility& atmVolatility,
+        const std::vector<Volatility>& vols,
+        Real a,
+        Real b,
+        Real sigma,
+        Real rho,
+        Real m,
+        bool isAFixed,
+        bool isBFixed,
+        bool isSigmaFixed,
+        bool isRhoFixed,
+        bool isMFixed,
+        bool vegaWeighted = true,
+        ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+        ext::shared_ptr<OptimizationMethod> method = ext::shared_ptr<OptimizationMethod>(),
+        const DayCounter& dc = Actual365Fixed());
+    //@}
+    //! \name LazyObject interface
+    //@{
+    void performCalculations() const override;
+    void update() override;
+    //@}
+    //! \name SmileSection interface
+    //@{
+    Real minStrike() const override;
+    Real maxStrike() const override;
+    Real atmLevel() const override;
+    //@}
+    Real varianceImpl(Rate strike) const override;
+    Volatility volatilityImpl(Rate strike) const override;
+    //! \name Inspectors
+    //@{
+    Real a() const;
+    Real b() const;
+    Real sigma() const;
+    Real rho() const;
+    Real m() const;
+    Real rmsError() const;
+    Real maxError() const;
+    EndCriteria::Type endCriteria() const;
+    //@}
+
+  protected:
+    //! Creates the mutable SviInterpolation
+    void createInterpolation() const;
+    mutable ext::shared_ptr<SviInterpolation> sviInterpolation_;
+
+    //! Market data
+    const Handle<Quote> forward_;
+    const Handle<Quote> atmVolatility_;
+    std::vector<Handle<Quote> > volHandles_;
+    mutable std::vector<Rate> strikes_;
+    //! Only strikes corresponding to valid market data
+    mutable std::vector<Rate> actualStrikes_;
+    bool hasFloatingStrikes_;
+
+    mutable Real forwardValue_;
+    mutable std::vector<Volatility> vols_;
+    //! Svi parameters
+    Real a_, b_, sigma_, rho_, m_;
+    //! Svi interpolation settings
+    bool isAFixed_, isBFixed_, isSigmaFixed_, isRhoFixed_, isMFixed_;
+    bool vegaWeighted_;
+    const ext::shared_ptr<EndCriteria> endCriteria_;
+    const ext::shared_ptr<OptimizationMethod> method_;
+};
+
+inline void SviInterpolatedSmileSection::update() {
+    LazyObject::update();
+    SmileSection::update();
+}
+
+inline Real SviInterpolatedSmileSection::volatilityImpl(Rate strike) const {
+    calculate();
+    return (*sviInterpolation_)(strike, true);
+}
+
+inline Real SviInterpolatedSmileSection::a() const {
+    calculate();
+    return sviInterpolation_->a();
+}
+
+inline Real SviInterpolatedSmileSection::b() const {
+    calculate();
+    return sviInterpolation_->b();
+}
+
+inline Real SviInterpolatedSmileSection::sigma() const {
+    calculate();
+    return sviInterpolation_->sigma();
+}
+
+inline Real SviInterpolatedSmileSection::rho() const {
+    calculate();
+    return sviInterpolation_->rho();
+}
+
+inline Real SviInterpolatedSmileSection::m() const {
+    calculate();
+    return sviInterpolation_->m();
+}
+
+inline Real SviInterpolatedSmileSection::rmsError() const {
+    calculate();
+    return sviInterpolation_->rmsError();
+}
+
+inline Real SviInterpolatedSmileSection::maxError() const {
+    calculate();
+    return sviInterpolation_->maxError();
+}
+
+inline EndCriteria::Type SviInterpolatedSmileSection::endCriteria() const {
+    calculate();
+    return sviInterpolation_->endCriteria();
+}
+
+inline Real SviInterpolatedSmileSection::minStrike() const {
+    calculate();
+    return actualStrikes_.front();
+}
+
+inline Real SviInterpolatedSmileSection::maxStrike() const {
+    calculate();
+    return actualStrikes_.back();
+}
+
+inline Real SviInterpolatedSmileSection::atmLevel() const {
+    calculate();
+    return forwardValue_;
+}
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="17">
+    <source>sviinterpolation.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file sviinterpolation.hpp
+    \brief Svi interpolation interpolation between discrete points
+*/
+
+#ifndef quantlib_svi_interpolation_hpp
+#define quantlib_svi_interpolation_hpp
+
+#include <ql/experimental/volatility/svismilesection.hpp>
+#include <ql/math/interpolations/xabrinterpolation.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+namespace detail {
+
+inline void checkSviParameters(const Real a, const Real b, const Real sigma,
+                               const Real rho, const Real m, const Time tte) {
+    QL_REQUIRE(b >= 0.0, "b (" << b << ") must be non negative");
+    QL_REQUIRE(std::fabs(rho) < 1.0, "rho (" << rho << ") must be in (-1,1)");
+    QL_REQUIRE(sigma > 0.0, "sigma (" << sigma << ") must be positive");
+    QL_REQUIRE(a + b * sigma * std::sqrt(1.0 - rho * rho) >= 0.0,
+               "a + b sigma sqrt(1-rho^2) (a=" << a << ", b=" << b << ", sigma="
+                                               << sigma << ", rho=" << rho
+                                               << ") must be non negative");
+    QL_REQUIRE(b * (1.0 + std::fabs(rho)) <= 4.0,
+               "b(1+|rho|) must be less than or equal to 4, (b=" << b << ", rho=" << rho << ")");
+
+}
+
+inline Real sviTotalVariance(const Real a, const Real b, const Real sigma,
+                             const Real rho, const Real m, const Real k) {
+    return a +
+           b * (rho * (k - m) + std::sqrt((k - m) * (k - m) + sigma * sigma));
+}
+
+typedef SviSmileSection SviWrapper;
+
+struct SviSpecs {
+    Size dimension() { return 5; }
+    void defaultValues(std::vector<Real> &params,
+                       std::vector<bool> &paramIsFixed, const Real &forward,
+                       const Real expiryTime,
+                       const std::vector<Real> &addParams) {
+        if (params[2] == Null<Real>())
+            params[2] = 0.1;
+        if (params[3] == Null<Real>())
+            params[3] = -0.4;
+        if (params[4] == Null<Real>())
+            params[4] = 0.0;
+        if (params[1] == Null<Real>())
+            params[1] = 2.0 / (1.0 + std::fabs(params[3]));
+        if (params[0] == Null<Real>()) {
+            params[0] = std::max(
+                0.20 * 0.20 * expiryTime -
+                    params[1] * (params[3] * (-params[4]) +
+                                 std::sqrt((-params[4]) * (-params[4]) +
+                                           params[2] * params[2])),
+                -params[1] * params[2] *
+                std::sqrt(1.0 - params[3] * params[3]) + eps1());
+        }
+    }
+    void guess(Array &values, const std::vector<bool> &paramIsFixed,
+               const Real &forward, const Real expiryTime,
+               const std::vector<Real> &r, const std::vector<Real> &addParams) {
+        Size j = 0;
+        if (!paramIsFixed[2])
+            values[2] = r[j++] + eps1();
+        if (!paramIsFixed[3])
+            values[3] = (2.0 * r[j++] - 1.0) * eps2();
+        if (!paramIsFixed[4])
+            values[4] = (2.0 * r[j++] - 1.0);
+        if (!paramIsFixed[1])
+            values[1] = r[j++] * 4.0 / (1.0 + std::fabs(values[3])) * eps2();
+        if (!paramIsFixed[0])
+            values[0] = r[j++] * expiryTime -
+                        eps2() * (values[1] * values[2] *
+                                  std::sqrt(1.0 - values[3] * values[3]));
+    }
+    Array inverse(const Array &y, const std::vector<bool> &,
+                  const std::vector<Real> &, const Real) {
+        Array x(5);
+        x[2] = std::sqrt(y[2] - eps1());
+        x[3] = std::asin(y[3] / eps2());
+        x[4] = y[4];
+        x[1] = std::tan(y[1] / 4.0 * (1.0 + std::fabs(y[3])) / eps2() * M_PI -
+                        M_PI / 2.0);
+        x[0] = std::sqrt(y[0] - eps1() +
+                         y[1] * y[2] * std::sqrt(1.0 - y[3] * y[3]));
+        return x;
+    }
+    Real eps1() { return 0.000001; }
+    Real eps2() { return 0.999999; }
+    Array direct(const Array &x, const std::vector<bool> &paramIsFixed,
+                 const std::vector<Real> &params, const Real forward) {
+        Array y(5);
+        y[2] = x[2] * x[2] + eps1();
+        y[3] = std::sin(x[3]) * eps2();
+        y[4] = x[4];
+        if (paramIsFixed[1])
+            y[1] = params[1];
+        else
+            y[1] = (std::atan(x[1]) + M_PI / 2.0) / M_PI * eps2() * 4.0 /
+                   (1.0 + std::fabs(y[3]));
+        if (paramIsFixed[0])
+            y[0] = params[0];
+        else
+            y[0] = eps1() + x[0] * x[0] -
+                   y[1] * y[2] * std::sqrt(1.0 - y[3] * y[3]);
+        return y;
+    }
+    Real weight(const Real strike, const Real forward, const Real stdDev,
+                const std::vector<Real> &addParams) {
+        return blackFormulaStdDevDerivative(strike, forward, stdDev, 1.0);
+    }
+    typedef SviWrapper type;
+    ext::shared_ptr<type> instance(const Time t, const Real &forward,
+                                     const std::vector<Real> &params,
+                                     const std::vector<Real> &addParams) {
+        return ext::make_shared<type>(t, forward, params);
+    }
+};
+}
+
+//! %Svi smile interpolation between discrete volatility points.
+class SviInterpolation : public Interpolation {
+  public:
+    template <class I1, class I2>
+    SviInterpolation(const I1 &xBegin, // x = strikes
+                     const I1 &xEnd,
+                     const I2 &yBegin, // y = volatilities
+                     Time t,           // option expiry
+                     const Real &forward, Real a, Real b, Real sigma, Real rho,
+                     Real m, bool aIsFixed, bool bIsFixed, bool sigmaIsFixed,
+                     bool rhoIsFixed, bool mIsFixed, bool vegaWeighted = true,
+                     const ext::shared_ptr<EndCriteria> &endCriteria =
+                         ext::shared_ptr<EndCriteria>(),
+                     const ext::shared_ptr<OptimizationMethod> &optMethod =
+                         ext::shared_ptr<OptimizationMethod>(),
+                     const Real errorAccept = 0.0020,
+                     const bool useMaxError = false,
+                     const Size maxGuesses = 50) {
+
+        impl_ = ext::shared_ptr<Interpolation::Impl>(
+            new detail::XABRInterpolationImpl<I1, I2, detail::SviSpecs>(
+                xBegin, xEnd, yBegin, t, forward,
+                {a, b, sigma, rho, m},
+                {aIsFixed, bIsFixed, sigmaIsFixed, rhoIsFixed, mIsFixed},
+                vegaWeighted, endCriteria, optMethod, errorAccept, useMaxError,
+                maxGuesses));
+    }
+    Real expiry() const { return coeffs().t_; }
+    Real forward() const { return coeffs().forward_; }
+    Real a() const { return coeffs().params_[0]; }
+    Real b() const { return coeffs().params_[1]; }
+    Real sigma() const { return coeffs().params_[2]; }
+    Real rho() const { return coeffs().params_[3]; }
+    Real m() const { return coeffs().params_[4]; }
+    Real rmsError() const { return coeffs().error_; }
+    Real maxError() const { return coeffs().maxError_; }
+    const std::vector<Real> &interpolationWeights() const {
+        return coeffs().weights_;
+    }
+    EndCriteria::Type endCriteria() { return coeffs().XABREndCriteria_; }
+
+  private:
+    const detail::XABRCoeffHolder<detail::SviSpecs>& coeffs() const {
+        return *dynamic_cast<detail::XABRCoeffHolder<detail::SviSpecs>*>(impl_.get());
+    }
+};
+
+//! %Svi interpolation factory and traits
+class Svi {
+  public:
+    Svi(Time t,
+        Real forward,
+        Real a,
+        Real b,
+        Real sigma,
+        Real rho,
+        Real m,
+        bool aIsFixed,
+        bool bIsFixed,
+        bool sigmaIsFixed,
+        bool rhoIsFixed,
+        bool mIsFixed,
+        bool vegaWeighted = false,
+        ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+        ext::shared_ptr<OptimizationMethod> optMethod = ext::shared_ptr<OptimizationMethod>(),
+        const Real errorAccept = 0.0020,
+        const bool useMaxError = false,
+        const Size maxGuesses = 50)
+    : t_(t), forward_(forward), a_(a), b_(b), sigma_(sigma), rho_(rho), m_(m), aIsFixed_(aIsFixed),
+      bIsFixed_(bIsFixed), sigmaIsFixed_(sigmaIsFixed), rhoIsFixed_(rhoIsFixed),
+      mIsFixed_(mIsFixed), vegaWeighted_(vegaWeighted), endCriteria_(std::move(endCriteria)),
+      optMethod_(std::move(optMethod)), errorAccept_(errorAccept), useMaxError_(useMaxError),
+      maxGuesses_(maxGuesses) {}
+    template <class I1, class I2>
+    Interpolation interpolate(const I1 &xBegin, const I1 &xEnd,
+                              const I2 &yBegin) const {
+        return SviInterpolation(xBegin, xEnd, yBegin, t_, forward_, a_, b_,
+                                 sigma_, rho_, m_, aIsFixed_, bIsFixed_,
+                                 sigmaIsFixed_, rhoIsFixed_, mIsFixed_,
+                                 vegaWeighted_, endCriteria_, optMethod_,
+                                 errorAccept_, useMaxError_, maxGuesses_);
+    }
+    static const bool global = true;
+
+  private:
+    Time t_;
+    Real forward_;
+    Real a_, b_, sigma_, rho_, m_;
+    bool aIsFixed_, bIsFixed_, sigmaIsFixed_, rhoIsFixed_, mIsFixed_;
+    bool vegaWeighted_;
+    const ext::shared_ptr<EndCriteria> endCriteria_;
+    const ext::shared_ptr<OptimizationMethod> optMethod_;
+    const Real errorAccept_;
+    const bool useMaxError_;
+    const Size maxGuesses_;
+};
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="18">
+    <source>svismilesection.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file svismilesection.hpp
+    \brief svi smile section
+*/
+
+#ifndef quantlib_svi_smile_section_hpp
+#define quantlib_svi_smile_section_hpp
+
+#include <ql/termstructures/volatility/smilesection.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <vector>
+
+namespace QuantLib {
+
+//! Stochastic Volatility Inspired Smile Section
+/*! \test the correctness of the result is tested by checking it
+          against known good values.
+*/
+class SviSmileSection : public SmileSection {
+
+  public:
+    //! \name Constructors
+    //@{
+    /*! @param timeToExpiry Time to expiry
+        @param forward Forward price corresponding to the expiry date
+        @param sviParameters Expects SVI parameters as a vector composed of a, b, sigma, rho, m
+    */
+    SviSmileSection(Time timeToExpiry, Rate forward, std::vector<Real> sviParameters);
+    /*! @param d Date of expiry
+        @param forward Forward price corresponding to the expiry date
+        @param sviParameters Expects SVI parameters as a vector composed of a, b, sigma, rho, m
+        @param dc Day count method used to compute the time to expiry
+    */
+    SviSmileSection(const Date& d,
+                    Rate forward,
+                    std::vector<Real> sviParameters,
+                    const DayCounter& dc = Actual365Fixed());
+    //@}
+    Real minStrike() const override { return 0.0; }
+    Real maxStrike() const override { return QL_MAX_REAL; }
+    Real atmLevel() const override { return forward_; }
+
+  protected:
+    Volatility volatilityImpl(Rate strike) const override;
+
+  private:
+    void init();
+    Rate forward_;
+    std::vector<Real> params_;
+};
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="19">
+    <source>volcube.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2007 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file volcube.hpp
+    \brief Interest rate (optionlet/swaption) volatility cube
+*/
+
+#ifndef quantlib_volatility_cube_h
+#define quantlib_volatility_cube_h
+
+#include <ql/handle.hpp>
+#include <ql/shared_ptr.hpp>
+#include <vector>
+
+namespace QuantLib {
+
+    class Period;
+    class AbcdAtmVolCurve;
+    class InterestRateVolSurface;
+    class InterestRateIndex;
+
+    class VolatilityCube {
+      public:
+        VolatilityCube(std::vector<Handle<InterestRateVolSurface> >,
+                       std::vector<Handle<AbcdAtmVolCurve> >);
+        const Period& minIndexTenor() const;
+        const Period& maxIndexTenor() const;
+        const std::vector<Handle<InterestRateVolSurface> >& surfaces() const;
+        const std::vector<Handle<AbcdAtmVolCurve> >& curves() const;
+      protected:
+        std::vector<Handle<InterestRateVolSurface> > surfaces_;
+        std::vector<Handle<AbcdAtmVolCurve> > curves_;
+    };
+
+    // inline
+
+    inline const std::vector<Handle<InterestRateVolSurface> >&
+    VolatilityCube::surfaces() const {
+        return surfaces_;
+    }
+
+    inline const std::vector<Handle<AbcdAtmVolCurve> >&
+    VolatilityCube::curves() const {
+        return curves_;
+    }
+
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="20">
+    <source>zabr.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file zabr.hpp
+    \brief ZABR functions
+    Reference: Andreasen, Huge: ZABR - Expansions for the masses, Preliminary
+               Version, December 2011, http://ssrn.com/abstract=1980726
+*/
+
+#ifndef quantlib_zabr_hpp
+#define quantlib_zabr_hpp
+
+#include <ql/types.hpp>
+#include <ql/math/statistics/incrementalstatistics.hpp>
+#include <ql/math/interpolations/linearinterpolation.hpp>
+#include <ql/math/interpolations/cubicinterpolation.hpp>
+#include <ql/math/interpolations/bicubicsplineinterpolation.hpp>
+#include <vector>
+
+namespace QuantLib {
+
+class ZabrModel {
+
+  public:
+    ZabrModel(Real expiryTime, Real forward, Real alpha, Real beta, Real nu, Real rho, Real gamma);
+
+    Real localVolatility(Real f) const;
+    std::vector<Real> localVolatility(const std::vector<Real> &f) const;
+
+    Real fdPrice(Real strike) const;
+    std::vector<Real> fdPrice(const std::vector<Real> &strikes) const;
+
+    Real fullFdPrice(Real strike) const;
+
+    Real lognormalVolatility(Real strike) const;
+    std::vector<Real> lognormalVolatility(const std::vector<Real> &strikes) const;
+
+    Real normalVolatility(Real strike) const;
+    std::vector<Real> normalVolatility(const std::vector<Real> &strikes) const;
+
+    Real forward() const { return forward_; }
+    Real expiryTime() const { return expiryTime_; }
+    Real alpha() const { return alpha_; }
+    Real beta() const { return beta_; }
+    Real nu() const { return nu_; }
+    Real rho() const { return rho_; }
+    Real gamma() const { return gamma_; }
+
+  private:
+    const Real expiryTime_, forward_;
+    const Real alpha_, beta_, nu_, rho_,
+        gamma_; // nu_ here is a tranformed version of the input nu !
+
+    Real x(Real strike) const;
+    std::vector<Real> x(const std::vector<Real> &strikes) const;
+
+    Real y(Real strike) const;
+
+    Real F(Real y, Real u) const;
+
+    Real lognormalVolatilityHelper(Real strike, Real x) const;
+    Real normalVolatilityHelper(Real strike, Real x) const;
+    Real localVolatilityHelper(Real f, Real x) const;
+};
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="21">
+    <source>zabrinterpolatedsmilesection.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file zabrinterpolatedsmilesection.hpp
+    \brief zabr interpolating smile section
+*/
+
+#ifndef quantlib_zabr_interpolated_smile_section_hpp
+#define quantlib_zabr_interpolated_smile_section_hpp
+
+#include <ql/experimental/volatility/zabrinterpolation.hpp>
+#include <ql/handle.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/quotes/simplequote.hpp>
+#include <ql/termstructures/volatility/smilesection.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+template <typename Evaluation>
+class ZabrInterpolatedSmileSection : public SmileSection, public LazyObject {
+  public:
+    //! \name Constructors
+    //@{
+    //! all market data are quotes
+    ZabrInterpolatedSmileSection(
+        const Date& optionDate,
+        Handle<Quote> forward,
+        const std::vector<Rate>& strikes,
+        bool hasFloatingStrikes,
+        Handle<Quote> atmVolatility,
+        const std::vector<Handle<Quote> >& volHandles,
+        Real alpha,
+        Real beta,
+        Real nu,
+        Real rho,
+        Real gamma,
+        bool isAlphaFixed = false,
+        bool isBetaFixed = false,
+        bool isNuFixed = false,
+        bool isRhoFixed = false,
+        bool isGammaFixed = false,
+        bool vegaWeighted = true,
+        ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+        ext::shared_ptr<OptimizationMethod> method = ext::shared_ptr<OptimizationMethod>(),
+        const DayCounter& dc = Actual365Fixed());
+    //! no quotes
+    ZabrInterpolatedSmileSection(
+        const Date& optionDate,
+        const Rate& forward,
+        const std::vector<Rate>& strikes,
+        bool hasFloatingStrikes,
+        const Volatility& atmVolatility,
+        const std::vector<Volatility>& vols,
+        Real alpha,
+        Real beta,
+        Real nu,
+        Real rho,
+        Real gamma,
+        bool isAlphaFixed = false,
+        bool isBetaFixed = false,
+        bool isNuFixed = false,
+        bool isRhoFixed = false,
+        bool isGammaFixed = false,
+        bool vegaWeighted = true,
+        ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+        ext::shared_ptr<OptimizationMethod> method = ext::shared_ptr<OptimizationMethod>(),
+        const DayCounter& dc = Actual365Fixed());
+    //@}
+    //! \name LazyObject interface
+    //@{
+    void performCalculations() const override;
+    void update() override;
+    //@}
+    //! \name SmileSection interface
+    //@{
+    Real minStrike() const override;
+    Real maxStrike() const override;
+    Real atmLevel() const override;
+    //@}
+    Real varianceImpl(Rate strike) const override;
+    Volatility volatilityImpl(Rate strike) const override;
+    //! \name Inspectors
+    //@{
+    Real alpha() const;
+    Real beta() const;
+    Real nu() const;
+    Real rho() const;
+    Real gamma() const;
+    Real rmsError() const;
+    Real maxError() const;
+    EndCriteria::Type endCriteria() const;
+    //@}
+
+  protected:
+    //! Creates the mutable SABRInterpolation
+    void createInterpolation() const;
+    mutable ext::shared_ptr<ZabrInterpolation<Evaluation> > zabrInterpolation_;
+
+    //! Market data
+    const Handle<Quote> forward_;
+    const Handle<Quote> atmVolatility_;
+    std::vector<Handle<Quote> > volHandles_;
+    mutable std::vector<Rate> strikes_;
+    //! Only strikes corresponding to valid market data
+    mutable std::vector<Rate> actualStrikes_;
+    bool hasFloatingStrikes_;
+
+    mutable Real forwardValue_;
+    mutable std::vector<Volatility> vols_;
+    //! Sabr parameters
+    Real alpha_, beta_, nu_, rho_, gamma_;
+    //! Sabr interpolation settings
+    bool isAlphaFixed_, isBetaFixed_, isNuFixed_, isRhoFixed_, isGammaFixed_;
+    bool vegaWeighted_;
+    const ext::shared_ptr<EndCriteria> endCriteria_;
+    const ext::shared_ptr<OptimizationMethod> method_;
+};
+
+template <typename Evaluation>
+inline void ZabrInterpolatedSmileSection<Evaluation>::update() {
+    LazyObject::update();
+    SmileSection::update();
+}
+
+template <typename Evaluation>
+inline Real
+ZabrInterpolatedSmileSection<Evaluation>::volatilityImpl(Rate strike) const {
+    calculate();
+    return (*zabrInterpolation_)(strike, true);
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::alpha() const {
+    calculate();
+    return zabrInterpolation_->alpha();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::beta() const {
+    calculate();
+    return zabrInterpolation_->beta();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::nu() const {
+    calculate();
+    return zabrInterpolation_->nu();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::rho() const {
+    calculate();
+    return zabrInterpolation_->rho();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::gamma() const {
+    calculate();
+    return zabrInterpolation_->gamma();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::rmsError() const {
+    calculate();
+    return zabrInterpolation_->rmsError();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::maxError() const {
+    calculate();
+    return zabrInterpolation_->maxError();
+}
+
+template <typename Evaluation>
+inline EndCriteria::Type
+ZabrInterpolatedSmileSection<Evaluation>::endCriteria() const {
+    calculate();
+    return zabrInterpolation_->endCriteria();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::minStrike() const {
+    calculate();
+    return actualStrikes_.front();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::maxStrike() const {
+    calculate();
+    return actualStrikes_.back();
+}
+
+template <typename Evaluation>
+inline Real ZabrInterpolatedSmileSection<Evaluation>::atmLevel() const {
+    calculate();
+    return forwardValue_;
+}
+
+template <typename Evaluation>
+ZabrInterpolatedSmileSection<Evaluation>::ZabrInterpolatedSmileSection(
+    const Date& optionDate,
+    Handle<Quote> forward,
+    const std::vector<Rate>& strikes,
+    bool hasFloatingStrikes,
+    Handle<Quote> atmVolatility,
+    const std::vector<Handle<Quote> >& volHandles,
+    Real alpha,
+    Real beta,
+    Real nu,
+    Real rho,
+    Real gamma,
+    bool isAlphaFixed,
+    bool isBetaFixed,
+    bool isNuFixed,
+    bool isRhoFixed,
+    bool isGammaFixed,
+    bool vegaWeighted,
+    ext::shared_ptr<EndCriteria> endCriteria,
+    ext::shared_ptr<OptimizationMethod> method,
+    const DayCounter& dc)
+: SmileSection(optionDate, dc), forward_(std::move(forward)),
+  atmVolatility_(std::move(atmVolatility)), volHandles_(volHandles), strikes_(strikes),
+  actualStrikes_(strikes), hasFloatingStrikes_(hasFloatingStrikes), vols_(volHandles.size()),
+  alpha_(alpha), beta_(beta), nu_(nu), rho_(rho), gamma_(gamma), isAlphaFixed_(isAlphaFixed),
+  isBetaFixed_(isBetaFixed), isNuFixed_(isNuFixed), isRhoFixed_(isRhoFixed),
+  isGammaFixed_(isGammaFixed), vegaWeighted_(vegaWeighted), endCriteria_(std::move(endCriteria)),
+  method_(std::move(method)) {
+
+    LazyObject::registerWith(forward_);
+    LazyObject::registerWith(atmVolatility_);
+    for (auto& volHandle : volHandles_)
+        LazyObject::registerWith(volHandle);
+}
+
+template <typename Evaluation>
+ZabrInterpolatedSmileSection<Evaluation>::ZabrInterpolatedSmileSection(
+    const Date& optionDate,
+    const Rate& forward,
+    const std::vector<Rate>& strikes,
+    bool hasFloatingStrikes,
+    const Volatility& atmVolatility,
+    const std::vector<Volatility>& volHandles,
+    Real alpha,
+    Real beta,
+    Real nu,
+    Real rho,
+    Real gamma,
+    bool isAlphaFixed,
+    bool isBetaFixed,
+    bool isNuFixed,
+    bool isRhoFixed,
+    bool isGammaFixed,
+    bool vegaWeighted,
+    ext::shared_ptr<EndCriteria> endCriteria,
+    ext::shared_ptr<OptimizationMethod> method,
+    const DayCounter& dc)
+: SmileSection(optionDate, dc),
+  forward_(Handle<Quote>(ext::shared_ptr<Quote>(new SimpleQuote(forward)))),
+  atmVolatility_(Handle<Quote>(ext::shared_ptr<Quote>(new SimpleQuote(atmVolatility)))),
+  volHandles_(volHandles.size()), strikes_(strikes), actualStrikes_(strikes),
+  hasFloatingStrikes_(hasFloatingStrikes), vols_(volHandles.size()), alpha_(alpha), beta_(beta),
+  nu_(nu), rho_(rho), gamma_(gamma), isAlphaFixed_(isAlphaFixed), isBetaFixed_(isBetaFixed),
+  isNuFixed_(isNuFixed), isRhoFixed_(isRhoFixed), isGammaFixed_(isGammaFixed),
+  vegaWeighted_(vegaWeighted), endCriteria_(std::move(endCriteria)), method_(std::move(method)) {
+
+    for (Size i = 0; i < volHandles_.size(); ++i)
+        volHandles_[i] = Handle<Quote>(
+            ext::shared_ptr<Quote>(new SimpleQuote(volHandles[i])));
+}
+
+template <typename Evaluation>
+void ZabrInterpolatedSmileSection<Evaluation>::createInterpolation() const {
+    ext::shared_ptr<ZabrInterpolation<Evaluation> > tmp(
+        new ZabrInterpolation<Evaluation>(
+            actualStrikes_.begin(), actualStrikes_.end(), vols_.begin(),
+            exerciseTime(), forwardValue_, alpha_, beta_, nu_, rho_, gamma_,
+            isAlphaFixed_, isBetaFixed_, isNuFixed_, isRhoFixed_, isGammaFixed_,
+            vegaWeighted_, endCriteria_, method_));
+    swap(tmp, zabrInterpolation_);
+}
+
+template <typename Evaluation>
+void ZabrInterpolatedSmileSection<Evaluation>::performCalculations() const {
+    forwardValue_ = forward_->value();
+    vols_.clear();
+    actualStrikes_.clear();
+    // we populate the volatilities, skipping the invalid ones
+    for (Size i = 0; i < volHandles_.size(); ++i) {
+        if (volHandles_[i]->isValid()) {
+            if (hasFloatingStrikes_) {
+                actualStrikes_.push_back(forwardValue_ + strikes_[i]);
+                vols_.push_back(atmVolatility_->value() +
+                                volHandles_[i]->value());
+            } else {
+                actualStrikes_.push_back(strikes_[i]);
+                vols_.push_back(volHandles_[i]->value());
+            }
+        }
+    }
+    // we are recreating the sabrinterpolation object unconditionnaly to
+    // avoid iterator invalidation
+    createInterpolation();
+    zabrInterpolation_->update();
+}
+
+template <typename Evaluation>
+Real ZabrInterpolatedSmileSection<Evaluation>::varianceImpl(Real strike) const {
+    calculate();
+    Real v = (*zabrInterpolation_)(strike, true);
+    return v * v * exerciseTime();
+}
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="22">
+    <source>zabrinterpolation.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file zabrinterpolation.hpp
+    \brief ZABR interpolation interpolation between discrete points
+*/
+
+#ifndef quantlib_zabr_interpolation_hpp
+#define quantlib_zabr_interpolation_hpp
+
+#include <ql/experimental/volatility/zabrsmilesection.hpp>
+#include <ql/math/interpolations/xabrinterpolation.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+namespace detail {
+
+template <typename Evaluation> struct ZabrSpecs {
+    Size dimension() { return 5; }
+    Real eps() { return 0.000001; }
+    void defaultValues(std::vector<Real> &params,
+                       std::vector<bool> &paramIsFixed, const Real &forward,
+                       const Real expiryTime, const std::vector<Real>& addParams) {
+        if (params[1] == Null<Real>())
+            params[1] = 0.5;
+        if (params[0] == Null<Real>())
+            // adapt alpha to beta level
+            params[0] =
+                0.2 *
+                (params[1] < 0.9999 ? std::pow(forward, 1.0 - params[1]) : Real(1.0));
+        if (params[2] == Null<Real>())
+            params[2] = std::sqrt(0.4);
+        if (params[3] == Null<Real>())
+            params[3] = 0.0;
+        if (params[4] == Null<Real>())
+            params[4] = 1.0;
+    }
+    void guess(Array &values, const std::vector<bool> &paramIsFixed,
+               const Real &forward, const Real expiryTime,
+               const std::vector<Real> &r, const std::vector<Real>& addParams) {
+        Size j = 0;
+        if (!paramIsFixed[1])
+            values[1] = (1.0 - 2E-6) * r[j++] + 1E-6;
+        if (!paramIsFixed[0]) {
+            values[0] = (1.0 - 2E-6) * r[j++] + 1E-6; // lognormal vol guess
+            // adapt this to beta level
+            if (values[1] < 0.999)
+                values[0] *= std::pow(forward, 1.0 - values[1]);
+        }
+        if (!paramIsFixed[2])
+            values[2] = 1.5 * r[j++] + 1E-6;
+        if (!paramIsFixed[3])
+            values[3] = (2.0 * r[j++] - 1.0) * (1.0 - 1E-6);
+        if (!paramIsFixed[4])
+            values[4] = r[j++] * 2.0;
+    }
+    Real eps1() { return .0000001; }
+    Real eps2() { return .9999; }
+    Real dilationFactor() { return 0.001; }
+    Array inverse(const Array &y, const std::vector<bool> &,
+                  const std::vector<Real> &, const Real) {
+        Array x(5);
+        x[0] = y[0] < 25.0 + eps1() ? std::sqrt(y[0] - eps1())
+                                    : Real((y[0] - eps1() + 25.0) / 10.0);
+        x[1] = std::sqrt(-std::log(y[1]));
+        x[2] = std::tan(M_PI*(y[4]/5.0-0.5));
+        x[3] = std::asin(y[3] / eps2());
+        x[4] = std::tan(M_PI*(y[4]/1.9-0.5));
+        return x;
+    }
+    Array direct(const Array &x, const std::vector<bool> &,
+                 const std::vector<Real> &, const Real) {
+        Array y(5);
+        y[0] = std::fabs(x[0]) < 5.0 ? Real(x[0] * x[0] + eps1())
+                                     : (10.0 * std::fabs(x[0]) - 25.0) + eps1();
+        y[1] = std::fabs(x[1]) < std::sqrt(-std::log(eps1()))
+                   ? std::exp(-(x[1] * x[1]))
+                   : eps1();
+        // limit nu to 5.00
+        y[2] = (std::atan(x[2])/M_PI + 0.5) * 5.0;
+        y[3] = std::fabs(x[3]) < 2.5 * M_PI
+                   ? eps2() * std::sin(x[3])
+                   : Real(eps2() * (x[3] > 0.0 ? 1.0 : (-1.0)));
+        // limit gamma to 1.9
+        y[4] = (std::atan(x[4])/M_PI + 0.5) * 1.9;
+        return y;
+    }
+    Real weight(const Real strike, const Real forward, const Real stdDev,
+                const std::vector<Real> &addParams) {
+        return blackFormulaStdDevDerivative(strike, forward, stdDev, 1.0);
+    }
+    typedef ZabrSmileSection<Evaluation> type;
+    ext::shared_ptr<type> instance(const Time t, const Real &forward,
+                                     const std::vector<Real> &params,
+                                     const std::vector<Real> &addParams) {
+        return ext::make_shared<type>(t, forward, params);
+    }
+};
+} // end namespace detail
+
+
+//! zabr smile interpolation between discrete volatility points.
+template <class Evaluation> class ZabrInterpolation : public Interpolation {
+  public:
+    template <class I1, class I2>
+    ZabrInterpolation(
+        const I1 &xBegin, // x = strikes
+        const I1 &xEnd,
+        const I2 &yBegin, // y = volatilities
+        Time t,           // option expiry
+        const Real &forward, Real alpha, Real beta, Real nu, Real rho,
+        Real gamma, bool alphaIsFixed, bool betaIsFixed, bool nuIsFixed,
+        bool rhoIsFixed, bool gammaIsFixed, bool vegaWeighted = true,
+        const ext::shared_ptr<EndCriteria> &endCriteria =
+            ext::shared_ptr<EndCriteria>(),
+        const ext::shared_ptr<OptimizationMethod> &optMethod =
+            ext::shared_ptr<OptimizationMethod>(),
+        const Real errorAccept = 0.0020, const bool useMaxError = false,
+        const Size maxGuesses = 50) {
+            impl_ = ext::shared_ptr<
+                Interpolation::Impl>(new detail::XABRInterpolationImpl<
+                I1, I2,
+                detail::ZabrSpecs<Evaluation> >(
+                xBegin, xEnd, yBegin, t, forward,
+                {alpha, beta, nu, rho, gamma},
+                {alphaIsFixed, betaIsFixed, nuIsFixed, rhoIsFixed, gammaIsFixed},
+                vegaWeighted, endCriteria, optMethod, errorAccept, useMaxError,
+                maxGuesses));
+    }
+    Real expiry() const { return coeffs().t_; }
+    Real forward() const { return coeffs().forward_; }
+    Real alpha() const { return coeffs().params_[0]; }
+    Real beta() const { return coeffs().params_[1]; }
+    Real nu() const { return coeffs().params_[2]; }
+    Real rho() const { return coeffs().params_[3]; }
+    Real gamma() const { return coeffs().params_[4]; }
+    Real rmsError() const { return coeffs().error_; }
+    Real maxError() const { return coeffs().maxError_; }
+    const std::vector<Real> &interpolationWeights() const {
+        return coeffs().weights_;
+    }
+    EndCriteria::Type endCriteria() { return coeffs().XABREndCriteria_; }
+
+  private:
+    const detail::XABRCoeffHolder<detail::ZabrSpecs<Evaluation>>& coeffs() const {
+        return *dynamic_cast<detail::XABRCoeffHolder<detail::ZabrSpecs<Evaluation>>*>(impl_.get());
+    }
+};
+
+//! no arbtrage sabr interpolation factory and traits
+template<class Evaluation> class Zabr {
+  public:
+    Zabr(Time t,
+         Real forward,
+         Real alpha,
+         Real beta,
+         Real nu,
+         Real rho,
+         Real gamma,
+         bool alphaIsFixed,
+         bool betaIsFixed,
+         bool nuIsFixed,
+         bool rhoIsFixed,
+         bool gammaIsFixed,
+         bool vegaWeighted = false,
+         ext::shared_ptr<EndCriteria> endCriteria = ext::shared_ptr<EndCriteria>(),
+         ext::shared_ptr<OptimizationMethod> optMethod = ext::shared_ptr<OptimizationMethod>(),
+         const Real errorAccept = 0.0020,
+         const bool useMaxError = false,
+         const Size maxGuesses = 50)
+    : t_(t), forward_(forward), alpha_(alpha), beta_(beta), nu_(nu), rho_(rho),
+      alphaIsFixed_(alphaIsFixed), betaIsFixed_(betaIsFixed), nuIsFixed_(nuIsFixed),
+      rhoIsFixed_(rhoIsFixed), gammaIsFixed_(gammaIsFixed), vegaWeighted_(vegaWeighted),
+      endCriteria_(std::move(endCriteria)), optMethod_(std::move(optMethod)),
+      errorAccept_(errorAccept), useMaxError_(useMaxError), maxGuesses_(maxGuesses) {}
+    template <class I1, class I2>
+    Interpolation interpolate(const I1 &xBegin, const I1 &xEnd,
+                              const I2 &yBegin) const {
+        return ZabrInterpolation<Evaluation>(
+            xBegin, xEnd, yBegin, t_, forward_, alpha_, beta_, nu_, rho_,
+            gamma_, alphaIsFixed_, betaIsFixed_, nuIsFixed_, rhoIsFixed_,
+            gammaIsFixed_, vegaWeighted_, endCriteria_, optMethod_,
+            errorAccept_, useMaxError_, maxGuesses_);
+    }
+    static const bool global = true;
+
+  private:
+    Time t_;
+    Real forward_;
+    Real alpha_, beta_, nu_, rho_, gamma_;
+    bool alphaIsFixed_, betaIsFixed_, nuIsFixed_, rhoIsFixed_, gammaIsFixed_;
+    bool vegaWeighted_;
+    const ext::shared_ptr<EndCriteria> endCriteria_;
+    const ext::shared_ptr<OptimizationMethod> optMethod_;
+    const Real errorAccept_;
+    const bool useMaxError_;
+    const Size maxGuesses_;
+};
+}
+
+#endif
+]]></document_content>
+  </document>
+  <document index="23">
+    <source>zabrsmilesection.hpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2014 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file zabrsmilesection.hpp
+    \brief zabr smile section
+*/
+
+#ifndef quantlib_zabr_smile_section_hpp
+#define quantlib_zabr_smile_section_hpp
+
+#include <ql/experimental/volatility/zabr.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <ql/termstructures/volatility/smilesection.hpp>
+#include <ql/termstructures/volatility/smilesectionutils.hpp>
+#include <ql/time/daycounters/actual365fixed.hpp>
+#include <utility>
+#include <vector>
+
+using std::exp;
+
+namespace QuantLib {
+
+// Evaluation Tags
+
+struct ZabrShortMaturityLognormal {};
+struct ZabrShortMaturityNormal {};
+struct ZabrLocalVolatility {};
+struct ZabrFullFd {};
+
+template <typename Evaluation> class ZabrSmileSection : public SmileSection {
+  public:
+    ZabrSmileSection(Time timeToExpiry,
+                     Rate forward,
+                     std::vector<Real> zabrParameters,
+                     const std::vector<Real>& moneyness = std::vector<Real>(),
+                     Size fdRefinement = 5);
+    ZabrSmileSection(const Date& d,
+                     Rate forward,
+                     std::vector<Real> zabrParameters,
+                     const DayCounter& dc = Actual365Fixed(),
+                     const std::vector<Real>& moneyness = std::vector<Real>(),
+                     Size fdRefinement = 5);
+
+    Real minStrike() const override { return 0.0; }
+    Real maxStrike() const override { return QL_MAX_REAL; }
+    Real atmLevel() const override { return model_->forward(); }
+    Real
+    optionPrice(Rate strike, Option::Type type = Option::Call, Real discount = 1.0) const override {
+        return optionPrice(strike, type, discount, Evaluation());
+    }
+
+    ext::shared_ptr<ZabrModel> model() { return model_; }
+
+  protected:
+    Volatility volatilityImpl(Rate strike) const override {
+        return volatilityImpl(strike, Evaluation());
+    }
+
+  private:
+    void init(const std::vector<Real> &moneyness) {
+        init(moneyness, Evaluation());
+        init2(Evaluation());
+        init3(Evaluation());
+    }
+    void init(const std::vector<Real> &moneyness, ZabrShortMaturityLognormal);
+    void init(const std::vector<Real> &moneyness, ZabrShortMaturityNormal);
+    void init(const std::vector<Real> &moneyness, ZabrLocalVolatility);
+    void init(const std::vector<Real> &moneyness, ZabrFullFd);
+    void init2(ZabrShortMaturityLognormal);
+    void init2(ZabrShortMaturityNormal);
+    void init2(ZabrLocalVolatility);
+    void init2(ZabrFullFd);
+    void init3(ZabrShortMaturityLognormal);
+    void init3(ZabrShortMaturityNormal);
+    void init3(ZabrLocalVolatility);
+    void init3(ZabrFullFd);
+    Real optionPrice(Rate strike, Option::Type type, Real discount,
+                     ZabrShortMaturityLognormal) const;
+    Real optionPrice(Rate strike, Option::Type type, Real discount,
+                     ZabrShortMaturityNormal) const;
+    Real optionPrice(Rate strike, Option::Type type, Real discount,
+                     ZabrLocalVolatility) const;
+    Real optionPrice(Rate strike, Option::Type type, Real discount,
+                     ZabrFullFd) const;
+    Volatility volatilityImpl(Rate strike, ZabrShortMaturityLognormal) const;
+    Volatility volatilityImpl(Rate strike, ZabrShortMaturityNormal) const;
+    Volatility volatilityImpl(Rate strike, ZabrLocalVolatility) const;
+    Volatility volatilityImpl(Rate strike, ZabrFullFd) const;
+    ext::shared_ptr<ZabrModel> model_;
+    Evaluation evaluation_;
+    Rate forward_;
+    std::vector<Real> params_;
+    const Size fdRefinement_;
+    std::vector<Real> strikes_, callPrices_;
+    ext::shared_ptr<Interpolation> callPriceFct_;
+    Real a_, b_;
+};
+
+template <typename Evaluation>
+ZabrSmileSection<Evaluation>::ZabrSmileSection(Time timeToExpiry,
+                                               Rate forward,
+                                               std::vector<Real> zabrParams,
+                                               const std::vector<Real>& moneyness,
+                                               const Size fdRefinement)
+: SmileSection(timeToExpiry, DayCounter()), forward_(forward), params_(std::move(zabrParams)),
+  fdRefinement_(fdRefinement) {
+    init(moneyness);
+}
+
+template <typename Evaluation>
+ZabrSmileSection<Evaluation>::ZabrSmileSection(const Date& d,
+                                               Rate forward,
+                                               std::vector<Real> zabrParams,
+                                               const DayCounter& dc,
+                                               const std::vector<Real>& moneyness,
+                                               const Size fdRefinement)
+: SmileSection(d, dc, Date()), forward_(forward), params_(std::move(zabrParams)),
+  fdRefinement_(fdRefinement) {
+    init(moneyness);
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init(const std::vector<Real> &,
+                                        ZabrShortMaturityLognormal) {
+
+    model_ = ext::make_shared<ZabrModel>(
+        exerciseTime(), forward_, params_[0], params_[1],
+                      params_[2], params_[3], params_[4]);
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init(const std::vector<Real> &a,
+                                        ZabrShortMaturityNormal) {
+    init(a, ZabrShortMaturityLognormal());
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init(const std::vector<Real> &moneyness,
+                                        ZabrLocalVolatility) {
+
+    QL_REQUIRE(params_.size() >= 5,
+               "zabr expects 5 parameters (alpha,beta,nu,rho,gamma) but ("
+                   << params_.size() << ") given");
+
+    model_ = ext::make_shared<ZabrModel>(
+        exerciseTime(), forward_, params_[0], params_[1],
+                      params_[2], params_[3], params_[4]);
+
+    // set up strike grid for local vol or full fd flavour of this section
+    // this is shared with SmileSectionUtils - unify later ?
+    static const Real defaultMoney[] = {
+        0.0, 0.01, 0.05, 0.10, 0.25, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90,
+        1.0, 1.25, 1.5,  1.75, 2.0,  5.0,  7.5,  10.0, 15.0, 20.0};
+    std::vector<Real> tmp;
+    if (moneyness.empty())
+        tmp = std::vector<Real>(defaultMoney, defaultMoney + 21);
+    else
+        tmp = std::vector<Real>(moneyness);
+
+    strikes_.clear(); // should not be necessary, anyway
+    Real lastF = 0.0;
+    bool firstStrike = true;
+    for (Real i : tmp) {
+        Real f = i * forward_;
+        if (f > 0.0) {
+            if (!firstStrike) {
+                for (Size j = 1; j <= fdRefinement_; ++j) {
+                    strikes_.push_back(lastF +
+                                       ((double)j) * (f - lastF) /
+                                           (fdRefinement_ + 1));
+                }
+            }
+            firstStrike = false;
+            lastF = f;
+            strikes_.push_back(f);
+        }
+    }
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init(const std::vector<Real> &moneyness,
+                                        ZabrFullFd) {
+    init(moneyness, ZabrLocalVolatility());
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init2(ZabrShortMaturityLognormal) {}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init2(ZabrShortMaturityNormal) {}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init2(ZabrLocalVolatility) {
+    callPrices_ = model_->fdPrice(strikes_);
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init2(ZabrFullFd) {
+    callPrices_.resize(strikes_.size());
+#pragma omp parallel for
+    for (long i = 0; i < (long)strikes_.size(); i++) {
+        callPrices_[i] = model_->fullFdPrice(strikes_[i]);
+    }
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init3(ZabrShortMaturityLognormal) {}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init3(ZabrShortMaturityNormal) {}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init3(ZabrLocalVolatility) {
+    strikes_.insert(strikes_.begin(), 0.0);
+    callPrices_.insert(callPrices_.begin(), forward_);
+
+    callPriceFct_ = ext::shared_ptr<Interpolation>(new CubicInterpolation(
+        strikes_.begin(), strikes_.end(), callPrices_.begin(),
+        CubicInterpolation::Spline, true, CubicInterpolation::SecondDerivative,
+        0.0, CubicInterpolation::SecondDerivative, 0.0));
+    // callPriceFct_ =
+    //     ext::shared_ptr<Interpolation>(new LinearInterpolation(
+    //         strikes_.begin(), strikes_.end(), callPrices_.begin()));
+
+    callPriceFct_->enableExtrapolation();
+
+    // on the right side we extrapolate exponetially (because spline
+    // does not make sense)
+    // we precompute the necessary parameters here
+    static const Real eps = 1E-5; // gap for first derivative computation
+
+    Real c0 = (*callPriceFct_)(strikes_.back());
+    Real c0p = ((*callPriceFct_)(strikes_.back() - eps) - c0) / eps;
+
+    a_ = c0p / c0;
+    b_ = std::log(c0) + a_ * strikes_.back();
+}
+
+template <typename Evaluation>
+void ZabrSmileSection<Evaluation>::init3(ZabrFullFd) {
+    init3(ZabrLocalVolatility());
+}
+
+template <typename Evaluation>
+Real
+ZabrSmileSection<Evaluation>::optionPrice(Real strike, Option::Type type,
+                                          Real discount,
+                                          ZabrShortMaturityLognormal) const {
+    return SmileSection::optionPrice(strike, type, discount);
+}
+
+template <typename Evaluation>
+Real ZabrSmileSection<Evaluation>::optionPrice(Real strike, Option::Type type,
+                                               Real discount,
+                                               ZabrShortMaturityNormal) const {
+    return bachelierBlackFormula(
+        type, strike, forward_,
+        model_->normalVolatility(strike) * std::sqrt(exerciseTime()), discount);
+}
+
+template <typename Evaluation>
+Real ZabrSmileSection<Evaluation>::optionPrice(Rate strike, Option::Type type,
+                                               Real discount,
+                                               ZabrLocalVolatility) const {
+    Real call = strike <= strikes_.back() ? (*callPriceFct_)(strike)
+                                          : exp(-a_ * strike + b_);
+    if (type == Option::Call)
+        return call * discount;
+    else
+        return (call - (forward_ - strike)) * discount;
+}
+
+template <typename Evaluation>
+Real ZabrSmileSection<Evaluation>::optionPrice(Rate strike, Option::Type type,
+                                               Real discount,
+                                               ZabrFullFd) const {
+    return optionPrice(strike, type, discount, ZabrLocalVolatility());
+}
+
+template <typename Evaluation>
+Real
+ZabrSmileSection<Evaluation>::volatilityImpl(Rate strike,
+                                             ZabrShortMaturityLognormal) const {
+    strike = std::max(1E-6, strike);
+    return model_->lognormalVolatility(strike);
+}
+
+template <typename Evaluation>
+Real
+ZabrSmileSection<Evaluation>::volatilityImpl(Rate strike,
+                                             ZabrShortMaturityNormal) const {
+    Real impliedVol = 0.0;
+    try {
+        Option::Type type;
+        if (strike >= model_->forward())
+            type = Option::Call;
+        else
+            type = Option::Put;
+        impliedVol =
+            blackFormulaImpliedStdDev(type, strike, model_->forward(),
+                                      optionPrice(strike, type, 1.0), 1.0) /
+            std::sqrt(exerciseTime());
+    } catch (...) {
+    }
+    return impliedVol;
+}
+
+template <typename Evaluation>
+Real ZabrSmileSection<Evaluation>::volatilityImpl(Rate strike,
+                                                  ZabrLocalVolatility) const {
+    return volatilityImpl(strike, ZabrShortMaturityNormal());
+}
+
+template <typename Evaluation>
+Real ZabrSmileSection<Evaluation>::volatilityImpl(Rate strike,
+                                                  ZabrFullFd) const {
+    return volatilityImpl(strike, ZabrShortMaturityNormal());
+}
+}
+
+#endif
+]]></document_content>
+  </document>
+</documents>

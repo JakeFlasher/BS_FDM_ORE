@@ -1,0 +1,1415 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document index="1">
+    <source>libormarketmodels/lfmcovarparam.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/lfmcovarparam.hpp>
+#include <ql/math/integrals/kronrodintegral.hpp>
+
+namespace QuantLib {
+
+    class LfmCovarianceParameterization::Var_Helper {
+      public:
+        Var_Helper(const LfmCovarianceParameterization* param, Size i, Size j);
+
+        Real operator()(Real t) const;
+      private:
+        const Size i_, j_;
+        const LfmCovarianceParameterization* param_;
+    };
+
+    LfmCovarianceParameterization::Var_Helper::Var_Helper(
+                                   const LfmCovarianceParameterization* param,
+                                   Size i, Size j)
+    : i_(i), j_(j), param_(param) {}
+
+    Real LfmCovarianceParameterization::Var_Helper::operator()(Real t) const {
+        const Matrix m = param_->diffusion(t);
+
+        return std::inner_product(m.row_begin(i_), m.row_end(i_),
+                                  m.row_begin(j_), Real(0.0));
+    }
+
+    Matrix LfmCovarianceParameterization::covariance(Time t, const Array& x) const {
+        Matrix sigma = this->diffusion(t, x);
+        Matrix result = sigma*transpose(sigma);
+        return result;
+    }
+
+    Matrix LfmCovarianceParameterization::integratedCovariance(Time t, const Array& x) const {
+        // this implementation is not intended for production.
+        // because it is too slow and too inefficient.
+        // This method is useful for testing and R&D.
+        // Please overload the method within derived classes.
+        QL_REQUIRE(x.empty(), "can not handle given x here");
+
+        Matrix tmp(size_, size_,0.0);
+
+        for (Size i=0; i<size_; ++i) {
+            for (Size j=0; j<=i;++j) {
+                Var_Helper helper(this, i, j);
+                GaussKronrodAdaptive integrator(1e-10, 10000);
+                for (Size k=0; k < 64; ++k) {
+                    tmp[i][j]+=integrator(helper, k*t/64.,(k+1)*t/64.);
+                }
+                tmp[j][i]=tmp[i][j];
+            }
+        }
+
+        return tmp;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="2">
+    <source>libormarketmodels/lfmcovarproxy.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/lfmcovarproxy.hpp>
+#include <ql/math/integrals/kronrodintegral.hpp>
+#include <utility>
+
+namespace QuantLib {
+    LfmCovarianceProxy::LfmCovarianceProxy(ext::shared_ptr<LmVolatilityModel> volaModel,
+                                           const ext::shared_ptr<LmCorrelationModel>& corrModel)
+
+    : LfmCovarianceParameterization(corrModel->size(), corrModel->factors()),
+      volaModel_(std::move(volaModel)), corrModel_(corrModel) {
+
+        QL_REQUIRE(volaModel_->size() == corrModel_->size(),
+            "different size for the volatility (" << volaModel_->size() <<
+            ") and correlation (" << corrModel_->size() <<
+            ") models");
+    }
+
+    ext::shared_ptr<LmVolatilityModel>
+    LfmCovarianceProxy::volatilityModel() const {
+        return volaModel_;
+    }
+
+    ext::shared_ptr<LmCorrelationModel>
+    LfmCovarianceProxy::correlationModel() const {
+        return corrModel_;
+    }
+
+    Matrix LfmCovarianceProxy::diffusion(Time t, const Array& x) const {
+
+        Matrix pca = corrModel_->pseudoSqrt(t, x);
+        Array  vol = volaModel_->volatility(t, x);
+        for (Size i=0; i<size_; ++i) {
+            std::transform(pca.row_begin(i), pca.row_end(i),
+                           pca.row_begin(i),
+                           [&](Real x) -> Real { return x * vol[i]; });
+        }
+
+        return pca;
+    }
+
+    Matrix LfmCovarianceProxy::covariance(Time t, const Array& x) const {
+
+        Array  volatility  = volaModel_->volatility(t, x);
+        Matrix correlation = corrModel_->correlation(t, x);
+
+        Matrix tmp(size_, size_);
+        for (Size i=0; i<size_; ++i) {
+            for (Size j=0; j<size_; ++j) {
+                tmp[i][j] = volatility[i]*correlation[i][j]*volatility[j];
+            }
+        }
+
+        return tmp;
+    }
+
+    class LfmCovarianceProxy::Var_Helper {
+      public:
+        Var_Helper(const LfmCovarianceProxy* proxy, Size i, Size j);
+
+        Real operator()(Real t) const;
+      private:
+        const Size i_, j_;
+        const LmVolatilityModel*  const volaModel_;
+        const LmCorrelationModel* const corrModel_;
+    };
+
+    LfmCovarianceProxy::Var_Helper::Var_Helper(const LfmCovarianceProxy* proxy,
+                                               Size i, Size j)
+    : i_(i),
+      j_(j),
+      volaModel_(proxy->volaModel_.get()),
+      corrModel_(proxy->corrModel_.get()) {
+    }
+
+    Real LfmCovarianceProxy::Var_Helper::operator()(Real t) const {
+        Volatility v1, v2;
+
+        if (i_ == j_) {
+            v1 = v2 = volaModel_->volatility(i_, t);
+        } else {
+            v1 = volaModel_->volatility(i_, t);
+            v2 = volaModel_->volatility(j_, t);
+        }
+
+        return  v1 * corrModel_->correlation(i_, j_, t) * v2;
+    }
+
+    Real LfmCovarianceProxy::integratedCovariance(
+                               Size i, Size j, Time t, const Array& x) const {
+
+        if (corrModel_->isTimeIndependent()) {
+            try {
+                // if all objects support these methods
+                // thats by far the fastest way to get the
+                // integrated covariance
+                return corrModel_->correlation(i, j, 0.0, x)
+                        * volaModel_->integratedVariance(j, i, t, x);
+            }
+            catch (Error&) {
+                // okay proceed with the
+                // slow numerical integration routine
+            }
+        }
+
+        QL_REQUIRE(x.empty(), "can not handle given x here");
+
+        Real tmp=0.0;
+        Var_Helper helper(this, i, j);
+
+        GaussKronrodAdaptive integrator(1e-10, 10000);
+        for (Size k=0; k<64; ++k) {
+            tmp+=integrator(helper, k*t/64., (k+1)*t/64.);
+        }
+        return tmp;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="3">
+    <source>libormarketmodels/lfmhullwhiteparam.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/math/matrixutilities/pseudosqrt.hpp>
+#include <ql/legacy/libormarketmodels/lfmhullwhiteparam.hpp>
+
+namespace QuantLib {
+
+    LfmHullWhiteParameterization::LfmHullWhiteParameterization(
+        const ext::shared_ptr<LiborForwardModelProcess> & process,
+        const ext::shared_ptr<OptionletVolatilityStructure> & capletVol,
+        const Matrix& correlation, Size factors)
+    : LfmCovarianceParameterization(process->size(), factors),
+      diffusion_  (size_-1, factors_),
+      fixingTimes_(process->fixingTimes()) {
+
+        Matrix sqrtCorr(size_-1, factors_, 1.0);
+        if (correlation.empty()) {
+            QL_REQUIRE(factors_ == 1,
+                       "correlation matrix must be given for "
+                       "multi factor models");
+        } else {
+            QL_REQUIRE(   correlation.rows() == size_-1
+                       && correlation.rows() == correlation.columns(),
+                       "wrong dimesion of the correlation matrix");
+
+            QL_REQUIRE(factors_ <= size_-1,
+                       "too many factors for given LFM process");
+
+            Matrix tmpSqrtCorr = pseudoSqrt(correlation,
+                                            SalvagingAlgorithm::Spectral);
+
+            // reduce to n factor model
+            // "Reconstructing a valid correlation matrix from invalid data"
+            // (<http://www.quarchome.org/correlationmatrix.pdf>)
+            for (Size i=0; i < size_-1; ++i) {
+                Real p = std::sqrt(std::inner_product(
+                                     tmpSqrtCorr[i],tmpSqrtCorr[i]+factors_,
+                                     tmpSqrtCorr[i], Real(0.0)));
+                std::transform(
+                    tmpSqrtCorr[i], tmpSqrtCorr[i]+factors_, sqrtCorr[i],
+                               [=](Real x) -> Real { return x / p; });
+            }
+        }
+
+        std::vector<Volatility> lambda;
+        const std::vector<Time> fixingTimes = process->fixingTimes();
+        const std::vector<Date> fixingDates = process->fixingDates();
+
+        for (Size i = 1; i < size_; ++i) {
+            Real cumVar = 0.0;
+            for (Size j = 1; j < i; ++j) {
+                cumVar +=  lambda[i-j-1] * lambda[i-j-1]
+                         * (fixingTimes[j+1] - fixingTimes[j]);
+            }
+
+            const Volatility vol =  capletVol->volatility(fixingDates[i], 0.0);
+            const Volatility var = vol * vol
+                * capletVol->dayCounter().yearFraction(fixingDates[0],
+                                                       fixingDates[i]);
+
+            lambda.push_back(std::sqrt(  (var - cumVar)
+                                       / (fixingTimes[1] - fixingTimes[0])) );
+
+            for (Size q=0; q<factors_; ++q) {
+                diffusion_[i-1][q] = sqrtCorr[i-1][q] * lambda.back();
+            }
+        }
+
+        covariance_ = diffusion_ * transpose(diffusion_);
+    }
+
+
+    Size LfmHullWhiteParameterization::nextIndexReset(Time t) const {
+        return std::upper_bound(fixingTimes_.begin(), fixingTimes_.end(), t)
+                 - fixingTimes_.begin();
+    }
+
+
+    Matrix LfmHullWhiteParameterization::diffusion(Time t, const Array&) const {
+        Matrix tmp(size_, factors_, 0.0);
+        const Size m = nextIndexReset(t);
+
+        for (Size k=m; k<size_; ++k) {
+            for (Size q=0; q<factors_; ++q) {
+                tmp[k][q] = diffusion_[k-m][q];
+            }
+        }
+        return tmp;
+    }
+
+    Matrix LfmHullWhiteParameterization::covariance(Time t, const Array&) const {
+        Matrix tmp(size_, size_, 0.0);
+        const Size m = nextIndexReset(t);
+
+        for (Size k=m; k<size_; ++k) {
+            for (Size i=m; i<size_; ++i) {
+                tmp[k][i] = covariance_[k-m][i-m];
+            }
+        }
+
+        return tmp;
+    }
+
+    Matrix LfmHullWhiteParameterization::integratedCovariance(Time t, const Array&) const {
+
+        Matrix tmp(size_, size_, 0.0);
+
+        Size last = std::lower_bound(fixingTimes_.begin(),
+                                        fixingTimes_.end(), t)
+                      - fixingTimes_.begin();
+
+        for (Size i=0; i<last; ++i) {
+            const Time dt = ((i+1<last)? fixingTimes_[i+1] : t )
+                - fixingTimes_[i];
+
+            for (Size k=i; k<size_-1; ++k) {
+                for (Size l=i; l<size_-1; ++l) {
+                    tmp[k+1][l+1]+= covariance_[k-i][l-i]*dt;
+                }
+            }
+        }
+
+        return tmp;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="4">
+    <source>libormarketmodels/lfmprocess.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/cashflows/cashflows.hpp>
+#include <ql/cashflows/cashflowvectors.hpp>
+#include <ql/cashflows/couponpricer.hpp>
+#include <ql/cashflows/floatingratecoupon.hpp>
+#include <ql/cashflows/iborcoupon.hpp>
+#include <ql/legacy/libormarketmodels/lfmprocess.hpp>
+#include <ql/processes/eulerdiscretization.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/time/schedule.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    LiborForwardModelProcess::LiborForwardModelProcess(Size size, ext::shared_ptr<IborIndex> index)
+    : StochasticProcess(ext::shared_ptr<discretization>(new EulerDiscretization)), size_(size),
+      index_(std::move(index)), initialValues_(size_), fixingTimes_(size_), fixingDates_(size_),
+      accrualStartTimes_(size), accrualEndTimes_(size), accrualPeriod_(size_), m1(size_),
+      m2(size_) {
+
+        const DayCounter dayCounter = index_->dayCounter();
+        const Leg flows = cashFlows();
+
+        QL_REQUIRE(size_ == flows.size(), "wrong number of cashflows");
+
+        Date settlement = index_->forwardingTermStructure()->referenceDate();
+        const Date startDate =
+            ext::dynamic_pointer_cast<IborCoupon>(flows[0])->fixingDate();
+
+        for (Size i = 0; i < size_; ++i) {
+            const ext::shared_ptr<IborCoupon> coupon =
+               ext::dynamic_pointer_cast<IborCoupon>(flows[i]);
+
+            QL_REQUIRE(coupon->date() == coupon->accrualEndDate(),
+                       "irregular coupon types are not suppported");
+
+            initialValues_[i] = coupon->rate();
+            accrualPeriod_[i] = coupon->accrualPeriod();
+
+            fixingDates_[i] = coupon->fixingDate();
+            fixingTimes_[i] =
+                dayCounter.yearFraction(startDate, coupon->fixingDate());
+            accrualStartTimes_[i] =
+                dayCounter.yearFraction(settlement,coupon->accrualStartDate());
+            accrualEndTimes_[i]   =
+                dayCounter.yearFraction(settlement,coupon->accrualEndDate());
+        }
+    }
+
+    Array LiborForwardModelProcess::drift(Time t,
+                                          const Array& x) const {
+        Array f(size_, 0.0);
+        Matrix covariance(lfmParam_->covariance(t, x));
+
+        const Size m = nextIndexReset(t);
+
+        for (Size k=m; k<size_; ++k) {
+            m1[k] = accrualPeriod_[k]*x[k]/(1+accrualPeriod_[k]*x[k]);
+            f[k]  = std::inner_product(m1.begin()+m, m1.begin()+k+1,
+                                       covariance.column_begin(k)+m,Real(0.0))
+                    - 0.5*covariance[k][k];
+        }
+
+        return f;
+    }
+
+    Matrix LiborForwardModelProcess::diffusion(Time t, const Array& x) const {
+        return lfmParam_->diffusion(t, x);
+    }
+
+    Matrix LiborForwardModelProcess::covariance(Time t, const Array& x, Time dt) const {
+        return lfmParam_->covariance(t, x)*dt;
+    }
+
+    Array LiborForwardModelProcess::apply(const Array& x0, const Array& dx) const {
+        Array tmp(size_);
+
+        for (Size k=0; k<size_; ++k) {
+            tmp[k] = x0[k] * std::exp(dx[k]);
+        }
+
+        return tmp;
+    }
+
+    Array LiborForwardModelProcess::evolve(Time t0, const Array& x0,
+                                           Time dt, const Array& dw) const {
+        /* predictor-corrector step to reduce discretization errors.
+
+           Short - but slow - solution would be
+
+           Array rnd_0     = stdDeviation(t0, x0, dt)*dw;
+           Array drift_0   = discretization_->drift(*this, t0, x0, dt);
+
+           return apply(x0, ( drift_0 + discretization_
+                ->drift(*this,t0,apply(x0, drift_0 + rnd_0),dt) )*0.5 + rnd_0);
+
+           The following implementation does the same but is faster.
+        */
+
+        const Size m   = nextIndexReset(t0);
+        const Real sdt = std::sqrt(dt);
+
+        Array f(x0);
+        Matrix diff       = lfmParam_->diffusion(t0, x0);
+        Matrix covariance = lfmParam_->covariance(t0, x0);
+
+        for (Size k=m; k<size_; ++k) {
+            const Real y = accrualPeriod_[k]*x0[k];
+            m1[k] = y/(1+y);
+            const Real d = (
+                std::inner_product(m1.begin()+m, m1.begin()+k+1,
+                                   covariance.column_begin(k)+m,Real(0.0))
+                -0.5*covariance[k][k]) * dt;
+
+            const Real r = std::inner_product(
+                diff.row_begin(k), diff.row_end(k), dw.begin(), Real(0.0))*sdt;
+
+            const Real x = y*std::exp(d + r);
+            m2[k] = x/(1+x);
+            f[k] = x0[k] * std::exp(0.5*(d+
+                 (std::inner_product(m2.begin()+m, m2.begin()+k+1,
+                                     covariance.column_begin(k)+m,Real(0.0))
+                  -0.5*covariance[k][k])*dt)+ r);
+        }
+
+        return f;
+    }
+
+    Array LiborForwardModelProcess::initialValues() const {
+        return initialValues_;
+    }
+
+    void LiborForwardModelProcess::setCovarParam(
+             const ext::shared_ptr<LfmCovarianceParameterization> & param) {
+        lfmParam_ = param;
+    }
+
+    ext::shared_ptr<LfmCovarianceParameterization>
+    LiborForwardModelProcess::covarParam() const {
+        return lfmParam_;
+    }
+
+    ext::shared_ptr<IborIndex>
+    LiborForwardModelProcess::index() const {
+        return index_;
+    }
+
+    Leg
+    LiborForwardModelProcess::cashFlows(Real amount) const {
+        Date refDate = index_->forwardingTermStructure()->referenceDate();
+        Schedule schedule(refDate,
+                          refDate + Period(index_->tenor().length()*size_,
+                                           index_->tenor().units()),
+                          index_->tenor(), index_->fixingCalendar(),
+                          index_->businessDayConvention(),
+                          index_->businessDayConvention(),
+                          DateGeneration::Forward, false);
+        return IborLeg(schedule,index_)
+            .withNotionals(amount)
+            .withPaymentDayCounter(index_->dayCounter())
+            .withPaymentAdjustment(index_->businessDayConvention())
+            .withFixingDays(index_->fixingDays());
+    }
+
+    Size LiborForwardModelProcess::size() const {
+        return size_;
+    }
+
+    Size LiborForwardModelProcess::factors() const {
+        return lfmParam_->factors();
+    }
+
+    const std::vector<Time> & LiborForwardModelProcess::fixingTimes() const {
+        return fixingTimes_;
+    }
+
+    const std::vector<Date> & LiborForwardModelProcess::fixingDates() const {
+        return fixingDates_;
+    }
+
+    const std::vector<Time> &
+    LiborForwardModelProcess::accrualStartTimes() const {
+        return accrualStartTimes_;
+    }
+
+    const std::vector<Time> &
+    LiborForwardModelProcess::accrualEndTimes() const {
+        return accrualEndTimes_;
+    }
+
+    Size LiborForwardModelProcess::nextIndexReset(Time t) const {
+        return std::upper_bound(fixingTimes_.begin(), fixingTimes_.end(), t)
+                 - fixingTimes_.begin();
+    }
+
+    std::vector<DiscountFactor> LiborForwardModelProcess::discountBond(
+        const std::vector<Rate> & rates) const {
+
+        std::vector<DiscountFactor> discountFactors(size_);
+        discountFactors[0] = 1.0/(1.0 + rates[0]*accrualPeriod_[0]);
+
+        for (Size i = 1; i < size_; ++i) {
+            discountFactors[i] =
+                discountFactors[i-1]/(1.0 + rates[i]*accrualPeriod_[i]);
+        }
+
+        return discountFactors;
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="5">
+    <source>libormarketmodels/lfmswaptionengine.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/lfmswaptionengine.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <ql/pricingengines/swap/discountingswapengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    LfmSwaptionEngine::LfmSwaptionEngine(const ext::shared_ptr<LiborForwardModel>& model,
+                                         Handle<YieldTermStructure> discountCurve)
+    : GenericModelEngine<LiborForwardModel, Swaption::arguments, Swaption::results>(model),
+      discountCurve_(std::move(discountCurve)) {
+        registerWith(discountCurve_);
+    }
+
+
+    void LfmSwaptionEngine::calculate() const {
+
+        QL_REQUIRE(arguments_.settlementMethod != Settlement::ParYieldCurve,
+                   "cash settled (ParYieldCurve) swaptions not priced with Lfm engine");
+
+        static const Spread basisPoint = 1.0e-4;
+
+        auto swap = arguments_.swap;
+        swap->setPricingEngine(ext::shared_ptr<PricingEngine>(
+                                  new DiscountingSwapEngine(discountCurve_, false)));
+
+        Spread correction = swap->spread() *
+            std::fabs(swap->floatingLegBPS()/swap->fixedLegBPS());
+        Rate fixedRate = swap->fixedRate() - correction;
+        Rate fairRate = swap->fairRate() - correction;
+
+        ext::shared_ptr<SwaptionVolatilityMatrix> volatility =
+            model_->getSwaptionVolatilityMatrix();
+
+        Date referenceDate = volatility->referenceDate();
+        DayCounter dayCounter = volatility->dayCounter();
+
+        Time exercise = dayCounter.yearFraction(referenceDate,
+                                                arguments_.exercise->date(0));
+        Time swapLength =
+            dayCounter.yearFraction(referenceDate,
+                                    arguments_.fixedPayDates.back())
+            - dayCounter.yearFraction(referenceDate,
+                                      arguments_.fixedResetDates[0]);
+
+        Option::Type w = arguments_.type==Swap::Payer ? Option::Call : Option::Put;
+        Volatility vol = volatility->volatility(exercise, swapLength,
+                                                fairRate, true);
+        results_.value = (swap->fixedLegBPS()/basisPoint) *
+            blackFormula(w, fixedRate, fairRate, vol*std::sqrt(exercise));
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="6">
+    <source>libormarketmodels/liborforwardmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/liborforwardmodel.hpp>
+#include <ql/pricingengines/blackformula.hpp>
+#include <ql/time/calendars/nullcalendar.hpp>
+#include <limits>
+
+namespace QuantLib {
+
+     LiborForwardModel::LiborForwardModel(
+          const ext::shared_ptr<LiborForwardModelProcess> & process,
+          const ext::shared_ptr<LmVolatilityModel> & volaModel,
+          const ext::shared_ptr<LmCorrelationModel> & corrModel)
+     : CalibratedModel(volaModel->params().size()+corrModel->params().size()),
+       f_(process->size()),
+       accrualPeriod_(process->size()),
+       covarProxy_(new LfmCovarianceProxy(volaModel, corrModel)),
+       process_(process)
+     {
+
+         const Size k=volaModel->params().size();
+         std::copy(volaModel->params().begin(), volaModel->params().end(),
+                   arguments_.begin());
+         std::copy(corrModel->params().begin(), corrModel->params().end(),
+                   arguments_.begin()+k);
+
+         for (Size i=0; i < process->size(); ++i) {
+             accrualPeriod_[i] =  process->accrualEndTimes()[i]
+                                - process->accrualStartTimes()[i];
+             f_[i] = 1.0/(1.0+accrualPeriod_[i]*process_->initialValues()[i]);
+         }
+    }
+
+    void LiborForwardModel::setParams(const Array& params) {
+        CalibratedModel::setParams(params);
+
+        const Size k=covarProxy_->volatilityModel()->params().size();
+
+        covarProxy_->volatilityModel()->setParams(
+            std::vector<Parameter>(arguments_.begin(), arguments_.begin()+k));
+        covarProxy_->correlationModel()->setParams(
+            std::vector<Parameter>(arguments_.begin()+k, arguments_.end()));
+
+        swaptionVola = ext::shared_ptr<SwaptionVolatilityMatrix>();
+    }
+
+    Real LiborForwardModel::discountBondOption(Option::Type type,
+                                               Real strike, Time maturity,
+                                               Time bondMaturity) const {
+
+        const std::vector<Time> & accrualStartTimes
+            = process_->accrualStartTimes();
+        const std::vector<Time> & accrualEndTimes
+            = process_->accrualEndTimes();
+
+        QL_REQUIRE(   accrualStartTimes.front()<= maturity
+                   && accrualStartTimes.back() >= maturity,
+                   "capet maturity does not fit to the process");
+
+        const Size i = std::lower_bound(accrualStartTimes.begin(),
+                                        accrualStartTimes.end(),
+                                        maturity) - accrualStartTimes.begin();
+
+        QL_REQUIRE(   i<process_->size()
+                   && std::fabs(maturity - accrualStartTimes[i])
+                        < 100*std::numeric_limits<Real>::epsilon()
+                   && std::fabs(bondMaturity - accrualEndTimes[i])
+                        < 100*std::numeric_limits<Real>::epsilon(),
+                   "irregular fixings are not (yet) supported");
+
+        const Real tenor     = accrualEndTimes[i] - accrualStartTimes[i];
+        const Real forward   = process_->initialValues()[i];
+        const Real capRate   = (1.0/strike - 1.0)/tenor;
+        const Volatility var = covarProxy_
+            ->integratedCovariance(i, i, process_->fixingTimes()[i]);
+        const DiscountFactor dis =
+            process_->index()->forwardingTermStructure()->discount(bondMaturity);
+
+        const Real black = blackFormula(
+            (type==Option::Put ? Option::Call : Option::Put),
+            capRate, forward, std::sqrt(var));
+
+        const Real npv = dis * tenor * black;
+
+        return npv / (1.0 + capRate*tenor);
+    }
+
+    Array LiborForwardModel::w_0(Size alpha, Size beta) const {
+        Array omega(beta+1,0.0);
+        QL_REQUIRE(alpha<beta, "alpha needs to be smaller than beta");
+
+        Real s=0.0;
+        for (Size k=alpha+1; k<=beta; ++k) {
+            Real b=accrualPeriod_[k];
+            for (Size j=alpha+1; j<=k; ++j) {
+                b*=f_[j];
+            }
+            s+=b;
+        }
+
+        for (Size i=alpha+1; i<=beta; ++i) {
+            Real a=accrualPeriod_[i];
+            for (Size j=alpha+1; j<=i; ++j) {
+                a*=f_[j];
+            }
+
+            omega[i] = a/s;
+        }
+
+        return omega;
+    }
+
+    Rate LiborForwardModel::S_0(Size alpha, Size beta) const {
+        const Array w = w_0(alpha, beta);
+        const Array f = process_->initialValues();
+
+        Rate fwdRate=0.0;
+        for (Size i=alpha+1; i <=beta; ++i) {
+            fwdRate+=w[i]*f[i];
+        }
+
+        return fwdRate;
+    }
+
+    // calculating swaption volatility matrix using
+    // Rebonatos approx. formula. Be aware that this
+    // matrix is valid only for regular fixings and
+    // assumes that the fix and floating leg have the
+    // same frequency
+    ext::shared_ptr<SwaptionVolatilityMatrix>
+        LiborForwardModel::getSwaptionVolatilityMatrix() const {
+        if (swaptionVola != nullptr) {
+            return swaptionVola;
+        }
+
+        const ext::shared_ptr<IborIndex> index = process_->index();
+        const Date today = process_->fixingDates()[0];
+
+        const Size size=process_->size()/2;
+        Matrix volatilities(size, size);
+
+        std::vector<Date> exercises(process_->fixingDates().begin() + 1,
+                                    process_->fixingDates().begin() + size+1);
+
+        std::vector<Period> lengths(size);
+        for (Size i=0; i < size; ++i) {
+            lengths[i] = (i+1)*index->tenor();
+        }
+
+        const Array f = process_->initialValues();
+        for (Size k=0; k < size; ++k) {
+            const Size alpha  =k;
+            const Time t_alpha=process_->fixingTimes()[alpha+1];
+
+            Matrix var(size, size);
+            for (Size i=alpha+1; i <= k+size; ++i) {
+                for (Size j=i; j <= k+size; ++j) {
+                    var[i-alpha-1][j-alpha-1] = var[j-alpha-1][i-alpha-1] =
+                        covarProxy_->integratedCovariance(i, j, t_alpha);
+                }
+            }
+
+            for (Size l=1; l <= size; ++l) {
+                const Size beta =l + k;
+                const Array w = w_0(alpha, beta);
+
+                Real sum=0.0;
+                for (Size i=alpha+1; i <= beta; ++i) {
+                    for (Size j=alpha+1; j <= beta; ++j) {
+                        sum+=w[i]*w[j]*f[i]*f[j]*var[i-alpha-1][j-alpha-1];
+                    }
+                }
+                volatilities[k][l-1] =
+                    std::sqrt(sum/t_alpha)/S_0(alpha, beta);
+            }
+        }
+
+        return swaptionVola = ext::make_shared<SwaptionVolatilityMatrix>(
+            today, NullCalendar(), Following,
+            exercises, lengths, volatilities,
+            index->dayCounter());
+    }
+
+    // the next two methods are meaningless within this context
+    // we might remove them from the AffineModel interface
+    DiscountFactor LiborForwardModel::discount(Time t) const {
+        return process_->index()->forwardingTermStructure()->discount(t);
+    }
+
+    Real LiborForwardModel::discountBond(Time, Time maturity, Array) const {
+        return discount(maturity);
+    }
+
+}
+]]></document_content>
+  </document>
+  <document index="7">
+    <source>libormarketmodels/lmcorrmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/math/matrixutilities/pseudosqrt.hpp>
+#include <ql/legacy/libormarketmodels/lmcorrmodel.hpp>
+
+namespace QuantLib {
+
+    LmCorrelationModel::LmCorrelationModel(Size size, Size nArguments)
+    : size_(size), arguments_(nArguments) {}
+
+    Size LmCorrelationModel::size() const {
+        return size_;
+    }
+
+    Size LmCorrelationModel::factors() const {
+        return size_;
+    }
+
+    bool LmCorrelationModel::isTimeIndependent() const {
+        return false;
+    }
+
+    Matrix LmCorrelationModel::pseudoSqrt(
+        Time t, const Array& x) const {
+        return QuantLib::pseudoSqrt(this->correlation(t, x),
+                                    SalvagingAlgorithm::Spectral);
+    }
+
+    Real LmCorrelationModel::correlation(
+        Size i, Size j, Time t, const Array& x) const {
+        // inefficient implementation, please overload in derived classes
+        return correlation(t, x)[i][j];
+    }
+
+
+    std::vector<Parameter>& LmCorrelationModel::params() {
+        return arguments_;
+    }
+
+    void LmCorrelationModel::setParams(
+        const std::vector<Parameter> & arguments) {
+        arguments_ = arguments;
+        generateArguments();
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="8">
+    <source>libormarketmodels/lmexpcorrmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/math/matrixutilities/pseudosqrt.hpp>
+#include <ql/legacy/libormarketmodels/lmexpcorrmodel.hpp>
+
+namespace QuantLib {
+
+    LmExponentialCorrelationModel::LmExponentialCorrelationModel(Size size,
+                                                                 Real rho)
+   : LmCorrelationModel(size, 1),
+     corrMatrix_(size, size),
+     pseudoSqrt_(size, size) {
+        arguments_[0] = ConstantParameter(rho, PositiveConstraint());
+        LmExponentialCorrelationModel::generateArguments();
+    }
+
+    Matrix LmExponentialCorrelationModel::correlation(Time, const Array&) const {
+
+        Matrix tmp(corrMatrix_);
+        return tmp;
+    }
+
+    Real LmExponentialCorrelationModel::correlation(
+                                   Size i, Size j, Time, const Array&) const {
+        return corrMatrix_[i][j];
+    }
+
+    bool LmExponentialCorrelationModel::isTimeIndependent() const {
+        return true;
+    }
+
+    Matrix LmExponentialCorrelationModel::pseudoSqrt(Time, const Array&) const {
+        Matrix tmp(pseudoSqrt_);
+        return tmp;
+    }
+
+    void LmExponentialCorrelationModel::generateArguments() {
+        const Real rho = arguments_[0](0.0);
+
+        for (Size i=0; i<size_; ++i) {
+            for (Size j=i; j<size_; ++j) {
+                corrMatrix_[i][j] = corrMatrix_[j][i]
+                    = std::exp(-rho*std::fabs(Real(i)-Real(j)));
+            }
+        }
+
+        pseudoSqrt_ = QuantLib::pseudoSqrt(corrMatrix_,
+                                           SalvagingAlgorithm::Spectral);
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="9">
+    <source>libormarketmodels/lmextlinexpvolmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/lmextlinexpvolmodel.hpp>
+
+namespace QuantLib {
+
+    LmExtLinearExponentialVolModel::LmExtLinearExponentialVolModel(
+                                         const std::vector<Time>& fixingTimes,
+                                         Real a, Real b, Real c, Real d)
+    : LmLinearExponentialVolatilityModel(fixingTimes, a, b, c, d) {
+
+        arguments_.resize(4+size_);
+        for (Size i=0; i <size_; ++i) {
+            arguments_[i+4] = ConstantParameter(1.0, PositiveConstraint());
+        }
+    }
+
+
+    Array LmExtLinearExponentialVolModel::volatility(
+                                               Time t, const Array& x) const {
+        Array tmp = LmLinearExponentialVolatilityModel::volatility(t, x);
+        for (Size i=0; i<size_; ++i) {
+            tmp[i]*=arguments_[i+4](0.0);
+        }
+
+        return tmp;
+    }
+
+    Volatility LmExtLinearExponentialVolModel::volatility(
+                                       Size i, Time t, const Array& x) const {
+        return arguments_[i+4](0.0)
+            *LmLinearExponentialVolatilityModel::volatility(i, t, x);
+    }
+
+    Real LmExtLinearExponentialVolModel::integratedVariance(
+                               Size i, Size j, Time u, const Array& x) const {
+        return arguments_[i+4](0.0)*arguments_[j+4](0.0)
+            *LmLinearExponentialVolatilityModel::integratedVariance(i,j,u,x);
+    }
+
+}
+
+]]></document_content>
+  </document>
+  <document index="10">
+    <source>libormarketmodels/lmfixedvolmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/lmfixedvolmodel.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    LmFixedVolatilityModel::LmFixedVolatilityModel(Array volatilities,
+                                                   const std::vector<Time>& startTimes)
+    : LmVolatilityModel(startTimes.size(), 0), volatilities_(std::move(volatilities)),
+      startTimes_(startTimes) {
+        QL_REQUIRE(startTimes_.size()>1, "too few dates");
+        QL_REQUIRE(volatilities_.size() == startTimes_.size(),
+                   "volatility array and fixing time array have to have "
+                   "the same size");
+        for (Size i = 1; i < startTimes_.size(); i++) {
+            QL_REQUIRE(startTimes_[i] > startTimes_[i-1],
+                       "invalid time (" << startTimes_[i] << ", vs "
+                       << startTimes_[i-1] << ")");
+        }
+    }
+
+    Array LmFixedVolatilityModel::volatility(Time t, const Array&) const {
+        QL_REQUIRE(t >= startTimes_.front() && t <= startTimes_.back(),
+                   "invalid time given for volatility model");
+
+        const Size ti = std::upper_bound(startTimes_.begin(),
+                                         startTimes_.end()-1, t)
+                      - startTimes_.begin()-1;
+
+        Array tmp(size_, 0.0);
+
+        for (Size i=ti; i<size_; ++i) {
+            tmp[i] = volatilities_[i-ti];
+        }
+
+        return tmp;
+    }
+
+    Volatility LmFixedVolatilityModel::volatility(
+                                         Size i, Time t, const Array&) const {
+        QL_REQUIRE(t >= startTimes_.front() && t <= startTimes_.back(),
+                   "invalid time given for volatility model");
+
+        const Size ti = std::upper_bound(startTimes_.begin(),
+                                         startTimes_.end()-1, t)
+                      - startTimes_.begin()-1;
+
+        return volatilities_[i-ti];
+    }
+
+    void LmFixedVolatilityModel::generateArguments() {}
+}
+
+]]></document_content>
+  </document>
+  <document index="11">
+    <source>libormarketmodels/lmlinexpcorrmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/math/matrixutilities/pseudosqrt.hpp>
+#include <ql/legacy/libormarketmodels/lmlinexpcorrmodel.hpp>
+
+namespace QuantLib {
+
+    LmLinearExponentialCorrelationModel::LmLinearExponentialCorrelationModel(
+                                  Size size, Real rho, Real beta, Size factors)
+   : LmCorrelationModel(size, 2),
+     corrMatrix_(size, size),
+     factors_((factors != Null<Size>()) ? factors : size) {
+        arguments_[0] = ConstantParameter(rho, BoundaryConstraint(-1.0, 1.0));
+        arguments_[1] = ConstantParameter(beta, PositiveConstraint());
+        LmLinearExponentialCorrelationModel::generateArguments();
+    }
+
+    Matrix LmLinearExponentialCorrelationModel::correlation(Time, const Array&) const {
+        Matrix tmp(corrMatrix_);
+        return tmp;
+    }
+
+    Real LmLinearExponentialCorrelationModel::correlation(
+                                   Size i, Size j, Time, const Array&) const {
+        return corrMatrix_[i][j];
+    }
+
+    bool LmLinearExponentialCorrelationModel::isTimeIndependent() const {
+        return true;
+    }
+
+    Size LmLinearExponentialCorrelationModel::factors() const {
+        return factors_;
+    }
+
+
+    Matrix LmLinearExponentialCorrelationModel::pseudoSqrt(Time, const Array&) const {
+        Matrix tmp(pseudoSqrt_);
+        return tmp;
+    }
+
+    void LmLinearExponentialCorrelationModel::generateArguments() {
+        const Real rho = arguments_[0](0.0);
+        const Real beta= arguments_[1](0.0);
+
+        for (Size i=0; i<size_; ++i) {
+            for (Size j=i; j<size_; ++j) {
+                corrMatrix_[i][j] = corrMatrix_[j][i]
+                    = rho + (1-rho)*std::exp(-beta*std::fabs(Real(i)-Real(j)));
+            }
+        }
+
+        pseudoSqrt_ = rankReducedSqrt(corrMatrix_, factors_,
+                                      1.0, SalvagingAlgorithm::None);
+
+        corrMatrix_ = pseudoSqrt_ * transpose(pseudoSqrt_);
+    }
+}
+
+]]></document_content>
+  </document>
+  <document index="12">
+    <source>libormarketmodels/lmlinexpvolmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/lmlinexpvolmodel.hpp>
+
+namespace QuantLib {
+
+    LmLinearExponentialVolatilityModel::LmLinearExponentialVolatilityModel(
+                                         const std::vector<Time>& fixingTimes,
+                                         Real a, Real b, Real c, Real d)
+    : LmVolatilityModel(fixingTimes.size(), 4),
+      fixingTimes_(fixingTimes) {
+        arguments_[0] = ConstantParameter(a, PositiveConstraint());
+        arguments_[1] = ConstantParameter(b, PositiveConstraint());
+        arguments_[2] = ConstantParameter(c, PositiveConstraint());
+        arguments_[3] = ConstantParameter(d, PositiveConstraint());
+    }
+
+
+    Array LmLinearExponentialVolatilityModel::volatility(
+                                                 Time t, const Array&) const {
+        const Real a = arguments_[0](0.0);
+        const Real b = arguments_[1](0.0);
+        const Real c = arguments_[2](0.0);
+        const Real d = arguments_[3](0.0);
+
+        Array tmp(size_, 0.0);
+
+        for (Size i=0; i<size_; ++i) {
+            const Time T = fixingTimes_[i];
+            if (T>t) {
+                tmp[i] = (a*(T-t)+d)*std::exp(-b*(T-t)) + c;
+            }
+        }
+
+        return tmp;
+    }
+
+    Volatility LmLinearExponentialVolatilityModel::volatility(
+                                         Size i, Time t, const Array&) const {
+        const Real a = arguments_[0](0.0);
+        const Real b = arguments_[1](0.0);
+        const Real c = arguments_[2](0.0);
+        const Real d = arguments_[3](0.0);
+
+        const Time T = fixingTimes_[i];
+
+        return (T>t) ? (a*(T-t)+d)*std::exp(-b*(T-t)) + c : Real(0.0);
+    }
+
+    Real LmLinearExponentialVolatilityModel::integratedVariance(
+                                 Size i, Size j, Time u, const Array&) const {
+        const Real a = arguments_[0](0.0);
+        const Real b = arguments_[1](0.0);
+        const Real c = arguments_[2](0.0);
+        const Real d = arguments_[3](0.0);
+
+        const Time T = fixingTimes_[i];
+        const Time S = fixingTimes_[j];
+
+        const Real k1=std::exp(b*u);
+        const Real k2=std::exp(b*S);
+        const Real k3=std::exp(b*T);
+
+        return (a*a*(-1 - 2*b*b*S*T - b*(S + T)
+                     + k1*k1*(1 + b*(S + T - 2*u) + 2*b*b*(S - u)*(T - u)))
+                + 2*b*b*(2*c*d*(k2 + k3)*(k1 - 1)
+                         +d*d*(k1*k1 - 1)+2*b*c*c*k2*k3*u)
+                + 2*a*b*(d*(-1 - b*(S + T) + k1*k1*(1 + b*(S + T - 2*u)))
+                         -2*c*(k3*(1 + b*S) + k2*(1 + b*T)
+                               - k1*k3*(1 + b*(S - u))
+                               - k1*k2*(1 + b*(T - u)))
+                         )
+                ) / (4*b*b*b*k2*k3);
+    }
+
+    void LmLinearExponentialVolatilityModel::generateArguments() {}
+
+}
+
+]]></document_content>
+  </document>
+  <document index="13">
+    <source>libormarketmodels/lmvolmodel.cpp</source>
+    <document_content><![CDATA[/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2005, 2006 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/legacy/libormarketmodels/lmlinexpvolmodel.hpp>
+
+namespace QuantLib {
+
+    LmVolatilityModel::LmVolatilityModel(Size size, Size nArguments)
+    : size_(size),
+      arguments_(nArguments) {
+    }
+
+    Size LmVolatilityModel::size() const {
+        return size_;
+    }
+
+    Volatility LmVolatilityModel::volatility(
+        Size i, Time t, const Array& x) const {
+        // inefficient implementation, please overload in derived classes
+        return volatility(t, x)[i];
+    }
+
+    Real LmVolatilityModel::integratedVariance(Size, Size, Time,
+                                               const Array&) const {
+        QL_FAIL("integratedVariance() method is not supported");
+    }
+
+    std::vector<Parameter> & LmVolatilityModel::params() {
+        return arguments_;
+    }
+
+    void LmVolatilityModel::setParams(
+        const std::vector<Parameter> & arguments) {
+        arguments_ = arguments;
+        generateArguments();
+    }
+
+}
+
+]]></document_content>
+  </document>
+</documents>
