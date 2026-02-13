@@ -1,0 +1,821 @@
+<system_context>
+You are an expert C++ developer implementing two positivity-preserving finite
+difference schemes from Milev & Tagliani (2010) into QuantLib 1.42-dev's modern
+Fdm* framework. The schemes address spurious oscillations and negative prices
+that standard Crank–Nicolson produces when σ² ≪ r and payoffs are discontinuous.
+
+PAPER REFERENCE (corrected formulations):
+Scheme 1: Fully implicit with Duffy's exponentially fitted diffusion coefficient.
+Scheme 2: Crank–Nicolson variant with a modified 6-node reaction-term stencil.
+Both are described in the GOLDEN REFERENCE DOCUMENT (Round 1.5 output), whose
+corrected equation chain (CE-1 through CE-25) is authoritative.
+
+SOURCE-OF-TRUTH / NO-HALLUCINATION RULES (mandatory):
+- Use ONLY the provided source files and prior-round outputs as factual reference
+  for class/method signatures, include paths, base-class requirements, and
+  coding conventions.
+- If any referenced file content is missing (i.e., an 
+
+<task>
+ROUND 5 OF 7: Modify the user-facing pricing engine to expose new capabilities,
+wire the barrier projection condition into the step condition composite, and
+update header registraOUTPUT: 6-8 files.
+</task>
+
+<source_files>
+FILE: ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdblackscholesvanillaengine.hpp
+    \brief Finite-differences Black Scholes vanilla option engine
+*/
+
+#ifndef quantlib_fd_black_scholes_vanilla_engine_hpp
+#define quantlib_fd_black_scholes_vanilla_engine_hpp
+
+#include <ql/pricingengine.hpp>
+#include <ql/pricingengines/vanilla/cashdividendeuropeanengine.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+
+namespace QuantLib {
+
+    class FdmQuantoHelper;
+    class GeneralizedBlackScholesProcess;
+
+    //! Finite-differences Black Scholes vanilla option engine
+    /*! \ingroup vanillaengines
+
+        \test the correctness of the returned value is tested by
+              reproducing results available in web/literature
+              and comparison with Black pricing.
+    */
+    class FdBlackScholesVanillaEngine : public VanillaOption::engine {
+      public:
+        enum CashDividendModel {
+            Spot = CashDividendEuropeanEngine::Spot,
+            Escrowed = CashDividendEuropeanEngine::Escrowed
+        };
+
+        explicit FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            DividendSchedule dividends,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            DividendSchedule dividends,
+            ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        void calculate() const override;
+
+      private:
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
+        DividendSchedule dividends_;
+        Size tGrid_, xGrid_, dampingSteps_;
+        FdmSchemeDesc schemeDesc_;
+        bool localVol_;
+        Real illegalLocalVolOverwrite_;
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
+        CashDividendModel cashDividendModel_;
+    };
+
+
+    class MakeFdBlackScholesVanillaEngine {
+      public:
+        explicit MakeFdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess> process);
+
+        MakeFdBlackScholesVanillaEngine& withQuantoHelper(
+            const ext::shared_ptr<FdmQuantoHelper>& quantoHelper);
+
+        MakeFdBlackScholesVanillaEngine& withTGrid(Size tGrid);
+        MakeFdBlackScholesVanillaEngine& withXGrid(Size xGrid);
+        MakeFdBlackScholesVanillaEngine& withDampingSteps(
+            Size dampingSteps);
+
+        MakeFdBlackScholesVanillaEngine& withFdmSchemeDesc(
+            const FdmSchemeDesc& schemeDesc);
+
+        MakeFdBlackScholesVanillaEngine& withLocalVol(bool localVol);
+        MakeFdBlackScholesVanillaEngine& withIllegalLocalVolOverwrite(
+            Real illegalLocalVolOverwrite);
+
+        MakeFdBlackScholesVanillaEngine& withCashDividends(
+            const std::vector<Date>& dividendDates,
+            const std::vector<Real>& dividendAmounts);
+
+        MakeFdBlackScholesVanillaEngine& withCashDividendModel(
+            FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel);
+
+        operator ext::shared_ptr<PricingEngine>() const;
+      private:
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
+        DividendSchedule dividends_;
+        Size tGrid_ = 100, xGrid_ = 100, dampingSteps_ = 0;
+        ext::shared_ptr<FdmSchemeDesc> schemeDesc_;
+        bool localVol_ = false;
+        Real illegalLocalVolOverwrite_;
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
+        FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel_ = FdBlackScholesVanillaEngine::Spot;
+    };
+
+}
+
+#endif
+
+
+FILE: ql/pricingengines/vanilla/fdblackscholesvanillaengine.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+#include <ql/methods/finitedifferences/utilities/escroweddividendadjustment.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmescrowedloginnervaluecalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+
+namespace QuantLib {
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)), tGrid_(tGrid), xGrid_(xGrid),
+      dampingSteps_(dampingSteps), schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+    }
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        DividendSchedule dividends,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)), dividends_(std::move(dividends)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps), schemeDesc_(schemeDesc),
+      localVol_(localVol), illegalLocalVolOverwrite_(illegalLocalVolOverwrite),
+      cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+    }
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), quantoHelper_(std::move(quantoHelper)),
+      cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+        registerWith(quantoHelper_);
+    }
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        DividendSchedule dividends,
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)), dividends_(std::move(dividends)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), quantoHelper_(std::move(quantoHelper)),
+      cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+        registerWith(quantoHelper_);
+    }
+
+
+    void FdBlackScholesVanillaEngine::calculate() const {
+
+        // 0. Cash dividend model
+        const Date exerciseDate = arguments_.exercise->lastDate();
+        const Time maturity = process_->time(exerciseDate);
+        const Date settlementDate = process_->riskFreeRate()->referenceDate();
+
+        Real spotAdjustment = 0.0;
+        DividendSchedule dividendSchedule = DividendSchedule();
+
+        ext::shared_ptr<EscrowedDividendAdjustment> escrowedDivAdj;
+
+        switch (cashDividendModel_) {
+          case Spot:
+            dividendSchedule = dividends_;
+            break;
+          case Escrowed:
+            if  (arguments_.exercise->type() != Exercise::European)
+                // add dividend dates as stopping times
+                for (const auto& cf: dividends_)
+                    dividendSchedule.push_back(
+                        ext::make_shared<FixedDividend>(0.0, cf->date()));
+
+            QL_REQUIRE(quantoHelper_ == nullptr,
+                "Escrowed dividend model is not supported for Quanto-Options");
+
+            escrowedDivAdj = ext::make_shared<EscrowedDividendAdjustment>(
+                dividends_,
+                process_->riskFreeRate(),
+                process_->dividendYield(),
+                [&](Date d){ return process_->time(d); },
+                maturity
+            );
+
+            spotAdjustment =
+                escrowedDivAdj->dividendAdjustment(process_->time(settlementDate));
+
+            QL_REQUIRE(process_->x0() + spotAdjustment > 0.0,
+                    "spot minus dividends becomes negative");
+
+            break;
+          default:
+              QL_FAIL("unknwon cash dividend model");
+        }
+
+        // 1. Mesher
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+
+        const ext::shared_ptr<Fdm1dMesher> equityMesher =
+            ext::make_shared<FdmBlackScholesMesher>(
+                    xGrid_, process_, maturity, payoff->strike(), 
+                    Null<Real>(), Null<Real>(), 0.0001, 1.5,
+                    std::pair<Real, Real>(payoff->strike(), 0.1),
+                    dividendSchedule, quantoHelper_,
+                    spotAdjustment);
+        
+        const ext::shared_ptr<FdmMesher> mesher =
+            ext::make_shared<FdmMesherComposite>(equityMesher);
+        
+        // 2. Calculator
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator =
+            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+
+        ext::shared_ptr<FdmInnerValueCalculator> earlyExerciseCalculator;
+        switch (cashDividendModel_) {
+          case Spot:
+              earlyExerciseCalculator = calculator;
+            break;
+          case Escrowed:
+              earlyExerciseCalculator = ext::make_shared<FdmEscrowedLogInnerValueCalculator>(
+                  escrowedDivAdj, payoff, mesher, 0);
+            break;
+          default:
+              QL_FAIL("unknwon cash dividend model");
+        }
+
+        // 3. Step conditions
+        const ext::shared_ptr<FdmStepConditionComposite> conditions = 
+            FdmStepConditionComposite::vanillaComposite(
+                dividendSchedule, arguments_.exercise, mesher,
+                earlyExerciseCalculator,
+                process_->riskFreeRate()->referenceDate(),
+                process_->riskFreeRate()->dayCounter());
+
+        // 4. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+
+        // 5. Solver
+        FdmSolverDesc solverDesc = {
+            mesher, boundaries, conditions, calculator, maturity, tGrid_, dampingSteps_
+        };
+
+        const ext::shared_ptr<FdmBlackScholesSolver> solver(
+            ext::make_shared<FdmBlackScholesSolver>(
+                Handle<GeneralizedBlackScholesProcess>(process_),
+                payoff->strike(), solverDesc, schemeDesc_,
+                localVol_, illegalLocalVolOverwrite_,
+                Handle<FdmQuantoHelper>(quantoHelper_)));
+
+        const Real spot = process_->x0() + spotAdjustment;
+
+        results_.value = solver->valueAt(spot);
+        results_.delta = solver->deltaAt(spot);
+        results_.gamma = solver->gammaAt(spot);
+        results_.theta = solver->thetaAt(spot);
+    }
+
+    MakeFdBlackScholesVanillaEngine::MakeFdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)),
+      schemeDesc_(ext::make_shared<FdmSchemeDesc>(FdmSchemeDesc::Douglas())),
+      illegalLocalVolOverwrite_(-Null<Real>()) {}
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withQuantoHelper(
+        const ext::shared_ptr<FdmQuantoHelper>& quantoHelper) {
+        quantoHelper_ = quantoHelper;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withTGrid(Size tGrid) {
+        tGrid_ = tGrid;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withXGrid(Size xGrid) {
+        xGrid_ = xGrid;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withDampingSteps(Size dampingSteps) {
+        dampingSteps_ = dampingSteps;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withFdmSchemeDesc(
+        const FdmSchemeDesc& schemeDesc) {
+        schemeDesc_ = ext::make_shared<FdmSchemeDesc>(schemeDesc);
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withLocalVol(bool localVol) {
+        localVol_ = localVol;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withIllegalLocalVolOverwrite(
+        Real illegalLocalVolOverwrite) {
+        illegalLocalVolOverwrite_ = illegalLocalVolOverwrite;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withCashDividends(
+            const std::vector<Date>& dividendDates,
+            const std::vector<Real>& dividendAmounts) {
+        dividends_ = DividendVector(dividendDates, dividendAmounts);
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withCashDividendModel(
+        FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel) {
+        cashDividendModel_ = cashDividendModel;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine::operator
+    ext::shared_ptr<PricingEngine>() const {
+        return ext::make_shared<FdBlackScholesVanillaEngine>(
+                process_,
+                dividends_,
+                quantoHelper_,
+                tGrid_, xGrid_, dampingSteps_,
+                *schemeDesc_,
+                localVol_,
+                illegalLocalVolOverwrite_,
+                cashDividendModel_);
+    }
+
+}
+
+
+FILE: ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmstepconditioncomposite.hpp
+    \brief composite of fdm step conditions
+*/
+
+#ifndef quantlib_fdm_step_condition_composite_hpp
+#define quantlib_fdm_step_condition_composite_hpp
+
+#include <ql/time/date.hpp>
+#include <ql/time/daycounter.hpp>
+#include <ql/instruments/dividendschedule.hpp>
+#include <ql/methods/finitedifferences/stepcondition.hpp>
+
+#include <list>
+
+namespace QuantLib {
+
+    class FdmMesher;
+    class Exercise;
+    class FdmSnapshotCondition;
+    class FdmInnerValueCalculator;
+    
+    class FdmStepConditionComposite : public StepCondition<Array> {
+    public:
+        typedef std::list<ext::shared_ptr<StepCondition<Array> > > Conditions;
+
+        FdmStepConditionComposite(const std::list<std::vector<Time> >& stoppingTimes,
+                                  Conditions conditions);
+
+        void applyTo(Array& a, Time t) const override;
+        const std::vector<Time>& stoppingTimes() const;
+        const Conditions& conditions() const;
+
+        static ext::shared_ptr<FdmStepConditionComposite> joinConditions(
+                    const ext::shared_ptr<FdmSnapshotCondition>& c1,
+                    const ext::shared_ptr<FdmStepConditionComposite>& c2);
+
+        static ext::shared_ptr<FdmStepConditionComposite> vanillaComposite(
+             const DividendSchedule& schedule,
+             const ext::shared_ptr<Exercise>& exercise,
+             const ext::shared_ptr<FdmMesher>& mesher,
+             const ext::shared_ptr<FdmInnerValueCalculator>& calculator,
+             const Date& refDate,
+             const DayCounter& dayCounter);
+        
+    private:
+        std::vector<Time> stoppingTimes_;
+        const Conditions conditions_;
+    };
+}
+#endif
+
+
+FILE: ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+
+#include <ql/exercise.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmamericanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmbermudanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmsnapshotcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdividendhandler.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <set>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmStepConditionComposite::FdmStepConditionComposite(
+        const std::list<std::vector<Time> >& stoppingTimes, Conditions conditions)
+    : conditions_(std::move(conditions)) {
+
+        std::set<Real> allStoppingTimes;
+        for (const auto& stoppingTime : stoppingTimes) {
+            allStoppingTimes.insert(stoppingTime.begin(), stoppingTime.end());
+        }
+        stoppingTimes_ = std::vector<Time>(allStoppingTimes.begin(),
+                                           allStoppingTimes.end());
+    }
+
+    const FdmStepConditionComposite::Conditions&
+    FdmStepConditionComposite::conditions() const {
+        return conditions_;
+    }
+
+    const std::vector<Time>& FdmStepConditionComposite::stoppingTimes() const {
+        return stoppingTimes_;
+    }
+
+    void FdmStepConditionComposite::applyTo(Array& a, Time t) const {
+        for (const auto& condition : conditions_) {
+            condition->applyTo(a, t);
+        }
+    }
+    
+    ext::shared_ptr<FdmStepConditionComposite> 
+    FdmStepConditionComposite::joinConditions(
+                const ext::shared_ptr<FdmSnapshotCondition>& c1,
+                const ext::shared_ptr<FdmStepConditionComposite>& c2) {
+
+        std::list<std::vector<Time> > stoppingTimes;
+        stoppingTimes.push_back(c2->stoppingTimes());
+        stoppingTimes.emplace_back(1, c1->getTime());
+
+        FdmStepConditionComposite::Conditions conditions;
+        conditions.push_back(c2);
+        conditions.push_back(c1);
+
+        return ext::make_shared<FdmStepConditionComposite>(
+            stoppingTimes, conditions);
+    }
+
+    ext::shared_ptr<FdmStepConditionComposite> 
+    FdmStepConditionComposite::vanillaComposite(
+                 const DividendSchedule& cashFlow,
+                 const ext::shared_ptr<Exercise>& exercise,
+                 const ext::shared_ptr<FdmMesher>& mesher,
+                 const ext::shared_ptr<FdmInnerValueCalculator>& calculator,
+                 const Date& refDate,
+                 const DayCounter& dayCounter) {
+        
+        std::list<std::vector<Time> > stoppingTimes;
+        std::list<ext::shared_ptr<StepCondition<Array> > > stepConditions;
+
+        if (!cashFlow.empty()) {
+            const Date maturityDate = exercise->lastDate();
+            DividendSchedule dividends;
+            std::copy_if(
+                cashFlow.begin(), cashFlow.end(),
+                std::back_inserter(dividends),
+                [refDate, maturityDate](const ext::shared_ptr<Dividend>& div) -> bool {
+                    return div->date() >= refDate && div->date() <= maturityDate;
+                }
+            );
+
+            auto dividendCondition =
+                ext::make_shared<FdmDividendHandler>(dividends, mesher,
+                                                     refDate, dayCounter, 0);
+            stepConditions.push_back(dividendCondition);
+
+            std::vector<Time> dividendTimes = dividendCondition->dividendTimes();
+            const Time maturityTime = dayCounter.yearFraction(refDate, exercise->lastDate());
+
+            // this effectively excludes times after maturity
+            for (auto& t: dividendTimes)
+                t = std::min(maturityTime, t);
+            stoppingTimes.push_back(dividendTimes);
+
+            // smoother convergence behavior with number of time steps
+            for (auto& t: dividendTimes)
+                t = std::min(maturityTime, t+1e-5);
+            stoppingTimes.push_back(dividendTimes);
+        }
+
+        QL_REQUIRE(   exercise->type() == Exercise::American
+                   || exercise->type() == Exercise::European
+                   || exercise->type() == Exercise::Bermudan,
+                   "exercise type is not supported");
+        if (exercise->type() == Exercise::American) {
+            stepConditions.push_back(ext::shared_ptr<StepCondition<Array> >(
+                          new FdmAmericanStepCondition(mesher,calculator)));
+        }
+        else if (exercise->type() == Exercise::Bermudan) {
+            ext::shared_ptr<FdmBermudanStepCondition> bermudanCondition(
+                new FdmBermudanStepCondition(exercise->dates(),
+                                             refDate, dayCounter,
+                                             mesher, calculator));
+            stepConditions.push_back(bermudanCondition);
+            stoppingTimes.push_back(bermudanCondition->exerciseTimes());
+        }
+        
+        return ext::make_shared<FdmStepConditionComposite>(
+            stoppingTimes, stepConditions);
+
+    }
+
+}
+
+
+FILE: ql/methods/finitedifferences/stepconditions/all.hpp
+/* This file is automatically generated; do not edit.     */
+/* Add the files to be included into Makefile.am instead. */
+
+#include <ql/methods/finitedifferences/stepconditions/fdmamericanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmarithmeticaveragecondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmbermudanstepcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmsimplestoragecondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmsimpleswingcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmsnapshotcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+
+
+
+FILE: ql/methods/finitedifferences/utilities/all.hpp
+/* This file is automatically generated; do not edit.     */
+/* Add the files to be included into Makefile.am instead. */
+
+#include <ql/methods/finitedifferences/utilities/bsmrndcalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/cevrndcalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/escroweddividendadjustment.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmaffinemodelswapinnervalue.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmaffinemodeltermstructure.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmboundaryconditionset.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdirichletboundary.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdiscountdirichletboundary.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdividendhandler.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmescrowedloginnervaluecalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmhestongreensfct.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmindicesonboundary.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmmesherintegral.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmshoutloginnervaluecalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmtimedepdirichletboundary.hpp>
+#include <ql/methods/finitedifferences/utilities/gbsmrndcalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/hestonrndcalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/localvolrndcalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/riskneutraldensitycalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/squarerootprocessrndcalculator.hpp>
+
+
+
+ROUND 1-4 OUTPUTS (headers only, for #include paths):
+[>>> ATTACH HERE: output file(s) generated in Round(s) 1, 2, 3, 4 <<<]
+</source_files>
+
+<implementation_guidance>
+
+=== FILE 1-2: Modified FdBlackScholesVanillaEngine ===
+
+The operatorType and monitoringDampingSteps are carried inside FdmSchemeDesc.
+Users select the scheme via the static factories:
+  FdmSchemeDesc::FittedImplicit()
+  FdmSchemeDesc::FittedCrankNicolson()
+  FdmSchemeDesc::CNVariant()
+  FdmSchemeDesc::CrankNicolsonWithDamping(2)
+
+Existing constructor signature must still compile.
+
+
+=== FILE 3-4: Modified FdmStepConditionComposite ===
+
+Add a new static factory for barrier-monitored options:
+
+  static ext::shared_ptr<FdmStepConditionComposite>
+  barrierMonitoredComposite(
+      const DividendSchedule& cashFlow,
+      const ext::shared_ptr<Exercise>& exercise,
+      const ext::shared_ptr<FdmMesher>& mesher,
+      const ext::shared_ptr<FdmInnerValueCalculator>& calculator,
+      const Date& refDate,
+      const DayCounter& dayCounter,
+      const std::vector<Date>& monitoringDates,
+      Real lowerBarrier,
+      Real upperBarrier);
+
+Empty monitoringDates must return same result as vanillaComposite().
+
+
+=== FILES 5-7: Updated all.hpp headers ===
+
+operators/all.hpp: add
+  #include <ql/methods/finitedifferences/operators/fdmfittedblackscholesop.hpp>
+  #include <ql/methods/finitedifferences/operators/fdmcnvariantblackscholesop.hpp>
+
+stepconditions/all.hpp: add
+  #include <ql/methods/finitedifferences/stepconditions/fdmbarrierprojectioncondition.hpp>
+
+utilities/all.hpp: add
+  #include <ql/methods/finitedifferences/utilities/fdmdiagnostics.hpp>
+
+All additions in alphabetical order.
+
+</implementation_guidance>
+
+<constraints>
+- Existing constructor signatures must still compile
+- FdmSchemeDesc::Douglas() default produces identical results to original
+- all.hpp additions alphabetically sorted
+- No circular include dependencies
+- If engine file path or content missing, STOP and ask
+</constraints>
+
+<output_specification>
+Produce the following files:
+1. fdblackscholesvanillaengine.hpp (modified)
+2. fdblackscholesvanillaengine.cpp (modified)
+3. fdmstepconditioncomposite.hpp (modified)
+4. fdmstepconditioncomposite.cpp (modified)
+5. operators/all.hpp (modified)
+6. stepconditions/all.hpp (modified)
+7. utilities/all.hpp (modified)
+</output_specification>
+
+<quality_checklist>
+□ Existing code compiles without changes
+□ Default schemeDesc produces identical results to original
+□ barrierMonitoredComposite with empty monitoring dates = vanillaComposite
+□ all.hpp entries alphabetically sorted
+□ No new public dependencies in engine .hpp
+</quality_checklist>

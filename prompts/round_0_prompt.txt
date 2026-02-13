@@ -1,0 +1,3521 @@
+<system_context>
+You are an expert C++ developer implementing two positivity-preserving finite
+difference schemes from Milev & Tagliani (2010) into QuantLib 1.42-dev's modern
+Fdm* framework. The schemes address spurious oscillations and negative prices
+that standard Crank–Nicolson produces when σ² ≪ r and payoffs are discontinuous.
+
+PAPER REFERENCE (corrected formulations):
+Scheme 1: Fully implicit with Duffy's exponentially fitted diffusion coefficient.
+Scheme 2: Crank–Nicolson variant with a modified 6-node reaction-term stencil.
+Both are described in the GOLDEN REFERENCE DOCUMENT (Round 1.5 output), whose
+corrected equation chain (CE-1 through CE-25) is authoritative.
+
+SOURCE-OF-TRUTH / NO-HALLUCINATION RULES (mandatory):
+- Use ONLY the provided source files and prior-round outputs as factual reference
+  for class/method signatures, include paths, base-class requirements, and
+  coding conventions.
+- If any referenced file content is missing (i.e., an 
+
+<task>
+ROUND 0 (OPTIONAL): Preflight mode — do NOT write code.
+
+You are given the complete set of QuantLib 1.42-dev header AND implementation
+files from the methods/finitedifferences/ directory tree. Perform a systematic
+audit to answer the questions below and produce a file-level implementation
+roadmap.
+
+PART A: Source Audit Questions
+
+Answer each with citations to specific identifiers/lines in the provided sources:
+
+1) COORDINATE CONVENTION:
+   a) What does FdmBlackScholesMesher store as the spatial coordinate x?
+      Is it ln(S), ln(S/K), or something else?
+   b) How does FdmBlackScholesOp interpret mesher->location() in its setTime()?
+   c) If the mesher uses ln(S/K), how is the strike communicated?
+
+2) DERIVATIVE OPERATORS:
+   a) How do FirstDerivativeOp / SecondDerivativeOp compute their stencils?
+   b) What spacing functions do they use (dplus/dminus from the mesher)?
+   c) What is the exact stencil at interior nodes? At boundary nodes?
+
+3) OPERATOR ASSEMBLY:
+   a) What does TripleBandLinearOp::axpyb(a, op1, op2, rhs) compute?
+   b) What are the exact index conventions for lower_[], diag_[], upper_[]?
+   c) How does mult(Array) work?
+
+4) TIME-STEPPING (MODERN FRAMEWORK):
+   a) How does FdmBackwardSolver::rollback() handle stopping times during
+      the CN phase? Does it segment the rollback at stopping times?
+   b) Is applyTo called at the initial 'from' time?
+   c) How are scheme instances (e.g., CrankNicolsonScheme) created inside
+      rollback — by value, by pointer? Do they persist across segments?
+
+5) SCHEME CONFIGURATION:
+   a) Are FdmSchemeDesc members (type, theta, mu) const or non-const?
+   b) How does FdmBackwardSolver's rollback method handle damping steps?
+   c) How does CrankNicolsonScheme combine explicit and implicit sub-steps?
+      (It delegates to ExplicitEulerScheme::step(a,t,theta) and
+       ImplicitEulerScheme::step(a,t,theta) via friend access.)
+
+6) SIGN CONVENTIONS:
+   a) For the operator L stored in mapT_, what sign convention do the
+      off-diagonals use? (lower_[i] multiplies u[i-neighbor_below])
+   b) For the system matrix (I − θ·dt·L), what sign must the off-diagonals
+      of L have for the system to be an M-matrix?
+      (Answer: L off-diags must be ≥ 0 so that −θ·dt·L off-diags ≤ 0.)
+   c) Verify with the standard FdmBlackScholesOp: are its off-diagonals
+      always non-negative? Under what grid conditions?
+
+PART B: Coordinate Translation
+
+Using the verified coordinate convention from Part A:
+
+7) Translate the paper's S-space fitting factor (CE-7):
+     ρ_j = (μ_j·ΔS/2)·coth(μ_j·ΔS/(2·σ_d^(j)))
+   to the log-space Péclet parameter Pe_j and fitting factor in terms of
+   QuantLib's operator coefficients a = σ²/2 and b = r−q−σ²/2.
+
+8) Translate the paper's CN variant parameter choice (CE-19):
+     ω = −r/(16σ²)
+   to the log-space effective diffusion coefficient. Show that the correct
+   value for use with standard CN time-stepping is:
+     a_eff = σ²/2 + r²·h²/(8·σ²)
+   (The factor r²h²/(8σ²) arises because the paper applies FULL ω at each
+   time level while standard CN halves the operator.)
+
+9) Express the M-matrix condition for both schemes in terms of the
+   TripleBandLinearOp coefficients (lower_[], upper_[]) after axpyb().
+
+PART C: File-Level Implementation Roadmap
+
+10) Based on the audit, produce a table listing:
+    - Each new file to create (path, class name, purpose)
+    - Each existing file to modify (path, what changes, which round)
+    - Dependencies between rounds
+    - Estimated output size per round
+
+If any answer cannot be determined from the provided sources, say exactly
+what additional file is needed.
+</task>
+
+<source_files>
+FILE: ql/methods/finitedifferences/operators/fdmblackscholesop.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmblackscholesop.hpp
+    \brief Black Scholes linear operator
+*/
+
+#ifndef quantlib_fdm_black_scholes_op_hpp
+#define quantlib_fdm_black_scholes_op_hpp
+
+#include <ql/payoff.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
+#include <ql/methods/finitedifferences/operators/firstderivativeop.hpp>
+#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp>
+
+namespace QuantLib {
+
+    class FdmBlackScholesOp : public FdmLinearOpComposite {
+      public:
+        FdmBlackScholesOp(
+            const ext::shared_ptr<FdmMesher>& mesher,
+            const ext::shared_ptr<GeneralizedBlackScholesProcess>& process,
+            Real strike,
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            Size direction = 0,
+            ext::shared_ptr<FdmQuantoHelper> quantoHelper = ext::shared_ptr<FdmQuantoHelper>());
+
+        Size size() const override;
+        void setTime(Time t1, Time t2) override;
+
+        Array apply(const Array& r) const override;
+        Array apply_mixed(const Array& r) const override;
+        Array apply_direction(Size direction, const Array& r) const override;
+        Array solve_splitting(Size direction, const Array& r, Real s) const override;
+        Array preconditioner(const Array& r, Real s) const override;
+
+        std::vector<SparseMatrix> toMatrixDecomp() const override;
+
+      private:
+        const ext::shared_ptr<FdmMesher> mesher_;
+        const ext::shared_ptr<YieldTermStructure> rTS_, qTS_;
+        const ext::shared_ptr<BlackVolTermStructure> volTS_;
+        const ext::shared_ptr<LocalVolTermStructure> localVol_;
+        const Array x_;
+        const FirstDerivativeOp  dxMap_;
+        const TripleBandLinearOp dxxMap_;
+        TripleBandLinearOp mapT_;
+        const Real strike_;
+        const Real illegalLocalVolOverwrite_;
+        const Size direction_;
+        const ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/operators/fdmblackscholesop.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/instruments/payoffs.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmBlackScholesOp::FdmBlackScholesOp(
+        const ext::shared_ptr<FdmMesher>& mesher,
+        const ext::shared_ptr<GeneralizedBlackScholesProcess>& bsProcess,
+        Real strike,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        Size direction,
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper)
+    : mesher_(mesher), rTS_(bsProcess->riskFreeRate().currentLink()),
+      qTS_(bsProcess->dividendYield().currentLink()),
+      volTS_(bsProcess->blackVolatility().currentLink()),
+      localVol_((localVol) ? bsProcess->localVolatility().currentLink() :
+                             ext::shared_ptr<LocalVolTermStructure>()),
+      x_((localVol) ? Array(Exp(mesher->locations(direction))) : Array()),
+      dxMap_(FirstDerivativeOp(direction, mesher)), dxxMap_(SecondDerivativeOp(direction, mesher)),
+      mapT_(direction, mesher), strike_(strike),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), direction_(direction),
+      quantoHelper_(std::move(quantoHelper)) {}
+
+    void FdmBlackScholesOp::setTime(Time t1, Time t2) {
+        const Rate r = rTS_->forwardRate(t1, t2, Continuous).rate();
+        const Rate q = qTS_->forwardRate(t1, t2, Continuous).rate();
+
+        if (localVol_ != nullptr) {
+            Array v(mesher_->layout()->size());
+            for (const auto& iter : *mesher_->layout()) {
+                const Size i = iter.index();
+
+                if (illegalLocalVolOverwrite_ < 0.0) {
+                    v[i] = squared(localVol_->localVol(0.5*(t1+t2), x_[i], true));
+                }
+                else {
+                    try {
+                        v[i] = squared(localVol_->localVol(0.5*(t1+t2), x_[i], true));
+                    } catch (Error&) {
+                        v[i] = squared(illegalLocalVolOverwrite_);
+                    }
+                }
+            }
+
+            if (quantoHelper_ != nullptr) {
+                mapT_.axpyb(r - q - 0.5*v
+                    - quantoHelper_->quantoAdjustment(Sqrt(v), t1, t2),
+                    dxMap_, dxxMap_.mult(0.5*v), Array(1, -r));
+            } else {
+                mapT_.axpyb(r - q - 0.5*v, dxMap_,
+                            dxxMap_.mult(0.5*v), Array(1, -r));
+            }
+        } else {
+            const Real v
+                = volTS_->blackForwardVariance(t1, t2, strike_)/(t2-t1);
+
+            if (quantoHelper_ != nullptr) {
+                mapT_.axpyb(
+                    Array(1, r - q - 0.5*v)
+                        - quantoHelper_->quantoAdjustment(
+                            Array(1, std::sqrt(v)), t1, t2),
+                    dxMap_,
+                    dxxMap_.mult(0.5*Array(mesher_->layout()->size(), v)),
+                    Array(1, -r));
+            } else {
+                mapT_.axpyb(Array(1, r - q - 0.5*v), dxMap_,
+                    dxxMap_.mult(0.5*Array(mesher_->layout()->size(), v)),
+                    Array(1, -r));
+            }
+        }
+    }
+
+    Size FdmBlackScholesOp::size() const { return 1U; }
+
+    Array FdmBlackScholesOp::apply(const Array& u) const {
+        return mapT_.apply(u);
+    }
+
+    Array FdmBlackScholesOp::apply_direction(Size direction,
+                                             const Array& r) const {
+        if (direction == direction_)
+            return mapT_.apply(r);
+        else {
+            return Array(r.size(), 0.0);
+        }
+    }
+
+    Array FdmBlackScholesOp::apply_mixed(const Array& r) const {
+        return Array(r.size(), 0.0);
+    }
+
+    Array FdmBlackScholesOp::solve_splitting(Size direction,
+                                             const Array& r, Real dt) const {
+        if (direction == direction_)
+            return mapT_.solve_splitting(r, dt, 1.0);
+        else {
+            return r;
+        }
+    }
+
+    Array FdmBlackScholesOp::preconditioner(const Array& r,
+                                            Real dt) const {
+        return solve_splitting(direction_, r, dt);
+    }
+
+    std::vector<SparseMatrix> FdmBlackScholesOp::toMatrixDecomp() const {
+        return std::vector<SparseMatrix>(1, mapT_.toMatrix());
+    }
+
+}
+
+
+FILE: ql/methods/finitedifferences/operators/triplebandlinearop.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+ Copyright (C) 2014 Johannes Göttker-Schnetmann
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file triplebandlinearop.hpp
+    \brief general triple band linear operator
+*/
+
+#ifndef quantlib_triple_band_linear_op_hpp
+#define quantlib_triple_band_linear_op_hpp
+
+#include <ql/methods/finitedifferences/operators/fdmlinearop.hpp>
+#include <memory>
+
+namespace QuantLib {
+
+    class FdmMesher;
+    
+    class TripleBandLinearOp : public FdmLinearOp {
+      public:
+        TripleBandLinearOp(Size direction,
+                           const ext::shared_ptr<FdmMesher>& mesher);
+
+        TripleBandLinearOp(const TripleBandLinearOp& m);
+        TripleBandLinearOp(TripleBandLinearOp&& m) noexcept;
+        TripleBandLinearOp& operator=(const TripleBandLinearOp& m);
+        TripleBandLinearOp& operator=(TripleBandLinearOp&& m) noexcept;
+        ~TripleBandLinearOp() override = default;
+
+        Array apply(const Array& r) const override;
+        Array solve_splitting(const Array& r, Real a, Real b = 1.0) const;
+
+        TripleBandLinearOp mult(const Array& u) const;
+        // interpret u as the diagonal of a diagonal matrix, multiplied on LHS
+        TripleBandLinearOp multR(const Array& u) const;
+        // interpret u as the diagonal of a diagonal matrix, multiplied on RHS
+        TripleBandLinearOp add(const TripleBandLinearOp& m) const;
+        TripleBandLinearOp add(const Array& u) const;
+
+        // some very basic linear algebra routines
+        void axpyb(const Array& a, const TripleBandLinearOp& x,
+                   const TripleBandLinearOp& y, const Array& b);
+
+        void swap(TripleBandLinearOp& m) noexcept;
+
+        SparseMatrix toMatrix() const override;
+
+      protected:
+        TripleBandLinearOp() = default;
+
+        Size direction_;
+        std::unique_ptr<Size[]> i0_, i2_;
+        std::unique_ptr<Size[]> reverseIndex_;
+        std::unique_ptr<Real[]> lower_, diag_, upper_;
+
+        ext::shared_ptr<FdmMesher> mesher_;
+    };
+
+
+    inline TripleBandLinearOp::TripleBandLinearOp(TripleBandLinearOp&& m) noexcept {
+        swap(m);
+    }
+
+    inline TripleBandLinearOp& TripleBandLinearOp::operator=(const TripleBandLinearOp& m) {
+        TripleBandLinearOp tmp(m);
+        swap(tmp);
+        return *this;
+    }
+
+    inline TripleBandLinearOp& TripleBandLinearOp::operator=(TripleBandLinearOp&& m) noexcept {
+        swap(m);
+        return *this;
+    }
+
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/operators/triplebandlinearop.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+ Copyright (C) 2014 Johannes Göttker-Schnetmann
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/tridiagonaloperator.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
+
+namespace QuantLib {
+
+    TripleBandLinearOp::TripleBandLinearOp(
+        Size direction,
+        const ext::shared_ptr<FdmMesher>& mesher)
+    : direction_(direction),
+      i0_       (new Size[mesher->layout()->size()]),
+      i2_       (new Size[mesher->layout()->size()]),
+      reverseIndex_ (new Size[mesher->layout()->size()]),
+      lower_    (new Real[mesher->layout()->size()]),
+      diag_     (new Real[mesher->layout()->size()]),
+      upper_    (new Real[mesher->layout()->size()]),
+      mesher_(mesher) {
+
+        std::vector<Size> newDim(mesher->layout()->dim());
+        std::iter_swap(newDim.begin(), newDim.begin()+direction_);
+        std::vector<Size> newSpacing = FdmLinearOpLayout(newDim).spacing();
+        std::iter_swap(newSpacing.begin(), newSpacing.begin()+direction_);
+
+        for (const auto& iter : *mesher->layout()) {
+            const Size i = iter.index();
+
+            i0_[i] = mesher->layout()->neighbourhood(iter, direction, -1);
+            i2_[i] = mesher->layout()->neighbourhood(iter, direction,  1);
+
+            const std::vector<Size>& coordinates = iter.coordinates();
+            const Size newIndex =
+                  std::inner_product(coordinates.begin(), coordinates.end(),
+                                     newSpacing.begin(), Size(0));
+            reverseIndex_[newIndex] = i;
+        }
+    }
+
+    TripleBandLinearOp::TripleBandLinearOp(const TripleBandLinearOp& m)
+    : direction_(m.direction_),
+      i0_   (new Size[m.mesher_->layout()->size()]),
+      i2_   (new Size[m.mesher_->layout()->size()]),
+      reverseIndex_(new Size[m.mesher_->layout()->size()]),
+      lower_(new Real[m.mesher_->layout()->size()]),
+      diag_ (new Real[m.mesher_->layout()->size()]),
+      upper_(new Real[m.mesher_->layout()->size()]),
+      mesher_(m.mesher_) {
+        const Size len = m.mesher_->layout()->size();
+        std::copy(m.i0_.get(), m.i0_.get() + len, i0_.get());
+        std::copy(m.i2_.get(), m.i2_.get() + len, i2_.get());
+        std::copy(m.reverseIndex_.get(), m.reverseIndex_.get()+len,
+                  reverseIndex_.get());
+        std::copy(m.lower_.get(), m.lower_.get() + len, lower_.get());
+        std::copy(m.diag_.get(),  m.diag_.get() + len,  diag_.get());
+        std::copy(m.upper_.get(), m.upper_.get() + len, upper_.get());
+    }
+
+    void TripleBandLinearOp::swap(TripleBandLinearOp& m) noexcept {
+        mesher_.swap(m.mesher_);
+        std::swap(direction_, m.direction_);
+
+        i0_.swap(m.i0_); i2_.swap(m.i2_);
+        reverseIndex_.swap(m.reverseIndex_);
+        lower_.swap(m.lower_); diag_.swap(m.diag_); upper_.swap(m.upper_);
+    }
+
+    void TripleBandLinearOp::axpyb(const Array& a,
+                                   const TripleBandLinearOp& x,
+                                   const TripleBandLinearOp& y,
+                                   const Array& b) {
+        const Size size = mesher_->layout()->size();
+
+        Real *diag(diag_.get());
+        Real *lower(lower_.get());
+        Real *upper(upper_.get());
+
+        const Real *y_diag (y.diag_.get());
+        const Real *y_lower(y.lower_.get());
+        const Real *y_upper(y.upper_.get());
+
+        if (a.empty()) {
+            if (b.empty()) {
+                //#pragma omp parallel for
+                for (Size i=0; i < size; ++i) {
+                    diag[i]  = y_diag[i];
+                    lower[i] = y_lower[i];
+                    upper[i] = y_upper[i];
+                }
+            }
+            else {
+                Array::const_iterator bptr(b.begin());
+                const Size binc = (b.size() > 1) ? 1 : 0;
+                //#pragma omp parallel for
+                for (Size i=0; i < size; ++i) {
+                    diag[i]  = y_diag[i] + bptr[i*binc];
+                    lower[i] = y_lower[i];
+                    upper[i] = y_upper[i];
+                }
+            }
+        }
+        else if (b.empty()) {
+            Array::const_iterator aptr(a.begin());
+            const Size ainc = (a.size() > 1) ? 1 : 0;
+
+            const Real *x_diag (x.diag_.get());
+            const Real *x_lower(x.lower_.get());
+            const Real *x_upper(x.upper_.get());
+
+            //#pragma omp parallel for
+            for (Size i=0; i < size; ++i) {
+                const Real s = aptr[i*ainc];
+                diag[i]  = y_diag[i]  + s*x_diag[i];
+                lower[i] = y_lower[i] + s*x_lower[i];
+                upper[i] = y_upper[i] + s*x_upper[i];
+            }
+        }
+        else {
+            Array::const_iterator bptr(b.begin());
+            const Size binc = (b.size() > 1) ? 1 : 0;
+
+            Array::const_iterator aptr(a.begin());
+            const Size ainc = (a.size() > 1) ? 1 : 0;
+
+            const Real *x_diag (x.diag_.get());
+            const Real *x_lower(x.lower_.get());
+            const Real *x_upper(x.upper_.get());
+
+            //#pragma omp parallel for
+            for (Size i=0; i < size; ++i) {
+                const Real s = aptr[i*ainc];
+                diag[i]  = y_diag[i]  + s*x_diag[i] + bptr[i*binc];
+                lower[i] = y_lower[i] + s*x_lower[i];
+                upper[i] = y_upper[i] + s*x_upper[i];
+            }
+        }
+    }
+
+    TripleBandLinearOp TripleBandLinearOp::add(const TripleBandLinearOp& m) const {
+
+        TripleBandLinearOp retVal(direction_, mesher_);
+        const Size size = mesher_->layout()->size();
+        //#pragma omp parallel for
+        for (Size i=0; i < size; ++i) {
+            retVal.lower_[i]= lower_[i] + m.lower_[i];
+            retVal.diag_[i] = diag_[i]  + m.diag_[i];
+            retVal.upper_[i]= upper_[i] + m.upper_[i];
+        }
+
+        return retVal;
+    }
+
+
+    TripleBandLinearOp TripleBandLinearOp::mult(const Array& u) const {
+
+        TripleBandLinearOp retVal(direction_, mesher_);
+
+        const Size size = mesher_->layout()->size();
+        //#pragma omp parallel for
+        for (Size i=0; i < size; ++i) {
+            const Real s = u[i];
+            retVal.lower_[i]= lower_[i]*s;
+            retVal.diag_[i] = diag_[i]*s;
+            retVal.upper_[i]= upper_[i]*s;
+        }
+
+        return retVal;
+    }
+
+    TripleBandLinearOp TripleBandLinearOp::multR(const Array& u) const {
+        const Size size = mesher_->layout()->size();
+        QL_REQUIRE(u.size() == size, "inconsistent size of rhs");
+        TripleBandLinearOp retVal(direction_, mesher_);
+
+        #pragma omp parallel for
+        for (long i=0; i < (long)size; ++i) {
+            const Real sm1 = i > 0? u[i-1] : 1.0;
+            const Real s0 = u[i];
+            const Real sp1 = i < (long)size-1? u[i+1] : 1.0;
+            retVal.lower_[i]= lower_[i]*sm1;
+            retVal.diag_[i] = diag_[i]*s0;
+            retVal.upper_[i]= upper_[i]*sp1;
+        }
+
+        return retVal;
+    }
+
+    TripleBandLinearOp TripleBandLinearOp::add(const Array& u) const {
+
+        TripleBandLinearOp retVal(direction_, mesher_);
+
+        const Size size = mesher_->layout()->size();
+        //#pragma omp parallel for
+        for (Size i=0; i < size; ++i) {
+            retVal.lower_[i]= lower_[i];
+            retVal.upper_[i]= upper_[i];
+            retVal.diag_[i] = diag_[i]+u[i];
+        }
+
+        return retVal;
+    }
+
+    Array TripleBandLinearOp::apply(const Array& r) const {
+        QL_REQUIRE(r.size() == mesher_->layout()->size(), "inconsistent length of r");
+
+        const Real* lptr = lower_.get();
+        const Real* dptr = diag_.get();
+        const Real* uptr = upper_.get();
+        const Size* i0ptr = i0_.get();
+        const Size* i2ptr = i2_.get();
+
+        array_type retVal(r.size());
+        //#pragma omp parallel for
+        for (Size i=0; i < mesher_->layout()->size(); ++i) {
+            retVal[i] = r[i0ptr[i]]*lptr[i]+r[i]*dptr[i]+r[i2ptr[i]]*uptr[i];
+        }
+
+        return retVal;
+    }
+
+    SparseMatrix TripleBandLinearOp::toMatrix() const {
+        const Size n = mesher_->layout()->size();
+
+        SparseMatrix retVal(n, n, 3*n);
+        for (Size i=0; i < n; ++i) {
+            retVal(i, i0_[i]) += lower_[i];
+            retVal(i, i     ) += diag_[i];
+            retVal(i, i2_[i]) += upper_[i];
+        }
+
+        return retVal;
+    }
+
+
+    Array TripleBandLinearOp::solve_splitting(const Array& r, Real a, Real b) const {
+        QL_REQUIRE(r.size() == mesher_->layout()->size(), "inconsistent size of rhs");
+
+#ifdef QL_EXTRA_SAFETY_CHECKS
+        for (const auto& iter : *mesher_->layout()) {
+            const std::vector<Size>& coordinates = iter.coordinates();
+            QL_REQUIRE(   coordinates[direction_] != 0
+                       || lower_[iter.index()] == 0,"removing non zero entry!");
+            QL_REQUIRE(   coordinates[direction_] != mesher_->layout()->dim()[direction_]-1
+                       || upper_[iter.index()] == 0,"removing non zero entry!");
+        }
+#endif
+
+        Array retVal(r.size()), tmp(r.size());
+
+        const Real* lptr = lower_.get();
+        const Real* dptr = diag_.get();
+        const Real* uptr = upper_.get();
+
+        // Thomson algorithm to solve a tridiagonal system.
+        // Example code taken from Tridiagonalopertor and
+        // changed to fit for the triple band operator.
+        Size rim1 = reverseIndex_[0];
+        Real bet=1.0/(a*dptr[rim1]+b);
+        QL_REQUIRE(bet != 0.0, "division by zero");
+        retVal[reverseIndex_[0]] = r[rim1]*bet;
+
+        for (Size j=1; j<=mesher_->layout()->size()-1; j++){
+            const Size ri = reverseIndex_[j];
+            tmp[j] = a*uptr[rim1]*bet;
+
+            bet=b+a*(dptr[ri]-tmp[j]*lptr[ri]);
+            QL_ENSURE(bet != 0.0, "division by zero");
+            bet=1.0/bet;
+
+            retVal[ri] = (r[ri]-a*lptr[ri]*retVal[rim1])*bet;
+            rim1 = ri;
+        }
+        // cannot be j>=0 with Size j
+        for (Size j=mesher_->layout()->size()-2; j>0; --j)
+            retVal[reverseIndex_[j]] -= tmp[j+1]*retVal[reverseIndex_[j+1]];
+        retVal[reverseIndex_[0]] -= tmp[1]*retVal[reverseIndex_[1]];
+
+        return retVal;
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/operators/modtriplebandlinearop.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2013 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file modtriplebandlinearop.hpp
+    \brief modifiable triple band linear operator
+*/
+
+#ifndef quantlib_mod_triple_band_linear_op_hpp
+#define quantlib_mod_triple_band_linear_op_hpp
+
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
+
+namespace QuantLib {
+
+    class ModTripleBandLinearOp : public TripleBandLinearOp {
+      public:
+        ModTripleBandLinearOp(Size direction,
+                              const ext::shared_ptr<FdmMesher>& mesher)
+        : TripleBandLinearOp(direction, mesher) { }
+
+        explicit ModTripleBandLinearOp(const TripleBandLinearOp& m)
+        : TripleBandLinearOp(m) { }
+
+        Real lower(Size i) const { return lower_[i]; }
+        Real& lower(Size i) { return lower_[i]; }
+        Real diag(Size i) const { return diag_[i]; }
+        Real& diag(Size i) { return diag_[i]; }
+        Real upper(Size i) const { return upper_[i]; }
+        Real& upper(Size i) { return upper_[i]; }
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008, 2012 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmlinearopcomposite.hpp
+    \brief composite pattern for linear operators
+*/
+
+#ifndef quantlib_fdm_affine_map_composite_hpp
+#define quantlib_fdm_affine_map_composite_hpp
+
+#include <ql/math/matrixutilities/sparsematrix.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearop.hpp>
+#include <numeric>
+
+namespace QuantLib {
+
+    class FdmLinearOpComposite : public FdmLinearOp {
+      public:
+        virtual Size size() const = 0;
+
+        //! Time \f$t1 <= t2\f$ is required
+        virtual void setTime(Time t1, Time t2) = 0;
+
+        virtual Array apply_mixed(const Array& r) const = 0;
+        
+        virtual Array apply_direction(Size direction, const Array& r) const = 0;
+        virtual Array solve_splitting(Size direction, const Array& r, Real s) const = 0;
+        virtual Array preconditioner(const Array& r, Real s) const = 0;
+
+        virtual std::vector<SparseMatrix> toMatrixDecomp() const {
+            QL_FAIL(" ublas representation is not implemented");
+        }
+
+        SparseMatrix toMatrix() const override {
+            const std::vector<SparseMatrix> dcmp = toMatrixDecomp();
+            return std::accumulate(dcmp.begin()+1, dcmp.end(),
+                                   SparseMatrix(dcmp.front()));
+        }
+
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/operators/firstderivativeop.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file firstderivativeop.hpp
+    \brief first derivative linear operator
+*/
+
+#ifndef quantlib_first_derivative_op_hpp
+#define quantlib_first_derivative_op_hpp
+
+#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
+
+namespace QuantLib {
+
+    class FirstDerivativeOp : public TripleBandLinearOp {
+      public:
+        FirstDerivativeOp(Size direction,
+                          const ext::shared_ptr<FdmMesher>& mesher);
+    };
+
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/operators/firstderivativeop.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/firstderivativeop.hpp>
+
+namespace QuantLib {
+
+    FirstDerivativeOp::FirstDerivativeOp(
+                                Size direction,
+                                const ext::shared_ptr<FdmMesher>& mesher)
+    : TripleBandLinearOp(direction, mesher) {
+
+        for (const auto& iter : *mesher->layout()) {
+            const Size i = iter.index();
+            const Real hm = mesher->dminus(iter, direction_);
+            const Real hp = mesher->dplus(iter, direction_);
+
+            const Real zetam1 = hm*(hm+hp);
+            const Real zeta0  = hm*hp;
+            const Real zetap1 = hp*(hm+hp);
+
+            if (iter.coordinates()[direction_] == 0) {
+                //upwinding scheme
+                lower_[i] = 0.0;
+                diag_[i]  = -(upper_[i] = 1/hp);
+            }
+            else if (   iter.coordinates()[direction_]
+                     == mesher->layout()->dim()[direction]-1) {
+                 // downwinding scheme
+                lower_[i] = -(diag_[i] = 1/hm);
+                upper_[i] = 0.0;
+            }
+            else {
+                lower_[i] = -hp/zetam1;
+                diag_[i]  = (hp-hm)/zeta0;
+                upper_[i] = hm/zetap1;
+            }
+        }
+    }
+}
+
+
+
+FILE: ql/methods/finitedifferences/operators/secondderivativeop.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file secondderivativeop.hpp
+    \brief second derivative operator
+*/
+
+#ifndef quantlib_second_derivative_op_hpp
+#define quantlib_second_derivative_op_hpp
+
+#include <ql/methods/finitedifferences/operators/triplebandlinearop.hpp>
+
+namespace QuantLib {
+
+    class SecondDerivativeOp : public TripleBandLinearOp {
+    public:
+        SecondDerivativeOp(Size direction,
+            const ext::shared_ptr<FdmMesher>& mesher);
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/operators/secondderivativeop.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/operators/secondderivativeop.hpp>
+
+namespace QuantLib {
+
+    SecondDerivativeOp::SecondDerivativeOp(
+        Size direction,
+        const ext::shared_ptr<FdmMesher>& mesher)
+    : TripleBandLinearOp(direction, mesher) {
+
+        for (const auto& iter : *mesher->layout()) {
+            const Size i = iter.index();
+            const Real hm = mesher->dminus(iter, direction_);
+            const Real hp = mesher->dplus(iter, direction_);
+
+            const Real zetam1 = hm*(hm+hp);
+            const Real zeta0  = hm*hp;
+            const Real zetap1 = hp*(hm+hp);
+
+            const Size co = iter.coordinates()[direction_];
+            if (co == 0 || co == mesher->layout()->dim()[direction]-1) {
+                lower_[i] = diag_[i] = upper_[i] = 0.0;
+            }
+            else {
+                lower_[i] =  2.0/zetam1;
+                diag_[i]  = -2.0/zeta0;
+                upper_[i] =  2.0/zetap1;
+            }
+        }
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/meshers/fdm1dmesher.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdm1dmesher.hpp
+    \brief One-dimensional simple FDM mesher object working on an index
+*/
+
+#ifndef quantlib_fdm_1d_mesher_hpp
+#define quantlib_fdm_1d_mesher_hpp
+
+#include <ql/types.hpp>
+#include <vector>
+
+namespace QuantLib {
+
+    class Fdm1dMesher {
+      public:
+        explicit Fdm1dMesher(Size size)
+        : locations_(size), dplus_(size), dminus_(size) {}
+        virtual ~Fdm1dMesher() = default;
+
+        Size size() const { return locations_.size(); }
+        Real dplus(Size index) const {return dplus_[index];}
+        Real dminus(Size index) const {return dminus_[index];}
+        Real location(Size index) const {return locations_[index];}
+        const std::vector<Real>& locations() const {return locations_;}
+
+      protected:
+        std::vector<Real> locations_;
+        std::vector<Real> dplus_, dminus_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmblackscholesmesher.hpp
+    \brief 1-d mesher for the Black-Scholes process (in ln(S))
+*/
+
+#ifndef quantlib_fdm_black_scholes_mesher_hpp
+#define quantlib_fdm_black_scholes_mesher_hpp
+
+#include <ql/instruments/dividendschedule.hpp>
+#include <ql/methods/finitedifferences/meshers/fdm1dmesher.hpp>
+
+#include <ql/handle.hpp>
+#include <ql/quote.hpp>
+
+namespace QuantLib {
+
+    class FdmQuantoHelper;
+    class YieldTermStructure;
+    class GeneralizedBlackScholesProcess;
+
+    class FdmBlackScholesMesher : public Fdm1dMesher {
+      public:
+        FdmBlackScholesMesher(
+            Size size,
+            const ext::shared_ptr<GeneralizedBlackScholesProcess>& process,
+            Time maturity, Real strike,
+            Real xMinConstraint = Null<Real>(),
+            Real xMaxConstraint = Null<Real>(),
+            Real eps = 0.0001,
+            Real scaleFactor = 1.5,
+            const std::pair<Real, Real>& cPoint = { Null<Real>(), Null<Real>() },
+            const DividendSchedule& dividendSchedule = {},
+            const ext::shared_ptr<FdmQuantoHelper>& fdmQuantoHelper = {},
+            Real spotAdjustment = 0.0);
+
+        static ext::shared_ptr<GeneralizedBlackScholesProcess> processHelper(
+             const Handle<Quote>& s0,
+             const Handle<YieldTermStructure>& rTS,
+             const Handle<YieldTermStructure>& qTS,
+             Volatility vol);
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/meshers/fdmblackscholesmesher.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmblackscholesmesher.cpp
+    \brief 1-d mesher for the Black-Scholes process (in ln(S))
+*/
+
+#include <ql/processes/blackscholesprocess.hpp>
+#include <ql/termstructures/yieldtermstructure.hpp>
+#include <ql/termstructures/yield/quantotermstructure.hpp>
+#include <ql/termstructures/volatility/equityfx/blackconstantvol.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
+#include <ql/methods/finitedifferences/meshers/uniform1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/concentrating1dmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+
+namespace QuantLib {
+
+    FdmBlackScholesMesher::FdmBlackScholesMesher(
+        Size size,
+        const ext::shared_ptr<GeneralizedBlackScholesProcess>& process,
+        Time maturity, Real strike,
+        Real xMinConstraint, Real xMaxConstraint,
+        Real eps, Real scaleFactor,
+        const std::pair<Real, Real>& cPoint,
+        const DividendSchedule& dividendSchedule,
+        const ext::shared_ptr<FdmQuantoHelper>& fdmQuantoHelper,
+        Real spotAdjustment)
+    : Fdm1dMesher(size) {
+
+        const Real S = process->x0();
+        QL_REQUIRE(S > 0.0, "negative or null underlying given");
+
+        std::vector<std::pair<Time, Real> > intermediateSteps;
+        for (const auto& i : dividendSchedule) {
+            const Time t = process->time(i->date());
+            if (t <= maturity && t >= 0.0)
+                intermediateSteps.emplace_back(process->time(i->date()), i->amount());
+        }
+
+        const Size intermediateTimeSteps = std::max<Size>(2, Size(24.0*maturity));
+        for (Size i=0; i < intermediateTimeSteps; ++i)
+            intermediateSteps.emplace_back((i + 1) * (maturity / intermediateTimeSteps), 0.0);
+
+        std::sort(intermediateSteps.begin(), intermediateSteps.end());
+
+        const Handle<YieldTermStructure> rTS = process->riskFreeRate();
+
+        const Handle<YieldTermStructure> qTS =
+            (fdmQuantoHelper) != nullptr ?
+                Handle<YieldTermStructure>(ext::make_shared<QuantoTermStructure>(
+                    process->dividendYield(), process->riskFreeRate(),
+                    Handle<YieldTermStructure>(fdmQuantoHelper->fTS_), process->blackVolatility(),
+                    strike, Handle<BlackVolTermStructure>(fdmQuantoHelper->fxVolTS_),
+                    fdmQuantoHelper->exchRateATMlevel_, fdmQuantoHelper->equityFxCorrelation_)) :
+                process->dividendYield();
+
+        Time lastDivTime = 0.0;
+        Real fwd = S + spotAdjustment;
+        Real mi = fwd, ma = fwd;
+
+        for (auto& intermediateStep : intermediateSteps) {
+            const Time divTime = intermediateStep.first;
+            const Real divAmount = intermediateStep.second;
+
+            fwd = fwd / rTS->discount(divTime) * rTS->discount(lastDivTime)
+                      * qTS->discount(divTime) / qTS->discount(lastDivTime);
+
+            mi  = std::min(mi, fwd); ma = std::max(ma, fwd);
+
+            fwd-= divAmount;
+
+            mi  = std::min(mi, fwd); ma = std::max(ma, fwd);
+
+            lastDivTime = divTime;
+        }
+
+        // Set the grid boundaries
+        const Real normInvEps = InverseCumulativeNormal()(1-eps);
+        const Real sigmaSqrtT 
+            = process->blackVolatility()->blackVol(maturity, strike)
+                                                        *std::sqrt(maturity);
+        
+        Real xMin = std::log(mi) - sigmaSqrtT*normInvEps*scaleFactor;
+        Real xMax = std::log(ma) + sigmaSqrtT*normInvEps*scaleFactor;
+
+        if (xMinConstraint != Null<Real>()) {
+            xMin = xMinConstraint;
+        }
+        if (xMaxConstraint != Null<Real>()) {
+            xMax = xMaxConstraint;
+        }
+
+        ext::shared_ptr<Fdm1dMesher> helper;
+        if (   cPoint.first != Null<Real>() 
+            && std::log(cPoint.first) >=xMin && std::log(cPoint.first) <=xMax) {
+            
+            helper = ext::shared_ptr<Fdm1dMesher>(
+                new Concentrating1dMesher(xMin, xMax, size, 
+                    std::pair<Real,Real>(std::log(cPoint.first),
+                                         cPoint.second)));
+        }
+        else {
+            helper = ext::shared_ptr<Fdm1dMesher>(
+                                        new Uniform1dMesher(xMin, xMax, size));
+            
+        }
+        
+        locations_ = helper->locations();
+        for (Size i=0; i < locations_.size(); ++i) {
+            dplus_[i]  = helper->dplus(i);
+            dminus_[i] = helper->dminus(i);
+        }
+    }
+            
+    ext::shared_ptr<GeneralizedBlackScholesProcess> 
+    FdmBlackScholesMesher::processHelper(const Handle<Quote>& s0,
+                                         const Handle<YieldTermStructure>& rTS,
+                                         const Handle<YieldTermStructure>& qTS,
+                                         Volatility vol) {
+        
+        return ext::make_shared<GeneralizedBlackScholesProcess>(
+            
+                s0, qTS, rTS,
+                Handle<BlackVolTermStructure>(
+                    ext::shared_ptr<BlackVolTermStructure>(
+                        new BlackConstantVol(rTS->referenceDate(),
+                                             Calendar(),
+                                             vol,
+                                             rTS->dayCounter()))));
+    }
+}
+
+
+
+FILE: ql/methods/finitedifferences/meshers/fdmmesher.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmmesher.hpp
+    \brief mesher for a fdm grid
+*/
+#ifndef quantlib_fdm_mesher_hpp
+#define quantlib_fdm_mesher_hpp
+
+#include <ql/math/array.hpp>
+#include <ql/shared_ptr.hpp>
+#include <utility>
+#include <vector>
+
+namespace QuantLib {
+    class FdmLinearOpLayout;
+    class FdmLinearOpIterator;
+
+    class FdmMesher {
+      public:
+        explicit FdmMesher(ext::shared_ptr<FdmLinearOpLayout> layout)
+        : layout_(std::move(layout)) {}
+        virtual ~FdmMesher() = default;
+
+        virtual Real dplus(const FdmLinearOpIterator& iter,
+                           Size direction)  const = 0;
+        virtual Real dminus(const FdmLinearOpIterator& iter,
+                            Size direction) const = 0;
+        virtual Real location(const FdmLinearOpIterator& iter ,
+                              Size direction) const = 0;
+        virtual Array locations(Size direction) const = 0;
+
+        const ext::shared_ptr<FdmLinearOpLayout>& layout() const {
+            return layout_;
+        }
+
+      protected:
+        const ext::shared_ptr<FdmLinearOpLayout> layout_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/meshers/fdmmeshercomposite.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+
+namespace QuantLib {
+
+    namespace {
+        typedef ext::shared_ptr<Fdm1dMesher> T;
+
+        ext::shared_ptr<FdmLinearOpLayout> getLayoutFromMeshers(
+                 const std::vector<ext::shared_ptr<Fdm1dMesher> > & meshers) {
+            std::vector<Size> dim(meshers.size());
+            for (Size i=0; i < dim.size(); ++i) {
+                dim[i] = meshers[i]->size();
+            }
+            return ext::make_shared<FdmLinearOpLayout>(std::move(dim));
+        }
+    }
+
+    FdmMesherComposite::FdmMesherComposite(
+        const ext::shared_ptr<Fdm1dMesher>& mesher)
+    : FdmMesher(getLayoutFromMeshers({mesher})),
+      mesher_({mesher}) {
+    }
+
+
+    FdmMesherComposite::FdmMesherComposite(
+        const ext::shared_ptr<Fdm1dMesher>& m1,
+        const ext::shared_ptr<Fdm1dMesher>& m2)
+    : FdmMesher(getLayoutFromMeshers({m1, m2})),
+      mesher_({m1, m2}) {
+    }
+
+    FdmMesherComposite::FdmMesherComposite(
+        const ext::shared_ptr<Fdm1dMesher>& m1,
+        const ext::shared_ptr<Fdm1dMesher>& m2,
+        const ext::shared_ptr<Fdm1dMesher>& m3)
+    : FdmMesher(getLayoutFromMeshers({m1, m2, m3})),
+      mesher_({m1, m2, m3}) {
+    }
+
+    FdmMesherComposite::FdmMesherComposite(
+        const ext::shared_ptr<Fdm1dMesher>& m1,
+        const ext::shared_ptr<Fdm1dMesher>& m2,
+        const ext::shared_ptr<Fdm1dMesher>& m3,
+        const ext::shared_ptr<Fdm1dMesher>& m4)
+    : FdmMesher(getLayoutFromMeshers({m1, m2, m3, m4})),
+      mesher_({m1, m2, m3, m4}) {
+    }
+
+    FdmMesherComposite::FdmMesherComposite(
+        const std::vector<ext::shared_ptr<Fdm1dMesher> > & mesher)
+    : FdmMesher(getLayoutFromMeshers(mesher)), mesher_(mesher) {
+    }
+
+    FdmMesherComposite::FdmMesherComposite(
+        const ext::shared_ptr<FdmLinearOpLayout>& layout,
+        const std::vector<ext::shared_ptr<Fdm1dMesher> > & mesher)
+    : FdmMesher(layout), mesher_(mesher) {
+        for (Size i=0; i < mesher.size(); ++i) {
+            QL_REQUIRE(mesher[i]->size() == layout->dim()[i],
+                       "size of 1d mesher " << i << " does not fit to layout");
+        }
+    }
+
+    Real FdmMesherComposite::dplus(const FdmLinearOpIterator& iter,
+                                   Size direction) const {
+        return mesher_[direction]->dplus(iter.coordinates()[direction]);
+    }
+
+    Real FdmMesherComposite::dminus(const FdmLinearOpIterator& iter,
+                                    Size direction) const {
+        return mesher_[direction]->dminus(iter.coordinates()[direction]);
+    }
+
+    Real FdmMesherComposite::location(const FdmLinearOpIterator& iter,
+                                      Size direction) const {
+        return mesher_[direction]->location(iter.coordinates()[direction]);
+    }
+
+    Array FdmMesherComposite::locations(Size direction) const {
+        Array retVal(layout_->size());
+
+        for (const auto& iter : *layout_) {
+            retVal[iter.index()] =
+                mesher_[direction]->locations()[iter.coordinates()[direction]];
+        }
+
+        return retVal;
+    }
+
+    const std::vector<ext::shared_ptr<Fdm1dMesher> >&
+        FdmMesherComposite::getFdm1dMeshers() const {
+        return  mesher_;
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/meshers/concentrating1dmesher.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2014 Johannes Göttker-Schnetmann
+ Copyright (C) 2014 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file concentrating1dmesher.hpp
+    \brief One-dimensional grid mesher concentrating around critical points
+*/
+
+#ifndef quantlib_concentrating_1d_mesher_hpp
+#define quantlib_concentrating_1d_mesher_hpp
+
+#include <ql/methods/finitedifferences/meshers/fdm1dmesher.hpp>
+#include <ql/utilities/null.hpp>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+namespace QuantLib {
+
+    class Concentrating1dMesher : public Fdm1dMesher {
+      public:
+        Concentrating1dMesher(Real start,
+                              Real end,
+                              Size size,
+                              const std::pair<Real, Real>& cPoints =
+                                  (std::pair<Real, Real>(Null<Real>(), Null<Real>())),
+                              bool requireCPoint = false);
+
+        Concentrating1dMesher(
+            Real start, Real end, Size size,
+            const std::vector<std::tuple<Real, Real, bool> >& cPoints,
+            Real tol = 1e-8);
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/meshers/uniform1dmesher.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file uniform1dmesher.hpp
+    \brief One-dimensional simple uniform grid mesher
+*/
+
+#ifndef quantlib_fdm_uniform_1d_mesher_hpp
+#define quantlib_fdm_uniform_1d_mesher_hpp
+
+#include <ql/methods/finitedifferences/meshers/fdm1dmesher.hpp>
+#include <ql/errors.hpp>
+#include <ql/utilities/null.hpp>
+
+namespace QuantLib {
+
+    class Uniform1dMesher : public Fdm1dMesher {
+      public:
+        Uniform1dMesher(Real start, Real end, Size size)
+        : Fdm1dMesher(size) {
+            QL_REQUIRE(end > start, "end must be larger than start");
+
+            const Real dx = (end-start)/(size-1);
+
+            for (Size i=0; i < size-1; ++i) {
+                locations_[i] = start + i*dx;
+                dplus_[i] = dminus_[i+1] = dx;
+            }
+
+            locations_.back() = end;
+            dplus_.back() = dminus_.front() = Null<Real>();
+        }
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2019 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file cranknicolsonscheme.hpp
+    \brief Crank-Nicolson scheme
+*/
+
+#ifndef quantlib_crank_nicolson_scheme_hpp
+#define quantlib_crank_nicolson_scheme_hpp
+
+#include <ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp>
+
+namespace QuantLib {
+
+    /*! In one dimension the Crank-Nicolson scheme is equivalent to the
+        Douglas scheme and in higher dimensions it is usually inferior to
+        operator splitting methods like Craig-Sneyd or Hundsdorfer-Verwer.
+    */
+    class ExplicitEulerScheme;
+
+    class CrankNicolsonScheme  {
+      public:
+        // typedefs
+        typedef OperatorTraits<FdmLinearOp> traits;
+        typedef traits::operator_type operator_type;
+        typedef traits::array_type array_type;
+        typedef traits::bc_set bc_set;
+        typedef traits::condition_type condition_type;
+
+        // constructors
+        CrankNicolsonScheme(
+            Real theta,
+            const ext::shared_ptr<FdmLinearOpComposite>& map,
+            const bc_set& bcSet = bc_set(),
+            Real relTol = 1e-8,
+            ImplicitEulerScheme::SolverType solverType
+                = ImplicitEulerScheme::BiCGstab);
+
+        void step(array_type& a, Time t);
+        void setStep(Time dt);
+
+        Size numberOfIterations() const;
+      protected:
+        Real dt_;
+        const Real theta_;
+        const ext::shared_ptr<ExplicitEulerScheme> explicit_;
+        const ext::shared_ptr<ImplicitEulerScheme> implicit_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2019 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp>
+
+namespace QuantLib {
+    CrankNicolsonScheme::CrankNicolsonScheme(
+        Real theta,
+        const ext::shared_ptr<FdmLinearOpComposite> & map,
+        const bc_set& bcSet,
+        Real relTol,
+        ImplicitEulerScheme::SolverType solverType)
+    : dt_(Null<Real>()),
+      theta_(theta),
+      explicit_(ext::make_shared<ExplicitEulerScheme>(map, bcSet)),
+      implicit_(ext::make_shared<ImplicitEulerScheme>(
+          map, bcSet, relTol, solverType)) {
+    }
+
+    void CrankNicolsonScheme::step(array_type& a, Time t) {
+        QL_REQUIRE(t-dt_ > -1e-8, "a step towards negative time given");
+
+        if (theta_ != 1.0)
+            explicit_->step(a, t, 1.0-theta_);
+
+        if (theta_ != 0.0)
+            implicit_->step(a, t, theta_);
+    }
+
+    void CrankNicolsonScheme::setStep(Time dt) {
+        dt_ = dt;
+        explicit_->setStep(dt_);
+        implicit_->setStep(dt_);
+    }
+
+    Size CrankNicolsonScheme::numberOfIterations() const {
+        return implicit_->numberOfIterations();
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009, 2017 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file impliciteulerscheme.hpp
+    \brief Implicit-Euler scheme
+*/
+
+#ifndef quantlib_implicit_euler_scheme_hpp
+#define quantlib_implicit_euler_scheme_hpp
+
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp>
+#include <ql/methods/finitedifferences/schemes/boundaryconditionschemehelper.hpp>
+
+namespace QuantLib {
+
+    class ImplicitEulerScheme {
+      public:
+        enum SolverType { BiCGstab, GMRES };
+
+        // typedefs
+        typedef OperatorTraits<FdmLinearOp> traits;
+        typedef traits::operator_type operator_type;
+        typedef traits::array_type array_type;
+        typedef traits::bc_set bc_set;
+        typedef traits::condition_type condition_type;
+
+        // constructors
+        explicit ImplicitEulerScheme(ext::shared_ptr<FdmLinearOpComposite> map,
+                                     const bc_set& bcSet = bc_set(),
+                                     Real relTol = 1e-8,
+                                     SolverType solverType = BiCGstab);
+
+        void step(array_type& a, Time t);
+        void setStep(Time dt);
+
+        Size numberOfIterations() const;
+      protected:
+        friend class CrankNicolsonScheme;
+        void step(array_type& a, Time t, Real theta);
+
+        Array apply(const Array& r, Real theta) const;
+          
+        Time dt_;
+        ext::shared_ptr<Size> iterations_;
+
+        const Real relTol_;
+        const ext::shared_ptr<FdmLinearOpComposite> map_;
+        const BoundaryConditionSchemeHelper bcSet_;
+        const SolverType solverType_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009, 2017 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/math/matrixutilities/bicgstab.hpp>
+#include <ql/math/matrixutilities/gmres.hpp>
+#include <ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp>
+#include <functional>
+#include <utility>
+
+namespace QuantLib {
+
+    ImplicitEulerScheme::ImplicitEulerScheme(ext::shared_ptr<FdmLinearOpComposite> map,
+                                             const bc_set& bcSet,
+                                             Real relTol,
+                                             SolverType solverType)
+    : dt_(Null<Real>()), iterations_(ext::make_shared<Size>(0U)), relTol_(relTol),
+      map_(std::move(map)), bcSet_(bcSet), solverType_(solverType) {}
+
+    Array ImplicitEulerScheme::apply(const Array& r, Real theta) const {
+        return r - (theta*dt_)*map_->apply(r);
+    }
+
+    void ImplicitEulerScheme::step(array_type& a, Time t) {
+        step(a, t, 1.0);
+    }
+
+    void ImplicitEulerScheme::step(array_type& a, Time t, Real theta) {
+        QL_REQUIRE(t-dt_ > -1e-8, "a step towards negative time given");
+        map_->setTime(std::max(0.0, t-dt_), t);
+        bcSet_.setTime(std::max(0.0, t-dt_));
+
+        bcSet_.applyBeforeSolving(*map_, a);
+
+        if (map_->size() == 1) {
+            a = map_->solve_splitting(0, a, -theta*dt_);
+        }
+        else {
+            auto preconditioner = [&](const Array& _a){ return map_->preconditioner(_a, -theta*dt_); };
+            auto applyF = [&](const Array& _a){ return apply(_a, theta); };
+
+            if (solverType_ == BiCGstab) {
+                const BiCGStabResult result =
+                    QuantLib::BiCGstab(applyF, std::max(Size(10), a.size()),
+                        relTol_, preconditioner).solve(a, a);
+
+                (*iterations_) += result.iterations;
+                a = result.x;
+            }
+            else if (solverType_ == GMRES) {
+                const GMRESResult result =
+                    QuantLib::GMRES(applyF, std::max(Size(10), a.size() / 10U), relTol_,
+                                    preconditioner)
+                        .solve(a, a);
+
+                (*iterations_) += result.errors.size();
+                a = result.x;
+            }
+            else
+                QL_FAIL("unknown/illegal solver type");
+        }
+        bcSet_.applyAfterSolving(a);
+    }
+
+    void ImplicitEulerScheme::setStep(Time dt) {
+        dt_=dt;
+    }
+
+    Size ImplicitEulerScheme::numberOfIterations() const {
+        return *iterations_;
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file expliciteulerscheme.hpp
+    \brief explicit-Euler scheme
+*/
+
+#ifndef quantlib_explicit_euler_scheme_hpp
+#define quantlib_explicit_euler_scheme_hpp
+
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp>
+#include <ql/methods/finitedifferences/schemes/boundaryconditionschemehelper.hpp>
+
+namespace QuantLib {
+
+    class ExplicitEulerScheme  {
+      public:
+        // typedefs
+        typedef OperatorTraits<FdmLinearOp> traits;
+        typedef traits::operator_type operator_type;
+        typedef traits::array_type array_type;
+        typedef traits::bc_set bc_set;
+        typedef traits::condition_type condition_type;
+
+        // constructors
+        explicit ExplicitEulerScheme(ext::shared_ptr<FdmLinearOpComposite> map,
+                                     const bc_set& bcSet = bc_set());
+
+        void step(array_type& a, Time t);
+        void setStep(Time dt);
+
+      protected:
+        friend class CrankNicolsonScheme;
+        void step(array_type& a, Time t, Real theta);
+
+        Time dt_;
+        const ext::shared_ptr<FdmLinearOpComposite> map_;
+        const BoundaryConditionSchemeHelper bcSet_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+ */
+
+#include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
+#include <utility>
+
+namespace QuantLib {
+    ExplicitEulerScheme::ExplicitEulerScheme(ext::shared_ptr<FdmLinearOpComposite> map,
+                                             const bc_set& bcSet)
+    : dt_(Null<Real>()), map_(std::move(map)), bcSet_(bcSet) {}
+
+    void ExplicitEulerScheme::step(array_type& a, Time t) {
+        step(a, t, 1.0);
+    }
+
+    void ExplicitEulerScheme::step(array_type& a, Time t, Real theta) {
+        QL_REQUIRE(t-dt_ > -1e-8, "a step towards negative time given");
+        map_->setTime(std::max(0.0, t - dt_), t);
+        bcSet_.setTime(std::max(0.0, t-dt_));
+
+        bcSet_.applyBeforeApplying(*map_);
+        a += (theta*dt_) * map_->apply(a);
+        bcSet_.applyAfterApplying(a);
+    }
+
+    void ExplicitEulerScheme::setStep(Time dt) {
+        dt_ = dt;
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmbackwardsolver.hpp
+*/
+
+#ifndef quantlib_fdm_backward_solver_hpp
+#define quantlib_fdm_backward_solver_hpp
+
+#include <ql/methods/finitedifferences/utilities/fdmboundaryconditionset.hpp>
+
+namespace QuantLib {
+
+    class FdmLinearOpComposite;
+    class FdmStepConditionComposite;
+
+    struct FdmSchemeDesc {
+        enum FdmSchemeType { HundsdorferType, DouglasType,
+                             CraigSneydType, ModifiedCraigSneydType, 
+                             ImplicitEulerType, ExplicitEulerType,
+                             MethodOfLinesType, TrBDF2Type,
+                             CrankNicolsonType };
+
+        FdmSchemeDesc(FdmSchemeType type, Real theta, Real mu);
+
+        const FdmSchemeType type;
+        const Real theta, mu;
+
+        // some default scheme descriptions
+        static FdmSchemeDesc Douglas(); //same as Crank-Nicolson in 1 dimension
+        static FdmSchemeDesc CrankNicolson();
+        static FdmSchemeDesc ImplicitEuler();
+        static FdmSchemeDesc ExplicitEuler();
+        static FdmSchemeDesc CraigSneyd();
+        static FdmSchemeDesc ModifiedCraigSneyd(); 
+        static FdmSchemeDesc Hundsdorfer();
+        static FdmSchemeDesc ModifiedHundsdorfer();
+        static FdmSchemeDesc MethodOfLines(
+            Real eps=0.001, Real relInitStepSize=0.01);
+        static FdmSchemeDesc TrBDF2();
+    };
+        
+    class FdmBackwardSolver {
+      public:
+        typedef FdmLinearOp::array_type array_type;
+
+        FdmBackwardSolver(ext::shared_ptr<FdmLinearOpComposite> map,
+                          FdmBoundaryConditionSet bcSet,
+                          const ext::shared_ptr<FdmStepConditionComposite>& condition,
+                          const FdmSchemeDesc& schemeDesc);
+
+        void rollback(array_type& a, 
+                      Time from, Time to,
+                      Size steps, Size dampingSteps);
+
+      protected:
+        const ext::shared_ptr<FdmLinearOpComposite> map_;
+        const FdmBoundaryConditionSet bcSet_;
+        const ext::shared_ptr<FdmStepConditionComposite> condition_;
+        const FdmSchemeDesc schemeDesc_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmbackwardsolver.cpp
+*/
+
+#include <ql/methods/finitedifferences/finitedifferencemodel.hpp>
+#include <ql/methods/finitedifferences/schemes/craigsneydscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/douglasscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/hundsdorferscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/methodoflinesscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/modifiedcraigsneydscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/trbdf2scheme.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/mathconstants.hpp>
+#include <utility>
+
+
+namespace QuantLib {
+    
+    FdmSchemeDesc::FdmSchemeDesc(FdmSchemeType aType, Real aTheta, Real aMu)
+    : type(aType), theta(aTheta), mu(aMu) { }
+
+    FdmSchemeDesc FdmSchemeDesc::Douglas() { return {FdmSchemeDesc::DouglasType, 0.5, 0.0}; }
+
+    FdmSchemeDesc FdmSchemeDesc::CrankNicolson() {
+        return {FdmSchemeDesc::CrankNicolsonType, 0.5, 0.0};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::CraigSneyd() { return {FdmSchemeDesc::CraigSneydType, 0.5, 0.5}; }
+
+    FdmSchemeDesc FdmSchemeDesc::ModifiedCraigSneyd() {
+        return {FdmSchemeDesc::ModifiedCraigSneydType, 1.0 / 3.0, 1.0 / 3.0};
+    }
+    
+    FdmSchemeDesc FdmSchemeDesc::Hundsdorfer() {
+        return {FdmSchemeDesc::HundsdorferType, 0.5 + std::sqrt(3.0) / 6, 0.5};
+    }
+    
+    FdmSchemeDesc FdmSchemeDesc::ModifiedHundsdorfer() {
+        return {FdmSchemeDesc::HundsdorferType, 1.0 - std::sqrt(2.0) / 2, 0.5};
+    }
+    
+    FdmSchemeDesc FdmSchemeDesc::ExplicitEuler() {
+        return {FdmSchemeDesc::ExplicitEulerType, 0.0, 0.0};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::ImplicitEuler() {
+        return {FdmSchemeDesc::ImplicitEulerType, 0.0, 0.0};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::MethodOfLines(Real eps, Real relInitStepSize) {
+        return {FdmSchemeDesc::MethodOfLinesType, eps, relInitStepSize};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::TrBDF2() { return {FdmSchemeDesc::TrBDF2Type, 2 - M_SQRT2, 1e-8}; }
+
+    FdmBackwardSolver::FdmBackwardSolver(
+        ext::shared_ptr<FdmLinearOpComposite> map,
+        FdmBoundaryConditionSet bcSet,
+        const ext::shared_ptr<FdmStepConditionComposite>& condition,
+        const FdmSchemeDesc& schemeDesc)
+    : map_(std::move(map)), bcSet_(std::move(bcSet)),
+      condition_((condition) != nullptr ?
+                     condition :
+                     ext::make_shared<FdmStepConditionComposite>(
+                         std::list<std::vector<Time> >(), FdmStepConditionComposite::Conditions())),
+      schemeDesc_(schemeDesc) {}
+
+    void FdmBackwardSolver::rollback(FdmBackwardSolver::array_type& rhs, 
+                                     Time from, Time to,
+                                     Size steps, Size dampingSteps) {
+
+        const Time deltaT = from - to;
+        const Size allSteps = steps + dampingSteps;
+        const Time dampingTo = from - (deltaT*dampingSteps)/allSteps;
+
+        if ((dampingSteps != 0U) && schemeDesc_.type != FdmSchemeDesc::ImplicitEulerType) {
+            ImplicitEulerScheme implicitEvolver(map_, bcSet_);    
+            FiniteDifferenceModel<ImplicitEulerScheme> 
+                    dampingModel(implicitEvolver, condition_->stoppingTimes());
+            dampingModel.rollback(rhs, from, dampingTo, 
+                                  dampingSteps, *condition_);
+        }
+
+        switch (schemeDesc_.type) {
+          case FdmSchemeDesc::HundsdorferType:
+            {
+                HundsdorferScheme hsEvolver(schemeDesc_.theta, schemeDesc_.mu, 
+                                            map_, bcSet_);
+                FiniteDifferenceModel<HundsdorferScheme> 
+                               hsModel(hsEvolver, condition_->stoppingTimes());
+                hsModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::DouglasType:
+            {
+                DouglasScheme dsEvolver(schemeDesc_.theta, map_, bcSet_);
+                FiniteDifferenceModel<DouglasScheme> 
+                               dsModel(dsEvolver, condition_->stoppingTimes());
+                dsModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::CrankNicolsonType:
+            {
+              CrankNicolsonScheme cnEvolver(schemeDesc_.theta, map_, bcSet_);
+              FiniteDifferenceModel<CrankNicolsonScheme>
+                             cnModel(cnEvolver, condition_->stoppingTimes());
+              cnModel.rollback(rhs, dampingTo, to, steps, *condition_);
+
+            }
+            break;
+          case FdmSchemeDesc::CraigSneydType:
+            {
+                CraigSneydScheme csEvolver(schemeDesc_.theta, schemeDesc_.mu, 
+                                           map_, bcSet_);
+                FiniteDifferenceModel<CraigSneydScheme> 
+                               csModel(csEvolver, condition_->stoppingTimes());
+                csModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::ModifiedCraigSneydType:
+            {
+                ModifiedCraigSneydScheme csEvolver(schemeDesc_.theta, 
+                                                   schemeDesc_.mu,
+                                                   map_, bcSet_);
+                FiniteDifferenceModel<ModifiedCraigSneydScheme> 
+                              mcsModel(csEvolver, condition_->stoppingTimes());
+                mcsModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::ImplicitEulerType:
+            {
+                ImplicitEulerScheme implicitEvolver(map_, bcSet_);
+                FiniteDifferenceModel<ImplicitEulerScheme> 
+                   implicitModel(implicitEvolver, condition_->stoppingTimes());
+                implicitModel.rollback(rhs, from, to, allSteps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::ExplicitEulerType:
+            {
+                ExplicitEulerScheme explicitEvolver(map_, bcSet_);
+                FiniteDifferenceModel<ExplicitEulerScheme> 
+                   explicitModel(explicitEvolver, condition_->stoppingTimes());
+                explicitModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::MethodOfLinesType:
+            {
+                MethodOfLinesScheme methodOfLines(
+                    schemeDesc_.theta, schemeDesc_.mu, map_, bcSet_);
+                FiniteDifferenceModel<MethodOfLinesScheme>
+                   molModel(methodOfLines, condition_->stoppingTimes());
+                molModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::TrBDF2Type:
+            {
+                const FdmSchemeDesc trDesc
+                    = FdmSchemeDesc::CraigSneyd();
+
+                const ext::shared_ptr<CraigSneydScheme> hsEvolver(
+                    ext::make_shared<CraigSneydScheme>(
+                        trDesc.theta, trDesc.mu, map_, bcSet_));
+
+                TrBDF2Scheme<CraigSneydScheme> trBDF2(
+                    schemeDesc_.theta, map_, hsEvolver, bcSet_,schemeDesc_.mu);
+
+                FiniteDifferenceModel<TrBDF2Scheme<CraigSneydScheme> >
+                   trBDF2Model(trBDF2, condition_->stoppingTimes());
+                trBDF2Model.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          default:
+            QL_FAIL("Unknown scheme type");
+        }
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/finitedifferencemodel.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file finitedifferencemodel.hpp
+    \brief generic finite difference model
+*/
+
+#ifndef quantlib_finite_difference_model_hpp
+#define quantlib_finite_difference_model_hpp
+
+#include <ql/methods/finitedifferences/boundarycondition.hpp>
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/stepcondition.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    //! Generic finite difference model
+    /*! \ingroup findiff */
+    template<class Evolver>
+    class FiniteDifferenceModel {
+      public:
+        typedef typename Evolver::traits traits;
+        typedef typename traits::operator_type operator_type;
+        typedef typename traits::array_type array_type;
+        typedef typename traits::bc_set bc_set;
+        typedef typename traits::condition_type condition_type;
+        // constructors
+        FiniteDifferenceModel(const operator_type& L,
+                              const bc_set& bcs,
+                              std::vector<Time> stoppingTimes = std::vector<Time>())
+        : evolver_(L, bcs), stoppingTimes_(std::move(stoppingTimes)) {
+            std::sort(stoppingTimes_.begin(), stoppingTimes_.end());
+            auto last = std::unique(stoppingTimes_.begin(), stoppingTimes_.end());
+            stoppingTimes_.erase(last, stoppingTimes_.end());
+        }
+        FiniteDifferenceModel(Evolver evolver,
+                              std::vector<Time> stoppingTimes = std::vector<Time>())
+        : evolver_(std::move(evolver)), stoppingTimes_(std::move(stoppingTimes)) {
+            std::sort(stoppingTimes_.begin(), stoppingTimes_.end());
+            auto last = std::unique(stoppingTimes_.begin(), stoppingTimes_.end());
+            stoppingTimes_.erase(last, stoppingTimes_.end());
+        }
+        // methods
+        // array_type grid() const { return evolver.xGrid(); }
+        const Evolver& evolver() const{ return evolver_; }
+        /*! solves the problem between the given times.
+            \warning being this a rollback, <tt>from</tt> must be a later
+                     time than <tt>to</tt>.
+        */
+        void rollback(array_type& a,
+                      Time from,
+                      Time to,
+                      Size steps) {
+            rollbackImpl(a, from, to, steps, (const condition_type*)nullptr);
+        }
+        /*! solves the problem between the given times,
+            applying a condition at every step.
+            \warning being this a rollback, <tt>from</tt> must be a later
+                     time than <tt>to</tt>.
+        */
+        void rollback(array_type& a,
+                      Time from,
+                      Time to,
+                      Size steps,
+                      const condition_type& condition) {
+            rollbackImpl(a,from,to,steps,&condition);
+        }
+      private:
+        void rollbackImpl(array_type& a,
+                          Time from,
+                          Time to,
+                          Size steps,
+                          const condition_type* condition) {
+
+            QL_REQUIRE(from >= to,
+                       "trying to roll back from " << from << " to " << to);
+
+            Time dt = (from-to)/steps, t = from;
+            evolver_.setStep(dt);
+
+            if(!stoppingTimes_.empty() && stoppingTimes_.back() == from) {
+                if (condition)
+                    condition->applyTo(a,from);
+            }
+            for (Size i=0; i<steps; ++i, t -= dt) {
+                Time now = t;
+                // make sure last step ends exactly on "to" in order to not
+                // miss a stopping time at "to" due to numerical issues
+                Time next = (i < steps -1)? t-dt : to;
+
+                if (std::fabs(to-next) < std::sqrt(QL_EPSILON)) next = to;
+                bool hit = false;
+                for (Integer j = static_cast<Integer>(stoppingTimes_.size())-1; j >= 0 ; --j) {
+                    if (next <= stoppingTimes_[j] && stoppingTimes_[j] < now) {
+                        // a stopping time was hit
+                        hit = true;
+
+                        // perform a small step to stoppingTimes_[j]...
+                        evolver_.setStep(now-stoppingTimes_[j]);
+                        evolver_.step(a,now);
+                        if (condition)
+                            condition->applyTo(a,stoppingTimes_[j]);
+                        // ...and continue the cycle
+                        now = stoppingTimes_[j];
+                    }
+                }
+                // if we did hit...
+                if (hit) {
+                    // ...we might have to make a small step to
+                    // complete the big one...
+                    if (now > next) {
+                        evolver_.setStep(now - next);
+                        evolver_.step(a,now);
+                        if (condition)
+                            condition->applyTo(a,next);
+                    }
+                    // ...and in any case, we have to reset the
+                    // evolver to the default step.
+                    evolver_.setStep(dt);
+                } else {
+                    // if we didn't, the evolver is already set to the
+                    // default step, which is ok for us.
+                    evolver_.step(a,now);
+                    if (condition)
+                        condition->applyTo(a, next);
+                }
+            }
+        }
+        Evolver evolver_;
+        std::vector<Time> stoppingTimes_;
+    };
+
+}
+
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/stepcondition.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file stepcondition.hpp
+    \brief conditions to be applied at every time step
+*/
+
+#ifndef quantlib_step_condition_hpp
+#define quantlib_step_condition_hpp
+
+#include <ql/math/array.hpp>
+#include <ql/instruments/payoffs.hpp>
+
+namespace QuantLib {
+
+    //! condition to be applied at every time step
+    /*! \ingroup findiff */
+    template <class array_type>
+    class StepCondition {
+      public:
+        virtual ~StepCondition() = default;
+        virtual void applyTo(array_type& a, Time t) const = 0;
+    };
+
+
+    //! %null step condition
+    /*! \ingroup findiff */
+    template <class array_type>
+    class NullCondition : public StepCondition<array_type> {
+      public:
+        void applyTo(array_type&, Time) const override {}
+    };
+
+}
+
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmstepconditioncomposite.hpp
+    \brief composite of fdm step conditions
+*/
+
+#ifndef quantlib_fdm_step_condition_composite_hpp
+#define quantlib_fdm_step_condition_composite_hpp
+
+#include <ql/time/date.hpp>
+#include <ql/time/daycounter.hpp>
+#include <ql/instruments/dividendschedule.hpp>
+#include <ql/methods/finitedifferences/stepcondition.hpp>
+
+#include <list>
+
+namespace QuantLib {
+
+    class FdmMesher;
+    class Exercise;
+    class FdmSnapshotCondition;
+    class FdmInnerValueCalculator;
+    
+    class FdmStepConditionComposite : public StepCondition<Array> {
+    public:
+        typedef std::list<ext::shared_ptr<StepCondition<Array> > > Conditions;
+
+        FdmStepConditionComposite(const std::list<std::vector<Time> >& stoppingTimes,
+                                  Conditions conditions);
+
+        void applyTo(Array& a, Time t) const override;
+        const std::vector<Time>& stoppingTimes() const;
+        const Conditions& conditions() const;
+
+        static ext::shared_ptr<FdmStepConditionComposite> joinConditions(
+                    const ext::shared_ptr<FdmSnapshotCondition>& c1,
+                    const ext::shared_ptr<FdmStepConditionComposite>& c2);
+
+        static ext::shared_ptr<FdmStepConditionComposite> vanillaComposite(
+             const DividendSchedule& schedule,
+             const ext::shared_ptr<Exercise>& exercise,
+             const ext::shared_ptr<FdmMesher>& mesher,
+             const ext::shared_ptr<FdmInnerValueCalculator>& calculator,
+             const Date& refDate,
+             const DayCounter& dayCounter);
+        
+    private:
+        std::vector<Time> stoppingTimes_;
+        const Conditions conditions_;
+    };
+}
+#endif
+
+
+FILE: ql/math/array.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+ Copyright (C) 2003, 2004, 2005, 2006, 2009 StatPro Italia srl
+ Copyright (C) 2004 Ferdinando Ametrano
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file array.hpp
+    \brief 1-D array used in linear algebra.
+*/
+
+#ifndef quantlib_array_hpp
+#define quantlib_array_hpp
+
+#include <ql/types.hpp>
+#include <ql/errors.hpp>
+#include <ql/utilities/null.hpp>
+#include <iterator>
+#include <functional>
+#include <algorithm>
+#include <numeric>
+#include <vector>
+#include <initializer_list>
+#include <iomanip>
+#include <memory>
+#include <type_traits>
+
+namespace QuantLib {
+
+    //! 1-D array used in linear algebra.
+    /*! This class implements the concept of vector as used in linear
+        algebra.
+        As such, it is <b>not</b> meant to be used as a container -
+        <tt>std::vector</tt> should be used instead.
+
+        \test construction of arrays is checked in a number of cases
+    */
+    class Array {
+      public:
+        //! \name Constructors, destructor, and assignment
+        //@{
+        //! creates the array with size 0
+        Array() : Array(static_cast<Size>(0)) {}
+        //! creates the array with the given dimension
+        explicit Array(Size size);
+        //! creates the array and fills it with <tt>value</tt>
+        Array(Size size, Real value);
+        /*! \brief creates the array and fills it according to
+            \f$ a_{0} = value, a_{i}=a_{i-1}+increment \f$
+        */
+        Array(Size size, Real value, Real increment);
+        Array(const Array&);
+        Array(Array&&) noexcept;
+        Array(std::initializer_list<Real>);
+        template <typename T, typename = std::enable_if_t<std::is_convertible_v<T, Real>>>
+        Array(std::initializer_list<T> init);
+        //! creates the array from an iterable sequence
+        template <class ForwardIterator>
+        Array(ForwardIterator begin, ForwardIterator end);
+        ~Array() = default;
+
+        Array& operator=(const Array&);
+        Array& operator=(Array&&) noexcept;
+
+        bool operator==(const Array&) const;
+        bool operator!=(const Array&) const;
+        //@}
+        /*! \name Vector algebra
+
+            <tt>v += x</tt> and similar operation involving a scalar value
+            are shortcuts for \f$ \forall i : v_i = v_i + x \f$
+
+            <tt>v *= w</tt> and similar operation involving two vectors are
+            shortcuts for \f$ \forall i : v_i = v_i \times w_i \f$
+
+            \pre all arrays involved in an algebraic expression must have
+            the same size.
+        */
+        //@{
+        const Array& operator+=(const Array&);
+        const Array& operator+=(Real);
+        const Array& operator-=(const Array&);
+        const Array& operator-=(Real);
+        const Array& operator*=(const Array&);
+        const Array& operator*=(Real);
+        const Array& operator/=(const Array&);
+        const Array& operator/=(Real);
+        //@}
+        //! \name Element access
+        //@{
+        //! read-only
+        Real operator[](Size) const;
+        Real at(Size) const;
+        Real front() const;
+        Real back() const;
+        //! read-write
+        Real& operator[](Size);
+        Real& at(Size);
+        Real& front();
+        Real& back();
+        //@}
+        //! \name Inspectors
+        //@{
+        //! dimension of the array
+        Size size() const;
+        //! whether the array is empty
+        bool empty() const;
+        //@}
+        typedef Size size_type;
+        typedef Real value_type;
+        typedef Real* iterator;
+        typedef const Real* const_iterator;
+        typedef std::reverse_iterator<iterator> reverse_iterator;
+        typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+        //! \name Iterator access
+        //@{
+        const_iterator begin() const;
+        iterator begin();
+        const_iterator end() const;
+        iterator end();
+        const_reverse_iterator rbegin() const;
+        reverse_iterator rbegin();
+        const_reverse_iterator rend() const;
+        reverse_iterator rend();
+        //@}
+        //! \name Utilities
+        //@{
+        void resize(Size n);
+        void swap(Array&) noexcept;
+        //@}
+
+      private:
+        std::unique_ptr<Real[]> data_;
+        Size n_;
+    };
+
+
+    /*! \relates Array */
+    Real DotProduct(const Array&, const Array&);
+
+    /*! \relates Array */
+    Real Norm2(const Array&);
+
+    // unary operators
+    /*! \relates Array */
+    Array operator+(const Array& v);
+    /*! \relates Array */
+    Array operator+(Array&& v);
+    /*! \relates Array */
+    Array operator-(const Array& v);
+    /*! \relates Array */
+    Array operator-(Array&& v);
+
+    // binary operators
+    /*! \relates Array */
+    Array operator+(const Array&, const Array&);
+    /*! \relates Array */
+    Array operator+(const Array&, Array&&);
+    /*! \relates Array */
+    Array operator+(Array&&, const Array&);
+    /*! \relates Array */
+    Array operator+(Array&&, Array&&);
+    /*! \relates Array */
+    Array operator+(const Array&, Real);
+    /*! \relates Array */
+    Array operator+(Array&&, Real);
+    /*! \relates Array */
+    Array operator+(Real, const Array&);
+    /*! \relates Array */
+    Array operator+(Real, Array&&);
+    /*! \relates Array */
+    Array operator-(const Array&, const Array&);
+    /*! \relates Array */
+    Array operator-(const Array&, Array&&);
+    /*! \relates Array */
+    Array operator-(Array&&, const Array&);
+    /*! \relates Array */
+    Array operator-(Array&&, Array&&);
+    /*! \relates Array */
+    Array operator-(const Array&, Real);
+    /*! \relates Array */
+    Array operator-(Real, const Array&);
+    /*! \relates Array */
+    Array operator-(Array&&, Real);
+    /*! \relates Array */
+    Array operator-(Real, Array&&);
+    /*! \relates Array */
+    Array operator*(const Array&, const Array&);
+    /*! \relates Array */
+    Array operator*(const Array&, Array&&);
+    /*! \relates Array */
+    Array operator*(Array&&, const Array&);
+    /*! \relates Array */
+    Array operator*(Array&&, Array&&);
+    /*! \relates Array */
+    Array operator*(const Array&, Real);
+    /*! \relates Array */
+    Array operator*(Real, const Array&);
+    /*! \relates Array */
+    Array operator*(Array&&, Real);
+    /*! \relates Array */
+    Array operator*(Real, Array&&);
+    /*! \relates Array */
+    Array operator/(const Array&, const Array&);
+    /*! \relates Array */
+    Array operator/(const Array&, Array&&);
+    /*! \relates Array */
+    Array operator/(Array&&, const Array&);
+    /*! \relates Array */
+    Array operator/(Array&&, Array&&);
+    /*! \relates Array */
+    Array operator/(const Array&, Real);
+    /*! \relates Array */
+    Array operator/(Real, const Array&);
+    /*! \relates Array */
+    Array operator/(Array&&, Real);
+    /*! \relates Array */
+    Array operator/(Real, Array&&);
+
+    // math functions
+    /*! \relates Array */
+    Array Abs(const Array&);
+    /*! \relates Array */
+    Array Abs(Array&&);
+    /*! \relates Array */
+    Array Sqrt(const Array&);
+    /*! \relates Array */
+    Array Sqrt(Array&&);
+    /*! \relates Array */
+    Array Log(const Array&);
+    /*! \relates Array */
+    Array Log(Array&&);
+    /*! \relates Array */
+    Array Exp(const Array&);
+    /*! \relates Array */
+    Array Exp(Array&&);
+    /*! \relates Array */
+    Array Pow(const Array&, Real);
+    /*! \relates Array */
+    Array Pow(Array&&, Real);
+
+    // utilities
+    /*! \relates Array */
+    void swap(Array&, Array&) noexcept;
+
+    // format
+    /*! \relates Array */
+    std::ostream& operator<<(std::ostream&, const Array&);
+
+
+    // inline definitions
+
+    inline Array::Array(Size size)
+    : data_(size != 0U ? new Real[size] : (Real*)nullptr), n_(size) {}
+
+    inline Array::Array(Size size, Real value)
+    : data_(size != 0U ? new Real[size] : (Real*)nullptr), n_(size) {
+        std::fill(begin(),end(),value);
+    }
+
+    inline Array::Array(Size size, Real value, Real increment)
+    : data_(size != 0U ? new Real[size] : (Real*)nullptr), n_(size) {
+        for (iterator i=begin(); i!=end(); ++i, value+=increment)
+            *i = value;
+    }
+
+    inline Array::Array(const Array& from)
+    : data_(from.n_ != 0U ? new Real[from.n_] : (Real*)nullptr), n_(from.n_) {
+        if (data_)
+            std::copy(from.begin(),from.end(),begin());
+    }
+
+    inline Array::Array(Array&& from) noexcept
+    : data_((Real*)nullptr), n_(0) {
+        swap(from);
+    }
+
+    namespace detail {
+
+        template <class I>
+        inline void _fill_array_(Array& a,
+                                 std::unique_ptr<Real[]>& data_,
+                                 Size& n_,
+                                 I begin, I end,
+                                 const std::true_type&) {
+            // we got redirected here from a call like Array(3, 4)
+            // because it matched the constructor below exactly with
+            // ForwardIterator = int.  What we wanted was fill an
+            // Array with a given value, which we do here.
+            Size n = begin;
+            Real value = end;
+            data_.reset(n ? new Real[n] : (Real*)nullptr);
+            n_ = n;
+            std::fill(a.begin(),a.end(),value);
+        }
+
+        template <class I>
+        inline void _fill_array_(Array& a,
+                                 std::unique_ptr<Real[]>& data_,
+                                 Size& n_,
+                                 const I& begin, const I& end,
+                                 const std::false_type&) {
+            // true iterators
+            Size n = std::distance(begin, end);
+            data_.reset(n ? new Real[n] : (Real*)nullptr);
+            n_ = n;
+            #if defined(QL_PATCH_MSVC) && defined(QL_DEBUG)
+            if (n_)
+            #endif
+            std::copy(begin, end, a.begin());
+        }
+
+    }
+
+    inline Array::Array(std::initializer_list<Real> init) {
+        detail::_fill_array_(*this, data_, n_, init.begin(), init.end(),
+                             std::false_type());
+    }
+
+    template <class ForwardIterator>
+    inline Array::Array(ForwardIterator begin, ForwardIterator end) {   // NOLINT(performance-unnecessary-value-param)
+        // Unfortunately, calls such as Array(3, 4) match this constructor.
+        // We have to detect integral types and dispatch.
+        detail::_fill_array_(*this, data_, n_, begin, end,
+                             std::is_integral<ForwardIterator>());
+    }
+
+    template <typename T, typename>
+    Array::Array(std::initializer_list<T> init) {
+        detail::_fill_array_(*this, data_, n_, init.begin(), init.end(), std::false_type());
+    }
+
+    inline Array& Array::operator=(const Array& from) {
+        // strong guarantee
+        Array temp(from);
+        swap(temp);
+        return *this;
+    }
+
+    inline Array& Array::operator=(Array&& from) noexcept {
+        swap(from);
+        return *this;
+    }
+
+    inline bool Array::operator==(const Array& to) const {
+        return (n_ == to.n_) && std::equal(begin(), end(), to.begin());
+    }
+
+    inline bool Array::operator!=(const Array& to) const {
+        return !(this->operator==(to));
+    }
+
+    inline const Array& Array::operator+=(const Array& v) {
+        QL_REQUIRE(n_ == v.n_,
+                   "arrays with different sizes (" << n_ << ", "
+                   << v.n_ << ") cannot be added");
+        std::transform(begin(),end(),v.begin(),begin(), std::plus<>());
+        return *this;
+    }
+
+
+    inline const Array& Array::operator+=(Real x) {
+        std::transform(begin(), end(), begin(), [=](Real y) -> Real { return y + x; });
+        return *this;
+    }
+
+    inline const Array& Array::operator-=(const Array& v) {
+        QL_REQUIRE(n_ == v.n_,
+                   "arrays with different sizes (" << n_ << ", "
+                   << v.n_ << ") cannot be subtracted");
+        std::transform(begin(), end(), v.begin(), begin(), std::minus<>());
+        return *this;
+    }
+
+    inline const Array& Array::operator-=(Real x) {
+        std::transform(begin(),end(),begin(), [=](Real y) -> Real { return y - x; });
+        return *this;
+    }
+
+    inline const Array& Array::operator*=(const Array& v) {
+        QL_REQUIRE(n_ == v.n_,
+                   "arrays with different sizes (" << n_ << ", "
+                   << v.n_ << ") cannot be multiplied");
+        std::transform(begin(), end(), v.begin(), begin(), std::multiplies<>());
+        return *this;
+    }
+
+    inline const Array& Array::operator*=(Real x) {
+        std::transform(begin(), end(), begin(), [=](Real y) -> Real { return y * x; });
+        return *this;
+    }
+
+    inline const Array& Array::operator/=(const Array& v) {
+        QL_REQUIRE(n_ == v.n_,
+                   "arrays with different sizes (" << n_ << ", "
+                   << v.n_ << ") cannot be divided");
+        std::transform(begin(), end(), v.begin(), begin(), std::divides<>());
+        return *this;
+    }
+
+    inline const Array& Array::operator/=(Real x) {
+        #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(x != 0.0, "division by zero");
+        #endif
+        std::transform(begin(), end(), begin(), [=](Real y) -> Real { return y / x; });
+        return *this;
+    }
+
+    inline Real Array::operator[](Size i) const {
+        #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(i<n_,
+                   "index (" << i << ") must be less than " << n_ <<
+                   ": array access out of range");
+        #endif
+        return data_.get()[i];
+    }
+
+    inline Real Array::at(Size i) const {
+        QL_REQUIRE(i<n_,
+                   "index (" << i << ") must be less than " << n_ <<
+                   ": array access out of range");
+        return data_.get()[i];
+    }
+
+    inline Real Array::front() const {
+        #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(n_>0, "null Array: array access out of range");
+        #endif
+        return data_.get()[0];
+    }
+
+    inline Real Array::back() const {
+        #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(n_>0, "null Array: array access out of range");
+        #endif
+        return data_.get()[n_-1];
+    }
+
+    inline Real& Array::operator[](Size i) {
+        #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(i<n_,
+                   "index (" << i << ") must be less than " << n_ <<
+                   ": array access out of range");
+        #endif
+        return data_.get()[i];
+    }
+
+    inline Real& Array::at(Size i) {
+        QL_REQUIRE(i<n_,
+                   "index (" << i << ") must be less than " << n_ <<
+                   ": array access out of range");
+        return data_.get()[i];
+    }
+
+    inline Real& Array::front() {
+        #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(n_>0, "null Array: array access out of range");
+        #endif
+        return data_.get()[0];
+    }
+
+    inline Real& Array::back() {
+        #if defined(QL_EXTRA_SAFETY_CHECKS)
+        QL_REQUIRE(n_>0, "null Array: array access out of range");
+        #endif
+        return data_.get()[n_-1];
+    }
+
+    inline Size Array::size() const {
+        return n_;
+    }
+
+    inline bool Array::empty() const {
+        return n_ == 0;
+    }
+
+    inline Array::const_iterator Array::begin() const {
+        return data_.get();
+    }
+
+    inline Array::iterator Array::begin() {
+        return data_.get();
+    }
+
+    inline Array::const_iterator Array::end() const {
+        return data_.get()+n_;
+    }
+
+    inline Array::iterator Array::end() {
+        return data_.get()+n_;
+    }
+
+    inline Array::const_reverse_iterator Array::rbegin() const {
+        return const_reverse_iterator(end());
+    }
+
+    inline Array::reverse_iterator Array::rbegin() {
+        return reverse_iterator(end());
+    }
+
+    inline Array::const_reverse_iterator Array::rend() const {
+        return const_reverse_iterator(begin());
+    }
+
+    inline Array::reverse_iterator Array::rend() {
+        return reverse_iterator(begin());
+    }
+
+    inline void Array::resize(Size n) {
+        if (n > n_) {
+            Array swp(n);
+            std::copy(begin(), end(), swp.begin());
+            swap(swp);
+        }
+        else if (n < n_) {
+            n_ = n;
+        }
+    }
+
+    inline void Array::swap(Array& from) noexcept {
+        data_.swap(from.data_);
+        std::swap(n_, from.n_);
+    }
+
+    // dot product and norm
+
+    inline Real DotProduct(const Array& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be multiplied");
+        return std::inner_product(v1.begin(),v1.end(),v2.begin(),Real(0.0));
+    }
+
+    inline Real Norm2(const Array& v) {
+        return std::sqrt(DotProduct(v, v));
+    }
+
+    // overloaded operators
+
+    // unary
+
+    inline Array operator+(const Array& v) {
+        Array result = v;
+        return result;
+    }
+
+    inline Array operator+(Array&& v) {
+        return std::move(v);
+    }
+
+    inline Array operator-(const Array& v) {
+        Array result(v.size());
+        std::transform(v.begin(), v.end(), result.begin(), std::negate<>());
+        return result;
+    }
+
+    inline Array operator-(Array&& v) {
+        Array result = std::move(v);
+        std::transform(result.begin(), result.end(), result.begin(), std::negate<>());
+        return result;
+    }
+
+    // binary operators
+
+    inline Array operator+(const Array& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be added");
+        Array result(v1.size());
+        std::transform(v1.begin(),v1.end(),v2.begin(),result.begin(), std::plus<>());
+        return result;
+    }
+
+    inline Array operator+(const Array& v1, Array&& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be added");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::plus<>());
+        return result;
+    }
+
+    inline Array operator+(Array&& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be added");
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), v2.begin(), result.begin(), std::plus<>());
+        return result;
+    }
+
+    inline Array operator+(Array&& v1, Array&& v2) { // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be added");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::plus<>());
+        return result;
+    }
+
+    inline Array operator+(const Array& v1, Real a) {
+        Array result(v1.size());
+        std::transform(v1.begin(), v1.end(), result.begin(), [=](Real y) -> Real { return y + a; });
+        return result;
+    }
+
+    inline Array operator+(Array&& v1, Real a) {
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return y + a; });
+        return result;
+    }
+
+    inline Array operator+(Real a, const Array& v2) {
+        Array result(v2.size());
+        std::transform(v2.begin(),v2.end(),result.begin(), [=](Real y) -> Real { return a + y; });
+        return result;
+    }
+
+    inline Array operator+(Real a, Array&& v2) {
+        Array result = std::move(v2);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return a + y; });
+        return result;
+    }
+
+    inline Array operator-(const Array& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be subtracted");
+        Array result(v1.size());
+        std::transform(v1.begin(), v1.end(), v2.begin(), result.begin(), std::minus<>());
+        return result;
+    }
+
+    inline Array operator-(const Array& v1, Array&& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be subtracted");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::minus<>());
+        return result;
+    }
+
+    inline Array operator-(Array&& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be subtracted");
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), v2.begin(), result.begin(), std::minus<>());
+        return result;
+    }
+
+    inline Array operator-(Array&& v1, Array&& v2) { // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be subtracted");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::minus<>());
+        return result;
+    }
+
+    inline Array operator-(const Array& v1, Real a) {
+        Array result(v1.size());
+        std::transform(v1.begin(),v1.end(),result.begin(), [=](Real y) -> Real { return y - a; });
+        return result;
+    }
+
+    inline Array operator-(Array&& v1, Real a) {
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return y - a; });
+        return result;
+    }
+
+    inline Array operator-(Real a, const Array& v2) {
+        Array result(v2.size());
+        std::transform(v2.begin(),v2.end(),result.begin(), [=](Real y) -> Real { return a - y; });
+        return result;
+    }
+
+    inline Array operator-(Real a, Array&& v2) {
+        Array result = std::move(v2);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return a - y; });
+        return result;
+    }
+
+    inline Array operator*(const Array& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be multiplied");
+        Array result(v1.size());
+        std::transform(v1.begin(), v1.end(), v2.begin(), result.begin(), std::multiplies<>());
+        return result;
+    }
+
+    inline Array operator*(const Array& v1, Array&& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be multiplied");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::multiplies<>());
+        return result;
+    }
+
+    inline Array operator*(Array&& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be multiplied");
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), v2.begin(), result.begin(), std::multiplies<>());
+        return result;
+    }
+
+    inline Array operator*(Array&& v1, Array&& v2) { // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be multiplied");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::multiplies<>());
+        return result;
+    }
+
+    inline Array operator*(const Array& v1, Real a) {
+        Array result(v1.size());
+        std::transform(v1.begin(),v1.end(),result.begin(), [=](Real y) -> Real { return y * a; });
+        return result;
+    }
+
+    inline Array operator*(Array&& v1, Real a) {
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return y * a; });
+        return result;
+    }
+
+    inline Array operator*(Real a, const Array& v2) {
+        Array result(v2.size());
+        std::transform(v2.begin(),v2.end(),result.begin(), [=](Real y) -> Real { return a * y; });
+        return result;
+    }
+
+    inline Array operator*(Real a, Array&& v2) {
+        Array result = std::move(v2);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return a * y; });
+        return result;
+    }
+
+    inline Array operator/(const Array& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be divided");
+        Array result(v1.size());
+        std::transform(v1.begin(), v1.end(), v2.begin(), result.begin(), std::divides<>());
+        return result;
+    }
+
+    inline Array operator/(const Array& v1, Array&& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be divided");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::divides<>());
+        return result;
+    }
+
+    inline Array operator/(Array&& v1, const Array& v2) {
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be divided");
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), v2.begin(), result.begin(), std::divides<>());
+        return result;
+    }
+
+    inline Array operator/(Array&& v1, Array&& v2) { // NOLINT(cppcoreguidelines-rvalue-reference-param-not-moved)
+        QL_REQUIRE(v1.size() == v2.size(),
+                   "arrays with different sizes (" << v1.size() << ", "
+                   << v2.size() << ") cannot be divided");
+        Array result = std::move(v2);
+        std::transform(v1.begin(), v1.end(), result.begin(), result.begin(), std::divides<>());
+        return result;
+    }
+
+    inline Array operator/(const Array& v1, Real a) {
+        Array result(v1.size());
+        std::transform(v1.begin(),v1.end(),result.begin(), [=](Real y) -> Real { return y / a; });
+        return result;
+    }
+
+    inline Array operator/(Array&& v1, Real a) {
+        Array result = std::move(v1);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return y / a; });
+        return result;
+    }
+
+    inline Array operator/(Real a, const Array& v2) {
+        Array result(v2.size());
+        std::transform(v2.begin(),v2.end(),result.begin(), [=](Real y) -> Real { return a / y; });
+        return result;
+    }
+
+    inline Array operator/(Real a, Array&& v2) {
+        Array result = std::move(v2);
+        std::transform(result.begin(), result.end(), result.begin(), [=](Real y) -> Real { return a / y; });
+        return result;
+    }
+
+    // functions
+
+    inline Array Abs(const Array& v) {
+        Array result(v.size());
+        std::transform(v.begin(), v.end(), result.begin(),
+                       [](Real x) -> Real { return std::fabs(x); });
+        return result;
+    }
+
+    inline Array Abs(Array&& v) {
+        Array result = std::move(v);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](Real x) -> Real { return std::fabs(x); });
+        return result;
+    }
+
+    inline Array Sqrt(const Array& v) {
+        Array result(v.size());
+        std::transform(v.begin(),v.end(),result.begin(),
+                       [](Real x) -> Real { return std::sqrt(x); });
+        return result;
+    }
+
+    inline Array Sqrt(Array&& v) {
+        Array result = std::move(v);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](Real x) -> Real { return std::sqrt(x); });
+        return result;
+    }
+
+    inline Array Log(const Array& v) {
+        Array result(v.size());
+        std::transform(v.begin(),v.end(),result.begin(),
+                       [](Real x) -> Real { return std::log(x); });
+        return result;
+    }
+
+    inline Array Log(Array&& v) {
+        Array result = std::move(v);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](Real x) -> Real { return std::log(x); });
+        return result;
+    }
+
+    inline Array Exp(const Array& v) {
+        Array result(v.size());
+        std::transform(v.begin(), v.end(), result.begin(),
+                       [](Real x) -> Real { return std::exp(x); });
+        return result;
+    }
+
+    inline Array Exp(Array&& v) {
+        Array result = std::move(v);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [](Real x) -> Real { return std::exp(x); });
+        return result;
+    }
+
+    inline Array Pow(const Array& v, Real alpha) {
+        Array result(v.size());
+        std::transform(v.begin(), v.end(), result.begin(),
+                       [=](Real x) -> Real { return std::pow(x, alpha); });
+        return result;
+    }
+
+    inline Array Pow(Array&& v, Real alpha) {
+        Array result = std::move(v);
+        std::transform(result.begin(), result.end(), result.begin(),
+                       [=](Real x) -> Real { return std::pow(x, alpha); });
+        return result;
+    }
+
+    inline void swap(Array& v, Array& w) noexcept {
+        v.swap(w);
+    }
+
+    inline std::ostream& operator<<(std::ostream& out, const Array& a) {
+        std::streamsize width = out.width();
+        out << "[ ";
+        if (!a.empty()) {
+            for (Size n=0; n<a.size()-1; ++n)
+                out << std::setw(int(width)) << a[n] << "; ";
+            out << std::setw(int(width)) << a.back();
+        }
+        out << " ]";
+        return out;
+    }
+
+}
+
+
+#endif
+
+</source_files>
+
+<output_specification>
+Output a structured preflight report with:
+- Part A: Numbered answers with source citations
+- Part B: Translated formulas with explicit verification
+- Part C: Implementation roadmap table
+
+No code in this round.
+</output_specification>

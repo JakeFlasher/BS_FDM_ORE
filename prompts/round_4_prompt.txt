@@ -1,0 +1,692 @@
+<system_context>
+You are an expert C++ developer implementing two positivity-preserving finite
+difference schemes from Milev & Tagliani (2010) into QuantLib 1.42-dev's modern
+Fdm* framework. The schemes address spurious oscillations and negative prices
+that standard Crank–Nicolson produces when σ² ≪ r and payoffs are discontinuous.
+
+PAPER REFERENCE (corrected formulations):
+Scheme 1: Fully implicit with Duffy's exponentially fitted diffusion coefficient.
+Scheme 2: Crank–Nicolson variant with a modified 6-node reaction-term stencil.
+Both are described in the GOLDEN REFERENCE DOCUMENT (Round 1.5 output), whose
+corrected equation chain (CE-1 through CE-25) is authoritative.
+
+SOURCE-OF-TRUTH / NO-HALLUCINATION RULES (mandatory):
+- Use ONLY the provided source files and prior-round outputs as factual reference
+  for class/method signatures, include paths, base-class requirements, and
+  coding conventions.
+- If any referenced file content is missing (i.e., an 
+
+<task>
+ROUND 4 OF 7: Modify FdmBackwardSolver to support monitoring-restart damping
+and operator typeon. Modify FdmBlackScholesSolver to create the
+appropriate operator based on the scheme description.
+
+Depends on Rounds 1, 2, 3.
+
+OUTPUT: 4 files (2 modified headers + 2 modified implementations).
+</task>
+
+<source_files>
+FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp
+[>>> ATTACH HERE: the fdmbackwardsolver.hpp file generated in Round(s) 3 <<<]
+
+FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmbackwardsolver.cpp
+*/
+
+#include <ql/methods/finitedifferences/finitedifferencemodel.hpp>
+#include <ql/methods/finitedifferences/schemes/craigsneydscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/douglasscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/hundsdorferscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/methodoflinesscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/modifiedcraigsneydscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/trbdf2scheme.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/mathconstants.hpp>
+#include <utility>
+
+
+namespace QuantLib {
+    
+    FdmSchemeDesc::FdmSchemeDesc(FdmSchemeType aType, Real aTheta, Real aMu)
+    : type(aType), theta(aTheta), mu(aMu) { }
+
+    FdmSchemeDesc FdmSchemeDesc::Douglas() { return {FdmSchemeDesc::DouglasType, 0.5, 0.0}; }
+
+    FdmSchemeDesc FdmSchemeDesc::CrankNicolson() {
+        return {FdmSchemeDesc::CrankNicolsonType, 0.5, 0.0};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::CraigSneyd() { return {FdmSchemeDesc::CraigSneydType, 0.5, 0.5}; }
+
+    FdmSchemeDesc FdmSchemeDesc::ModifiedCraigSneyd() {
+        return {FdmSchemeDesc::ModifiedCraigSneydType, 1.0 / 3.0, 1.0 / 3.0};
+    }
+    
+    FdmSchemeDesc FdmSchemeDesc::Hundsdorfer() {
+        return {FdmSchemeDesc::HundsdorferType, 0.5 + std::sqrt(3.0) / 6, 0.5};
+    }
+    
+    FdmSchemeDesc FdmSchemeDesc::ModifiedHundsdorfer() {
+        return {FdmSchemeDesc::HundsdorferType, 1.0 - std::sqrt(2.0) / 2, 0.5};
+    }
+    
+    FdmSchemeDesc FdmSchemeDesc::ExplicitEuler() {
+        return {FdmSchemeDesc::ExplicitEulerType, 0.0, 0.0};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::ImplicitEuler() {
+        return {FdmSchemeDesc::ImplicitEulerType, 0.0, 0.0};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::MethodOfLines(Real eps, Real relInitStepSize) {
+        return {FdmSchemeDesc::MethodOfLinesType, eps, relInitStepSize};
+    }
+
+    FdmSchemeDesc FdmSchemeDesc::TrBDF2() { return {FdmSchemeDesc::TrBDF2Type, 2 - M_SQRT2, 1e-8}; }
+
+    FdmBackwardSolver::FdmBackwardSolver(
+        ext::shared_ptr<FdmLinearOpComposite> map,
+        FdmBoundaryConditionSet bcSet,
+        const ext::shared_ptr<FdmStepConditionComposite>& condition,
+        const FdmSchemeDesc& schemeDesc)
+    : map_(std::move(map)), bcSet_(std::move(bcSet)),
+      condition_((condition) != nullptr ?
+                     condition :
+                     ext::make_shared<FdmStepConditionComposite>(
+                         std::list<std::vector<Time> >(), FdmStepConditionComposite::Conditions())),
+      schemeDesc_(schemeDesc) {}
+
+    void FdmBackwardSolver::rollback(FdmBackwardSolver::array_type& rhs, 
+                                     Time from, Time to,
+                                     Size steps, Size dampingSteps) {
+
+        const Time deltaT = from - to;
+        const Size allSteps = steps + dampingSteps;
+        const Time dampingTo = from - (deltaT*dampingSteps)/allSteps;
+
+        if ((dampingSteps != 0U) && schemeDesc_.type != FdmSchemeDesc::ImplicitEulerType) {
+            ImplicitEulerScheme implicitEvolver(map_, bcSet_);    
+            FiniteDifferenceModel<ImplicitEulerScheme> 
+                    dampingModel(implicitEvolver, condition_->stoppingTimes());
+            dampingModel.rollback(rhs, from, dampingTo, 
+                                  dampingSteps, *condition_);
+        }
+
+        switch (schemeDesc_.type) {
+          case FdmSchemeDesc::HundsdorferType:
+            {
+                HundsdorferScheme hsEvolver(schemeDesc_.theta, schemeDesc_.mu, 
+                                            map_, bcSet_);
+                FiniteDifferenceModel<HundsdorferScheme> 
+                               hsModel(hsEvolver, condition_->stoppingTimes());
+                hsModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::DouglasType:
+            {
+                DouglasScheme dsEvolver(schemeDesc_.theta, map_, bcSet_);
+                FiniteDifferenceModel<DouglasScheme> 
+                               dsModel(dsEvolver, condition_->stoppingTimes());
+                dsModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::CrankNicolsonType:
+            {
+              CrankNicolsonScheme cnEvolver(schemeDesc_.theta, map_, bcSet_);
+              FiniteDifferenceModel<CrankNicolsonScheme>
+                             cnModel(cnEvolver, condition_->stoppingTimes());
+              cnModel.rollback(rhs, dampingTo, to, steps, *condition_);
+
+            }
+            break;
+          case FdmSchemeDesc::CraigSneydType:
+            {
+                CraigSneydScheme csEvolver(schemeDesc_.theta, schemeDesc_.mu, 
+                                           map_, bcSet_);
+                FiniteDifferenceModel<CraigSneydScheme> 
+                               csModel(csEvolver, condition_->stoppingTimes());
+                csModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::ModifiedCraigSneydType:
+            {
+                ModifiedCraigSneydScheme csEvolver(schemeDesc_.theta, 
+                                                   schemeDesc_.mu,
+                                                   map_, bcSet_);
+                FiniteDifferenceModel<ModifiedCraigSneydScheme> 
+                              mcsModel(csEvolver, condition_->stoppingTimes());
+                mcsModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::ImplicitEulerType:
+            {
+                ImplicitEulerScheme implicitEvolver(map_, bcSet_);
+                FiniteDifferenceModel<ImplicitEulerScheme> 
+                   implicitModel(implicitEvolver, condition_->stoppingTimes());
+                implicitModel.rollback(rhs, from, to, allSteps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::ExplicitEulerType:
+            {
+                ExplicitEulerScheme explicitEvolver(map_, bcSet_);
+                FiniteDifferenceModel<ExplicitEulerScheme> 
+                   explicitModel(explicitEvolver, condition_->stoppingTimes());
+                explicitModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::MethodOfLinesType:
+            {
+                MethodOfLinesScheme methodOfLines(
+                    schemeDesc_.theta, schemeDesc_.mu, map_, bcSet_);
+                FiniteDifferenceModel<MethodOfLinesScheme>
+                   molModel(methodOfLines, condition_->stoppingTimes());
+                molModel.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          case FdmSchemeDesc::TrBDF2Type:
+            {
+                const FdmSchemeDesc trDesc
+                    = FdmSchemeDesc::CraigSneyd();
+
+                const ext::shared_ptr<CraigSneydScheme> hsEvolver(
+                    ext::make_shared<CraigSneydScheme>(
+                        trDesc.theta, trDesc.mu, map_, bcSet_));
+
+                TrBDF2Scheme<CraigSneydScheme> trBDF2(
+                    schemeDesc_.theta, map_, hsEvolver, bcSet_,schemeDesc_.mu);
+
+                FiniteDifferenceModel<TrBDF2Scheme<CraigSneydScheme> >
+                   trBDF2Model(trBDF2, condition_->stoppingTimes());
+                trBDF2Model.rollback(rhs, dampingTo, to, steps, *condition_);
+            }
+            break;
+          default:
+            QL_FAIL("Unknown scheme type");
+        }
+    }
+}
+
+
+FILE: ql/methods/finitediffere/solvers/fdmblackscholessolver.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmblackscholessolver.hpp
+*/
+
+#ifndef quantlib_fdm_black_scholes_solver_hpp
+#define quantlib_fdm_black_scholes_solver_hpp
+
+#include <ql/handle.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
+
+namespace QuantLib {
+
+    class Fdm1DimSolver;
+    class FdmSnapshotCondition;
+    class GeneralizedBlackScholesProcess;
+
+    class FdmBlackScholesSolver : public LazyObject {
+      public:
+        FdmBlackScholesSolver(Handle<GeneralizedBlackScholesProcess> process,
+                              Real strike,
+                              FdmSolverDesc solverDesc,
+                              const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+                              bool localVol = false,
+                              Real illegalLocalVolOverwrite = -Null<Real>(),
+                              Handle<FdmQuantoHelper> quantoHelper = Handle<FdmQuantoHelper>());
+
+        Real valueAt(Real s) const;
+        Real deltaAt(Real s) const;
+        Real gammaAt(Real s) const;
+        Real thetaAt(Real s) const;
+
+      protected:
+        void performCalculations() const override;
+
+      private:
+        Handle<GeneralizedBlackScholesProcess> process_;
+        const Real strike_;
+        const FdmSolverDesc solverDesc_;
+        const FdmSchemeDesc schemeDesc_;
+        const bool localVol_;
+        const Real illegalLocalVolOverwrite_;
+        const Handle<FdmQuantoHelper> quantoHelper_;
+
+        mutable ext::shared_ptr<Fdm1DimSolver> solver_;
+    };
+}
+
+#endif /* quantlib_fdm_black_scholes_solver_hpp */
+
+
+FILE: ql/methods/finitedifferences/solvers/fdmblackscholessolver.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
+#include <ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmBlackScholesSolver::FdmBlackScholesSolver(Handle<GeneralizedBlackScholesProcess> process,
+                                                 Real strike,
+                                                 FdmSolverDesc solverDesc,
+                                                 const FdmSchemeDesc& schemeDesc,
+                                                 bool localVol,
+                                                 Real illegalLocalVolOverwrite,
+                                                 Handle<FdmQuantoHelper> quantoHelper)
+    : process_(std::move(process)), strike_(strike), solverDesc_(std::move(solverDesc)),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), quantoHelper_(std::move(quantoHelper)) {
+
+        registerWith(process_);
+        registerWith(quantoHelper_);
+    }
+
+    void FdmBlackScholesSolver::performCalculations() const {
+            const ext::shared_ptr<FdmBlackScholesOp> op(
+            ext::make_shared<FdmBlackScholesOp>(
+                solverDesc_.mesher, process_.currentLink(), strike_,
+                localVol_, illegalLocalVolOverwrite_, 0,
+                (quantoHelper_.empty())
+                    ? ext::shared_ptr<FdmQuantoHelper>()
+                    : quantoHelper_.currentLink()));
+
+        solver_ = ext::make_shared<Fdm1DimSolver>(solverDesc_, schemeDesc_, op);
+    }
+
+    Real FdmBlackScholesSolver::valueAt(Real s) const {
+        calculate();
+        return solver_->interpolateAt(std::log(s));
+    }
+
+    Real FdmBlackScholesSolver::deltaAt(Real s) const {
+        calculate();
+        return solver_->derivativeX(std::log(s))/s;
+    }
+
+    Real FdmBlackScholesSolver::gammaAt(Real s) const {
+        calculate();
+        return (solver_->derivativeXX(std::log(s))
+                -solver_->derivativeX(std::log(s)))/(s*s);
+    }
+
+    Real FdmBlackScholesSolver::thetaAt(Real s) const {
+        return solver_->thetaAt(std::log(s));
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2011 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdm1dimsolver.hpp
+*/
+
+#ifndef quantlib_fdm_1_dim_solver_hpp
+#define quantlib_fdm_1_dim_solver_hpp
+
+#include <ql/handle.hpp>
+#include <ql/math/matrix.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+
+
+namespace QuantLib {
+
+    class CubicInterpolation;
+    class FdmSnapshotCondition;
+
+    class Fdm1DimSolver : public LazyObject {
+      public:
+        Fdm1DimSolver(const FdmSolverDesc& solverDesc,
+                      const FdmSchemeDesc& schemeDesc,
+                      ext::shared_ptr<FdmLinearOpComposite> op);
+
+        Real interpolateAt(Real x) const;
+        Real thetaAt(Real x) const;
+
+        Real derivativeX(Real x) const;
+        Real derivativeXX(Real x) const;
+
+      protected:
+        void performCalculations() const override;
+
+      private:
+        const FdmSolverDesc solverDesc_;
+        const FdmSchemeDesc schemeDesc_;
+        const ext::shared_ptr<FdmLinearOpComposite> op_;
+
+        const ext::shared_ptr<FdmSnapshotCondition> thetaCondition_;
+        const ext::shared_ptr<FdmStepConditionComposite> conditions_;
+
+        std::vector<Real> x_, initialValues_;
+        mutable Array resultValues_;
+        mutable ext::shared_ptr<CubicInterpolation> interpolation_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/finitedifferencemodel.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file finitedifferencemodel.hpp
+    \brief generic finite difference model
+*/
+
+#ifndef quantlib_finite_difference_model_hpp
+#define quantlib_finite_difference_model_hpp
+
+#include <ql/methods/finitedifferences/boundarycondition.hpp>
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/stepcondition.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    //! Generic finite difference model
+    /*! \ingroup findiff */
+    template<class Evolver>
+    class FiniteDifferenceModel {
+      public:
+        typedef typename Evolver::traits traits;
+        typedef typename traits::operator_type operator_type;
+        typedef typename traits::array_type array_type;
+        typedef typename traits::bc_set bc_set;
+        typedef typename traits::condition_type condition_type;
+        // constructors
+        FiniteDifferenceModel(const operator_type& L,
+                              const bc_set& bcs,
+                              std::vector<Time> stoppingTimes = std::vector<Time>())
+        : evolver_(L, bcs), stoppingTimes_(std::move(stoppingTimes)) {
+            std::sort(stoppingTimes_.begin(), stoppingTimes_.end());
+            auto last = std::unique(stoppingTimes_.begin(), stoppingTimes_.end());
+            stoppingTimes_.erase(last, stoppingTimes_.end());
+        }
+        FiniteDifferenceModel(Evolver evolver,
+                              std::vector<Time> stoppingTimes = std::vector<Time>())
+        : evolver_(std::move(evolver)), stoppingTimes_(std::move(stoppingTimes)) {
+            std::sort(stoppingTimes_.begin(), stoppingTimes_.end());
+            auto last = std::unique(stoppingTimes_.begin(), stoppingTimes_.end());
+            stoppingTimes_.erase(last, stoppingTimes_.end());
+        }
+        // methods
+        // array_type grid() const { return evolver.xGrid(); }
+        const Evolver& evolver() const{ return evolver_; }
+        /*! solves the problem between the given times.
+            \warning being this a rollback, <tt>from</tt> must be a later
+                     time than <tt>to</tt>.
+        */
+        void rollback(array_type& a,
+                      Time from,
+                      Time to,
+                      Size steps) {
+            rollbackImpl(a, from, to, steps, (const condition_type*)nullptr);
+        }
+        /*! solves the problem between the given times,
+            applying a condition at every step.
+            \warning being this a rollback, <tt>from</tt> must be a later
+                     time than <tt>to</tt>.
+        */
+        void rollback(array_type& a,
+                      Time from,
+                      Time to,
+                      Size steps,
+                      const condition_type& condition) {
+            rollbackImpl(a,from,to,steps,&condition);
+        }
+      private:
+        void rollbackImpl(array_type& a,
+                          Time from,
+                          Time to,
+                          Size steps,
+                          const condition_type* condition) {
+
+            QL_REQUIRE(from >= to,
+                       "trying to roll back from " << from << " to " << to);
+
+            Time dt = (from-to)/steps, t = from;
+            evolver_.setStep(dt);
+
+            if(!stoppingTimes_.empty() && stoppingTimes_.back() == from) {
+                if (condition)
+                    condition->applyTo(a,from);
+            }
+            for (Size i=0; i<steps; ++i, t -= dt) {
+                Time now = t;
+                // make sure last step ends exactly on "to" in order to not
+                // miss a stopping time at "to" due to numerical issues
+                Time next = (i < steps -1)? t-dt : to;
+
+                if (std::fabs(to-next) < std::sqrt(QL_EPSILON)) next = to;
+                bool hit = false;
+                for (Integer j = static_cast<Integer>(stoppingTimes_.size())-1; j >= 0 ; --j) {
+                    if (next <= stoppingTimes_[j] && stoppingTimes_[j] < now) {
+                        // a stopping time was hit
+                        hit = true;
+
+                        // perform a small step to stoppingTimes_[j]...
+                        evolver_.setStep(now-stoppingTimes_[j]);
+                        evolver_.step(a,now);
+                        if (condition)
+                            condition->applyTo(a,stoppingTimes_[j]);
+                        // ...and continue the cycle
+                        now = stoppingTimes_[j];
+                    }
+                }
+                // if we did hit...
+                if (hit) {
+                    // ...we might have to make a small step to
+                    // complete the big one...
+                    if (now > next) {
+                        evolver_.setStep(now - next);
+                        evolver_.step(a,now);
+                        if (condition)
+                            condition->applyTo(a,next);
+                    }
+                    // ...and in any case, we have to reset the
+                    // evolver to the default step.
+                    evolver_.setStep(dt);
+                } else {
+                    // if we didn't, the evolver is already set to the
+                    // default step, which is ok for us.
+                    evolver_.step(a,now);
+                    if (condition)
+                        condition->applyTo(a, next);
+                }
+            }
+        }
+        Evolver evolver_;
+        std::vector<Time> stoppingTimes_;
+    };
+
+}
+
+
+#endif
+
+
+ROUND 1 OUTPUT (header only):
+FILE: ql/methods/finitedifferences/operators/fdmblackscholesop.hpp
+[>>> ATTACH HERE: the fdmblackscholesop.hpp file generated in Round(s) 1 <<<]
+
+ROUND 2 OUTPUT (header only):
+FILE: ql/methods/finitedifferences/operators/fdmcnvariantblackscholesop.hpp
+[>>> ATTACH HERE: the fdmcnvariantblackscholesop.hpp file generated in Round(s) 2 <<<]
+
+ROUND 3 OUTPUT (headers only):
+FILE: cranknicolsonscheme.hpp
+[>>> ATTACH HERE: the cranknicolsonscheme.hpp file generated in Round(s) 3 <<<]
+</source_files>
+
+<implementation_guidance>
+
+=== FILE 1-2: Modified FdmBackwardSolver ===
+
+When schemeDesc_.monitoringDampingSteps > 0 AND schemeDesc_.type == CrankNicolsonType:
+1. Phase 1 (unchanged): if dampingSteps != 0, run original implicit damping.
+2. Phase 2 (CN): segment the CN phase at stopping times.
+   At each segment boundary that is a monitoring stopping time:
+   - Call cnEvolver.notifyDiscontinuity() to trigger Rannacher restart
+   - Continue rollback; the scheme's step() handles the damping internally
+
+When monitoringDampingSteps == 0: behavior IDENTICAL to original.
+When type != CrankNicolsonType: behavior IDENTICAL to original.
+
+
+=== FILE 3-4: Modified FdmBlackScholesSolver ===
+
+Add operator selection based on schemeDesc_.operatorType:
+
+In performCalculations():
+  ext::shared_ptr<FdmLinearOpComposite> op;
+  switch (schemeDesc_.operatorType) {
+      case 0:  // standard
+          op = ext::make_shared<FdmBlackScholesOp>(...);
+          break;
+      case 1:  // Scheme 1: exponentially fitted
+          op = ext::make_shared<FdmFittedBlackScholesOp>(...);
+          break;
+      case 2:  // Scheme 2: CN variant
+          op = ext::make_shared<FdmCNVariantBlackScholesOp>(...);
+          break;
+      default:
+          QL_FAIL("Unknown operator type " << schemeDesc_.operatorType);
+  }
+
+Include new headers in .cpp only (NOT in .hpp):
+  #include <ql/methods/finitedifferences/operators/fdmfittedblackscholesop.hpp>
+  #include <ql/methods/finitedifferences/operators/fdmcnvariantblackscholesop.hpp>
+
+</implementation_guidance>
+
+<constraints>
+- When monitoringDampingSteps==0: rollback IDENTICAL to original
+- When operatorType==0: solver IDENTICAL to original
+- Do NOT modify FiniteDifferenceModel
+- New operator headers #included in .cpp only
+- If any .cpp source file content is missing, STOP and ask
+</constraints>
+
+<output_specification>
+Produce exactly 4 files:
+1. fdmbackwardsolver.hpp (from Round 3, with FdmBackwardSolver changes if needed)
+2. fdmbackwardsolver.cpp (modified rollback)
+3. fdmblackscholessolver.hpp (modified if needed)
+4. fdmblackscholessolver.cpp (modified — conditional operator creation)
+</output_specification>
+
+<quality_checklist>
+□ Original rollback behavior preserved when monitoringDampingSteps==0
+□ Original solver behavior preserve operatorType==0
+□ CN phase notifies discontinuity at stopping times when damping enabled
+□ Other scheme types (Douglas, Hundsdorfer) unchanged
+□ New headers #included in .cpp only
+□ If any required .cpp source is missing, STOP and ask
+</quality_checklist>

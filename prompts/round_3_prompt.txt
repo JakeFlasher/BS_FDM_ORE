@@ -1,0 +1,510 @@
+<system_context>
+You are an expert C++ developer implementing two positivity-preserving finite
+difference schemes from Milev & Tagliani (2010) into QuantLib 1.42-dev's modern
+Fdm* framework. The schemes address spurious oscillations and negative prices
+that standard Crank–Nicolson produces when σ² ≪ r and payoffs are discontinuous.
+
+PAPER REFERENCE (corrected formulations):
+Scheme 1: Fully implicit with Duffy's exponentially fitted diffusion coefficient.
+Scheme 2: Crank–Nicolson variant with a modified 6-node reaction-term stencil.
+Both are described in the GOLDEN REFERENCE DOCUMENT (Round 1.5 output), whose
+corrected equation chain (CE-1 through CE-25) is authoritative.
+
+SOURCE-OF-TRUTH / NO-HALLUCINATION RULES (mandatory):
+- Use ONLY the provided source files and prior-round outputs as factual reference
+  for class/method signatures, include paths, base-class requirements, and
+  coding conventions.
+- If any referenced file content is missing (i.e., an 
+
+<task>
+ROUND 3 OF 7: Modify FdmSchemeDesc to carry new configuration parodify CrankNicolsonScheme to support Rannacher-style damping restart after
+discrete monitoring events.
+
+OUTPUT: 3 files (1 modified header, 1 modified scheme header, 1 modified
+scheme implementation).
+NOTE: Only FdmSchemeDesc changes inside fdmbackwardsolver.hpp —
+the FdmBackwardSolver class body is NOT changed until Round 4.
+</task>
+
+<source_files>
+FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmbackwardsolver.hpp
+*/
+
+#ifndef quantlib_fdm_backward_solver_hpp
+#define quantlib_fdm_backward_solver_hpp
+
+#include <ql/methods/finitedifferences/utilities/fdmboundaryconditionset.hpp>
+
+namespace QuantLib {
+
+    class FdmLinearOpComposite;
+    class FdmStepConditionComposite;
+
+    struct FdmSchemeDesc {
+        enum FdmSchemeType { HundsdorferType, DouglasType,
+                             CraigSneydType, ModifiedCraigSneydType, 
+                             ImplicitEulerType, ExplicitEulerType,
+                             MethodOfLinesType, TrBDF2Type,
+                             CrankNicolsonType };
+
+        FdmSchemeDesc(FdmSchemeType type, Real theta, Real mu);
+
+        const FdmSchemeType type;
+        const Real theta, mu;
+
+        // some default scheme descriptions
+        static FdmSchemeDesc Douglas(); //same as Crank-Nicolson in 1 dimension
+        static FdmSchemeDesc CrankNicolson();
+        static FdmSchemeDesc ImplicitEuler();
+        static FdmSchemeDesc ExplicitEuler();
+        static FdmSchemeDesc CraigSneyd();
+        static FdmSchemeDesc ModifiedCraigSneyd(); 
+        static FdmSchemeDesc Hundsdorfer();
+        static FdmSchemeDesc ModifiedHundsdorfer();
+        static FdmSchemeDesc MethodOfLines(
+            Real eps=0.001, Real relInitStepSize=0.01);
+        static FdmSchemeDesc TrBDF2();
+    };
+        
+    class FdmBackwardSolver {
+      public:
+        typedef FdmLinearOp::array_type array_type;
+
+        FdmBackwardSolver(ext::shared_ptr<FdmLinearOpComposite> map,
+                          FdmBoundaryConditionSet bcSet,
+                          const ext::shared_ptr<FdmStepConditionComposite>& condition,
+                          const FdmSchemeDesc& schemeDesc);
+
+        void rollback(array_type& a, 
+                      Time from, Time to,
+                      Size steps, Size dampingSteps);
+
+      protected:
+        const ext::shared_ptr<FdmLinearOpComposite> map_;
+        const FdmBoundaryConditionSet bcSet_;
+        const ext::shared_ptr<FdmStepConditionComposite> condition_;
+        const FdmSchemeDesc schemeDesc_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2019 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file cranknicolsonscheme.hpp
+    \brief Crank-Nicolson scheme
+*/
+
+#ifndef quantlib_crank_nicolson_scheme_hpp
+#define quantlib_crank_nicolson_scheme_hpp
+
+#include <ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp>
+
+namespace QuantLib {
+
+    /*! In one dimension the Crank-Nicolson scheme is equivalent to the
+        Douglas scheme and in higher dimensions it is usually inferior to
+        operator splitting methods like Craig-Sneyd or Hundsdorfer-Verwer.
+    */
+    class ExplicitEulerScheme;
+
+    class CrankNicolsonScheme  {
+      public:
+        // typedefs
+        typedef OperatorTraits<FdmLinearOp> traits;
+        typedef traits::operator_type operator_type;
+        typedef traits::array_type array_type;
+        typedef traits::bc_set bc_set;
+        typedef traits::condition_type condition_type;
+
+        // constructors
+        CrankNicolsonScheme(
+            Real theta,
+            const ext::shared_ptr<FdmLinearOpComposite>& map,
+            const bc_set& bcSet = bc_set(),
+            Real relTol = 1e-8,
+            ImplicitEulerScheme::SolverType solverType
+                = ImplicitEulerScheme::BiCGstab);
+
+        void step(array_type& a, Time t);
+        void setStep(Time dt);
+
+        Size numberOfIterations() const;
+      protected:
+        Real dt_;
+        const Real theta_;
+        const ext::shared_ptr<ExplicitEulerScheme> explicit_;
+        const ext::shared_ptr<ImplicitEulerScheme> implicit_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2019 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
+#include <ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp>
+
+namespace QuantLib {
+    CrankNicolsonScheme::CrankNicolsonScheme(
+        Real theta,
+        const ext::shared_ptr<FdmLinearOpComposite> & map,
+        const bc_set& bcSet,
+        Real relTol,
+        ImplicitEulerScheme::SolverType solverType)
+    : dt_(Null<Real>()),
+      theta_(theta),
+      explicit_(ext::make_shared<ExplicitEulerScheme>(map, bcSet)),
+      implicit_(ext::make_shared<ImplicitEulerScheme>(
+          map, bcSet, relTol, solverType)) {
+    }
+
+    void CrankNicolsonScheme::step(array_type& a, Time t) {
+        QL_REQUIRE(t-dt_ > -1e-8, "a step towards negative time given");
+
+        if (theta_ != 1.0)
+            explicit_->step(a, t, 1.0-theta_);
+
+        if (theta_ != 0.0)
+            implicit_->step(a, t, theta_);
+    }
+
+    void CrankNicolsonScheme::setStep(Time dt) {
+        dt_ = dt;
+        explicit_->setStep(dt_);
+        implicit_->setStep(dt_);
+    }
+
+    Size CrankNicolsonScheme::numberOfIterations() const {
+        return implicit_->numberOfIterations();
+    }
+}
+
+
+FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009, 2017 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file impliciteulerscheme.hpp
+    \brief Implicit-Euler scheme
+*/
+
+#ifndef quantlib_implicit_euler_scheme_hpp
+#define quantlib_implicit_euler_scheme_hpp
+
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp>
+#include <ql/methods/finitedifferences/schemes/boundaryconditionschemehelper.hpp>
+
+namespace QuantLib {
+
+    class ImplicitEulerScheme {
+      public:
+        enum SolverType { BiCGstab, GMRES };
+
+        // typedefs
+        typedef OperatorTraits<FdmLinearOp> traits;
+        typedef traits::operator_type operator_type;
+        typedef traits::array_type array_type;
+        typedef traits::bc_set bc_set;
+        typedef traits::condition_type condition_type;
+
+        // constructors
+        explicit ImplicitEulerScheme(ext::shared_ptr<FdmLinearOpComposite> map,
+                                     const bc_set& bcSet = bc_set(),
+                                     Real relTol = 1e-8,
+                                     SolverType solverType = BiCGstab);
+
+        void step(array_type& a, Time t);
+        void setStep(Time dt);
+
+        Size numberOfIterations() const;
+      protected:
+        friend class CrankNicolsonScheme;
+        void step(array_type& a, Time t, Real theta);
+
+        Array apply(const Array& r, Real theta) const;
+          
+        Time dt_;
+        ext::shared_ptr<Size> iterations_;
+
+        const Real relTol_;
+        const ext::shared_ptr<FdmLinearOpComposite> map_;
+        const BoundaryConditionSchemeHelper bcSet_;
+        const SolverType solverType_;
+    };
+}
+
+#endif
+
+
+FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Andreas Gaida
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file expliciteulerscheme.hpp
+    \brief explicit-Euler scheme
+*/
+
+#ifndef quantlib_explicit_euler_scheme_hpp
+#define quantlib_explicit_euler_scheme_hpp
+
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp>
+#include <ql/methods/finitedifferences/schemes/boundaryconditionschemehelper.hpp>
+
+namespace QuantLib {
+
+    class ExplicitEulerScheme  {
+      public:
+        // typedefs
+        typedef OperatorTraits<FdmLinearOp> traits;
+        typedef traits::operator_type operator_type;
+        typedef traits::array_type array_type;
+        typedef traits::bc_set bc_set;
+        typedef traits::condition_type condition_type;
+
+        // constructors
+        explicit ExplicitEulerScheme(ext::shared_ptr<FdmLinearOpComposite> map,
+                                     const bc_set& bcSet = bc_set());
+
+        void step(array_type& a, Time t);
+        void setStep(Time dt);
+
+      protected:
+        friend class CrankNicolsonScheme;
+        void step(array_type& a, Time t, Real theta);
+
+        Time dt_;
+        const ext::shared_ptr<FdmLinearOpComposite> map_;
+        const BoundaryConditionSchemeHelper bcSet_;
+    };
+}
+
+#endif
+
+</source_files>
+
+<implementation_guidance>
+
+=== FILE 1: Modified FdmSchemeDesc (in fdmbackwardsolver.hpp) ===
+
+FdmSchemeDeshas ALL CONST members. New fields must also be const.
+
+APPROACH: Replace the existing 3-parameter constructor with a 5-parameter
+constructor that has defaults for backward compatibility:
+
+  struct FdmSchemeDesc {
+      enum FdmSchemeType { HundsdorferType, DouglasType,
+                           CraigSneydType, ModifiedCraigSneydType,
+                           ImplicitEulerType, ExplicitEulerType,
+                           MethodOfLinesType, TrBDF2Type,
+                           CrankNicolsonType };
+
+      FdmSchemeDesc(FdmSchemeType type, Real theta, Real mu,
+                    Size monitoringDampingSteps = 0,
+                    Size operatorType = 0);
+
+      const FdmSchemeType type;
+      const Real theta, mu;
+      const Size monitoringDampingSteps;  // NEW: Rannacher half-steps after monitoring
+      const Size operatorType;             // NEW: 0=standard, 1=fitted, 2=CN variant
+
+      // ALL existing static factories — produce identical behavior
+      static FdmSchemeDesc Douglas();
+      static mSchemeDesc CrankNicolson();
+      static FdmSchemeDesc ImplicitEuler();
+      static FdmSchemeDesc ExplicitEuler();
+      static FdmSchemeDesc CraigSneyd();
+      static FdmSchemeDesc ModifiedCraigSneyd();
+      static FdmSchemeDesc Hundsdorfer();
+      static FdmSchemeDesc ModifiedHundsdorfer();
+      static FdmSchemeDesc MethodOfLines(Real eps=0.001, Real relInitStepSize=0.01);
+      static FdmSchemeDesc TrBDF2();
+
+      // NEW static factories
+      static FdmSchemeDesc FittedImplicit();
+      // Returns {ImplicitEulerType, 1.0, 0.0, 0, 1}
+
+      static FdmSchemeDesc FittedCrankNicolson();
+      // Returns {CrankNicolsonType, 0.5, 0.0, 0, 1}
+
+      static FdmSchemeDesc CNVariant(Size monitoringDampingSteps = 0);
+      // Returns {CrankNicolsonType, 0.5, 0.0, monitoringDampingSteps, 2}
+
+      static FdmSchemeDesc CrankNicolsonWithDamping(Size monitoringDampingSteps = 2);
+      // Returns {CrankNicolsonType, 0.5, 0.0, monitoringDampingSteps, 0}
+  };
+
+All EXISTING static factories pass 0,0 for the new parameters (via defaults).
+This is fully backward-compatible.
+
+CRITICAL: Do NOT change FdmBackwardSolver class body in this round.
+
+
+=== FILES 2-3: Modified CrankNicolsonScheme ===
+
+Add Rannacher monitoring-restart capability.
+
+Modified constructor:
+  CrankNicolsonScheme(
+      Real theta,
+      const ext::shared_ptr<FdmLinearOpComposite>& map,
+      const bc_set& bcSet = bc_set(),
+      Real relTol = 1e-8,
+      ImplicitEulerScheme::SolverType solverType
+          = ImplicitEulerScheme::BiCGstab,
+      Size dampingHalfSteps = 0);    // NEW — must be even; 0 = no restart
+
+New methods:
+  void notifyDiscontinuity();
+  // Sets inDampingPhase_ = true, dampingRemaining_ = dampingHalfSteps_
+  // If dampingHalfSteps_ == 0, this is a no-op
+
+  bool isDamping() const;
+
+QL_REQUIRE: dampingHalfSteps must be even (0 allowed).
+
+Modified step() method:
+  void CrankNicolsonScheme::step(array_type& a, Time t) {
+      if (inDampingPhase_ && dampingRemaining_ > 0) {
+          // Two implicit Euler half-steps at dt/2
+          Time lfDt = dt_ * 0.5;
+          implicit_->setStep(halfDt);
+          implicit_->step(a, t, 1.0);              // t → t−dt/2
+          implicit_->step(a, t - halfDt, 1.0);     // t−dt/2 → t−dt
+          implicit_->setStep(dt_);                  // restore
+          dampingRemaining_ -= 2;
+          if (dampingRemaining_ <= 0) inDampingPhase_ = false;
+          return;
+      }
+      // Standard CN (unchanged):
+      if (theta_ != 1.0) explicit_->step(a, t, 1.0 - theta_);
+      if (theta_ != 0.0) implica, t, theta_);
+  }
+
+Default behavior (dampingHalfSteps=0) must be BIT-IDENTICAL to original.
+
+</implementation_guidance>
+
+<constraints>
+- Default behavior must be IDENTICAL to original CrankNicolsonScheme
+- notifyDiscontinuity() when dampingHalfSteps_==0 must be a no-op
+- Do NOT modify any other scheme files
+- Do NOT modify FdmBackwardSolver class in this round
+- All existing FdmSchemeDesc factories produce identical behavior
+- The 5-parameter constructor replaces (not supplements) the 3-parameter one
+</constraints>
+
+<output_specification>
+Produce exactly 3 files:
+1. fdmbackwardsolver.hpp (FdmSchemeDesc modified, FdmBackwardSolver unchanged)
+2. cranknicolsonscheme.hpp (modified)
+3. cranknicolsonscheme.cpp (modified — complete implementation)
+</output_specification>
+
+<quality_checklist>
+□ FdmSchemeDesc constructor is 5-param with defaults; old 3-param call sites compile
+□ All existing FdmSchemeDesc factories return operatorType=0, monitoringDampingSteps=0
+□ New factories produce correct operatorType varankNicolsonScheme with dampingHalfSteps=0 behaves identically to original
+□ QL_REQUIRE enforces dampingHalfSteps is even
+□ step() during damping performs exactly 2 implicit Euler half-steps per call
+□ implicit_->setStep restored to dt_ after damping half-steps
+□ FdmBackwardSolver class declaration unchanged from input
+</quality_checklist>
