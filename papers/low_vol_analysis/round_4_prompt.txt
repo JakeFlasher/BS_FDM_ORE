@@ -1,76 +1,137 @@
 <system_context>
-You are an expert C++ developer implementing improvements to QuantLib v1.23's
-finite difference framework for Black-Scholes option pricing. You have deep
-familiarity with QuantLib's coding conventions, class hierarchy, and the modern
-Fdm* framework (not the deprecated legacy MixedScheme framework).
+You are an expert C++ developer implementing two positivity-preserving finite
+difference schemes from Milev & Tagliani (2010) into QuantLib v1.23's modern
+Fdm* framework. The schemes address spurious oscillations and negative prices
+that standard Crank–Nicolson produces when σ² ≪ r and payoffs are discontinuous.
+
+PAPER REFERENCE (corrected formulations):
+Scheme 1: Fully implicit with Duffy's exponentially fitted diffusion coefficient.
+Scheme 2: Crank–Nicolson variant with a modified 6-node reaction-term stencil.
+Both are described in the GOLDEN REFERENCE DOCUMENT (Round 1.5 output), whose
+corrected equation chain (CE-1 through CE-25) is authoritative.
+
+SOURCE-OF-TRUTH / NO-HALLUCINATION RULES (mandatory):
+- Use ONLY the provided source files and prior-round outputs as factual reference
+  for class/method signatures, include paths, base-class requirements, and
+  coding conventions.
+- If any referenced file content is missing (i.e., an [INSERT FULL CONTENT ...]
+  placeholder is not filled), DO NOT guess or reconstruct.
+  STOP and ask the user to provide the missing file(s).
+- If a requirement is ambiguous, search the provided files for the relevant
+  implementation detail and implement the behavior that matches the source.
+  If still ambiguous, STOP and ask a precise clarification question.
+
+INTERNAL VERIFICATION PROTOCOL (mandatory; do before coding; do not print):
+- Verify what the 1D BS mesher stores as spatial coordinate x (ln(S), ln(S/K),
+  or other) by reading FdmBlackScholesMesher and FdmBlackScholesOp.
+- Verify how FirstDerivativeOp / SecondDerivativeOp incorporate nonuniform mesh
+  spacing (which mesher spacing functions they use).
+- Verify the TripleBandLinearOp sign conventions: which off-diagonal coefficients
+  must be nonneg for the system matrix (I − θ·dt·L) to be an M-matrix.
+- Verify how FiniteDifferenceModel handles StepCondition::applyTo (every step
+  vs stopping times, and whether at the initial 'from' time).
 
 CODING CONVENTIONS (mandatory):
 - Namespace: all classes in `namespace QuantLib { }`
 - Smart pointers: use `ext::shared_ptr`, NOT `std::shared_ptr`
-- Return arrays: use `Array` (QuantLib uses move semantics; match existing
-  method signatures — if similar methods return `Disposable<Array>`, do so too)
-- Assertions: use `QL_REQUIRE(condition, message)` for preconditions,
+- Return arrays: use `Array`; if similar methods return `Disposable<Array>`, match
+- Assertions: `QL_REQUIRE(condition, message)` for preconditions,
   `QL_ENSURE(condition, message)` for postconditions
-- Include guards: `#ifndef quantlib_<path_underscored>_hpp` /
-  `#define quantlib_<path_underscored>_hpp`
+- Include guards: `#ifndef quantlib_<path_underscored>_hpp`
 - Copyright header: match the style of adjacent files in the same directory
 - Includes: use angle brackets `<ql/...>` for QuantLib headers
 - No `using namespace std;` in headers
-- Follow existing naming: `camelCase` for methods, `camelCase_` for private
-  members, `CamelCase` for classes
+- Naming: `camelCase` for methods, `camelCase_` for private members,
+  `CamelCase` for classes
 
 OUTPUT RULES:
 - Produce COMPLETE files, never diffs or partial snippets
 - Only output files that are new or modified in this round
-- Each file must compile against unmodified QuantLib v1.23 headers (plus any
-  files produced in prior rounds, which will be provided if needed)
+- Each file must compile against unmodified QuantLib v1.23 headers plus any
+  files produced in prior rounds
 - Include all necessary #include directives
 </system_context>
 
 <mathematical_context>
-PDE in log-price x = ln(S/K), time-to-maturity τ (τ=0 at payoff, τ=T today):
+PAPER'S ORIGINAL PDE (S-space, time-to-expiry τ; CE-1):
+  −∂V/∂τ + rS·∂V/∂S + ½σ²S²·∂²V/∂S² − rV = 0
 
-  -u_τ + a(x,τ)·u_xx + b(x,τ)·u_x − r·u = 0
+QUANTLIB LOG-SPACE PDE (x = ln(S), backward time τ):
+  −u_τ + b·u_x + a·u_xx − r·u = 0
+  where a = σ²/2,  b = (r − q) − σ²/2
 
-where a(x,τ) = σ²/2,  b(x,τ) = (r−q) − σ²/2.
+═══ SCHEME 1: EXPONENTIALLY FITTED OPERATOR (CE-7 through CE-15) ═══
 
-EXPONENTIAL FITTING:
-  θ_j = b_j·h / (2·a_j)       (local Péclet parameter)
-  ρ_j = θ_j·coth(θ_j)         (fitting factor; ρ ≈ 1 + θ²/3 for |θ| < 1e-8)
+In log-space, the Péclet parameter and fitting factor at interior node j are:
+  θ_j = b · h_j / (2·a)                   (local Péclet)
+  ρ_j = θ_j · coth(θ_j)                   (fitting factor; ρ → 1+θ²/3 for |θ|<1e-8)
 
-Fitted stencil at interior node j (uniform grid spacing h):
-  ℓ_j = a_j·ρ_j/h² − b_j/(2h)     (lower off-diagonal)
-  d_j = −2·a_j·ρ_j/h² − r          (main diagonal)
-  u_j⁺ = a_j·ρ_j/h² + b_j/(2h)    (upper off-diagonal)
+Fitted stencil (replacing the standard centered operator):
+  ℓ_j = a·ρ_j/h² − b/(2h)     (lower off-diagonal; GUARANTEED ≥ 0)
+  d_j = −2·a·ρ_j/h² − r        (main diagonal)
+  u_j = a·ρ_j/h² + b/(2h)     (upper off-diagonal; GUARANTEED ≥ 0)
 
-IMPORTANT: Exponential fitting GUARANTEES ℓ_j ≥ 0 and u_j⁺ ≥ 0 for all
-finite a_j > 0 (proof: ℓ_j = (b_j/(2h))·(coth(θ_j)−1) which is non-negative
-for all signs of b_j). Upwind fallback is only needed as a degenerate guard
-when a_j ≈ 0.
+PROOF OF NON-NEGATIVITY (critical for M-matrix):
+  ℓ_j = (b/(2h))·(coth(θ) − 1) ≥ 0  for all θ (b>0 ⟹ coth>1; b<0 ⟹ both negative)
+  u_j = (b/(2h))·(coth(θ) + 1) ≥ 0  for all θ (same sign argument)
 
-This stencil decomposes as: b_j·(∂/∂x) + a_j·ρ_j·(∂²/∂x²) − r·I,
-which means it can be assembled via TripleBandLinearOp::axpyb():
-  mapT_.axpyb(b_array, firstDerivOp, secondDerivOp.mult(aρ_array), Array(1,-r))
+This GUARANTEES the system matrix (I − θ·dt·L) is an M-matrix for any h, dt.
 
-RANNACHER-SMOOTHED CN: After each discontinuity event (payoff at τ=0,
-monitoring projection), perform 2 implicit Euler half-steps at dt/2, then
-resume Crank-Nicolson.
+Artificial diffusion (CE-15, low-σ limit): ½·r·S·ΔS·V_SS in S-space,
+equivalently ½·|b|·h·u_xx in log-space when |θ| ≫ 1.
 
-GREEKS: Δ = u_x/S,  Γ = (u_xx − u_x)/S²  where x = ln(S/K).
+NONUNIFORM GRID NOTE: For non-uniform meshes, compute a per-node effective
+spacing consistent with QuantLib's derivative operators:
+  h_j := 0.5*(dplus_j + dminus_j)
 
-SINH MESH: x(ξ) = x_center + c·sinh(α·(ξ − ξ₀)) for ξ ∈ [0,1], with ξ₀
-found by bisection to satisfy endpoint constraints x(0)=xMin, x(1)=xMax.
+═══ SCHEME 2: CN VARIANT WITH MODIFIED REACTION TERM (CE-16 through CE-23) ═══
+
+The standard −r·u_j is replaced by the 6-node stencil:
+  −r·[ω·u_{j−1} + (1−2ω)·u_j + ω·u_{j+1}]
+
+at each time level, with ω₁ = ω₂ = ω (symmetric weighting).
+
+In log-space, this adds off-diagonal reaction contributions to the operator:
+  ℓ'_j = a/h² − b/(2h) − rω   (modified lower)
+  d'_j = −2a/h² − r(1−2ω)     (modified diagonal)
+  u'_j = a/h² + b/(2h) − rω   (modified upper)
+
+PARAMETER CHOICE (CE-19, adapted to log-space):
+  S-space optimal: ω = −r/(16σ²)   (from completing-the-square in S_j)
+  Log-space: since coefficients are constant, ω must satisfy:
+    ℓ'_j ≥ 0  ⟹  ω ≤ (a/h² − b/(2h))/r
+    u'_j ≥ 0  ⟹  ω ≤ (a/h² + b/(2h))/r
+  The binding constraint (tighter) determines the maximum |ω|.
+
+TIME-STEP CONSTRAINT (CE-20): For Scheme 2 with CN time-stepping, the
+diagonal of the explicit-side matrix N must be non-negative:
+  Δt < 1 / [r(½ − 2ω) + ½(σM)²]   (S-space form)
+
+Artificial diffusion (CE-23): ⅛·(r·ΔS/σ)²·V_SS in S-space.
+
+═══ DISCRETE BARRIER MONITORING (CE-6) ═══
+
+At each monitoring date t_i, after the time-step solve:
+  U_j ← U_j · 𝟙_{[L,U]}(S_j)
+This re-introduces discontinuities that the schemes must handle.
+
+═══ M-MATRIX DIAGNOSTIC (CE-10, Proposition 4.1) ═══
+
+For the system matrix (I − θ·dt·L) stored as mapT_:
+  M-matrix satisfied ⟺ all off-diagonals of mapT_ are NON-NEGATIVE
+  (because system off-diag = −θ·dt·(operator off-diag), and θ·dt > 0)
 </mathematical_context>
 
 <task>
 ROUND 4 OF 7: Modify FdmBackwardSolver to support monitoring-restart damping
-via time-segment splitting, and modify FdmBlackScholesSolver to support the
-fitted operator selection.
+and operator type selection. Modify FdmBlackScholesSolver to create the
+appropriate operator (standard, fitted, or CN variant) based on the scheme
+description.
 
 This round depends on:
-- Round 1: FdmFittedBlackScholesOp (new operator)
-- Round 3: Modified CrankNicolsonScheme (with notifyDiscontinuity) and
-  modified FdmSchemeDesc (with monitoringDampingSteps field)
+- Round 1: FdmFittedBlackScholesOp
+- Round 2: FdmCNVariantBlackScholesOp
+- Round 3: Modified CrankNicolsonScheme + FdmSchemeDesc
 
 OUTPUT: 4 files (2 modified headers + 2 modified implementations).
 </task>
@@ -94,7 +155,7 @@ FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.cpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -104,7 +165,6 @@ FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.cpp
 /*! \file fdmbackwardsolver.cpp
 */
 
-#include <ql/mathconstants.hpp>
 #include <ql/methods/finitedifferences/finitedifferencemodel.hpp>
 #include <ql/methods/finitedifferences/schemes/craigsneydscheme.hpp>
 #include <ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp>
@@ -117,6 +177,7 @@ FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.cpp
 #include <ql/methods/finitedifferences/schemes/trbdf2scheme.hpp>
 #include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
 #include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/mathconstants.hpp>
 #include <utility>
 
 
@@ -297,7 +358,7 @@ FILE: ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -371,7 +432,7 @@ FILE: ql/methods/finitedifferences/solvers/fdmblackscholessolver.cpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -448,7 +509,7 @@ FILE: ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -518,7 +579,7 @@ FILE: ql/methods/finitedifferences/finitedifferencemodel.hpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -661,12 +722,16 @@ namespace QuantLib {
 #endif
 
 
-ROUND 1 OUTPUT (for reference):
+ROUND 1 OUTPUT (header only):
 FILE: ql/methods/finitedifferences/operators/fdmfittedblackscholesop.hpp
 [>>> ATTACH HERE: the fdmfittedblackscholesop.hpp file generated in Round(s) 1 <<<]
 
-ROUND 3 OUTPUT (for reference):
-FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp
+ROUND 2 OUTPUT (header only):
+FILE: ql/methods/finitedifferences/operators/fdmcnvariantblackscholesop.hpp
+[>>> ATTACH HERE: the fdmcnvariantblackscholesop.hpp file generated in Round(s) 2 <<<]
+
+ROUND 3 OUTPUT (headers only):
+FILE: cranknicolsonscheme.hpp
 [>>> ATTACH HERE: the cranknicolsonscheme.hpp file generated in Round(s) 3 <<<]
 </source_files>
 
@@ -674,166 +739,90 @@ FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp
 
 === FILE 1: Modified FdmBackwardSolver ===
 
-The rollback() method must be restructured to support monitoring-restart
-damping. The current structure (from hpp_structure document) is:
+FACT-CHECKS (mandatory; do not print):
+- Read finitedifferencemodel.hpp to confirm: evolver copied by value? applyTo
+  called when? Time ordering conventions?
 
-  void FdmBackwardSolver::rollback(..., Size steps, Size dampingSteps) {
-      // Phase 1: damping steps with implicit Euler
-      if (dampingSteps != 0) {
-          ImplicitEulerScheme implicitEvolver(map_, bcSet_);
-          FiniteDifferenceModel<ImplicitEulerScheme> dampingModel(implicitEvolver, ...);
-          dampingModel.rollback(rhs, from, dampingTo, dampingSteps, *condition_);
-      }
-      // Phase 2: main scheme steps
-      switch (schemeDesc_.type) {
-          case CrankNicolsonType: {
-              CrankNicolsonScheme cnEvolver(schemeDesc_.theta, map_, bcSet_);
-              FiniteDifferenceModel<CrankNicolsonScheme> cnModel(cnEvolver, ...);
-              cnModel.rollback(rhs, dampingTo, to, steps-dampingSteps, *condition_);
-          } break;
-          // ... other scheme types
-      }
-  }
+The rollback method gains monitoring-restart damping for the CN case:
 
-NEW STRUCTURE when schemeDesc_.monitoringDampingSteps > 0 AND scheme is
-CrankNicolsonType:
+When schemeDesc_.monitoringDampingSteps > 0 AND schemeDesc_.type == CrankNicolsonType:
+1. Phase 1 (unchanged): if dampingSteps != 0, run original implicit damping.
+2. Phase 2 (CN): segment the CN phase at stopping times.
+   At each segment boundary that is a monitoring stopping time:
+   - Call cnEvolver.notifyDiscontinuity() to trigger Rannacher restart
+   - Continue rollback; the scheme's internal step() handles the damping
 
-  1. Query condition_->stoppingTimes() to get monitoring times
-  2. Filter to times within [to, from] (backward: from > to)
-  3. Sort these times in descending order (backward marching)
-  4. Add segment boundaries: {from, mon_1, mon_2, ..., mon_F, to}
-  5. For each segment [segFrom, segTo]:
-     a. If this is the first segment: use initial dampingSteps as before
-     b. If this is after a monitoring event: the CN scheme will be in damping
-        state (notifyDiscontinuity was called at end of previous segment)
-     c. Create CN scheme with monitoringDampingSteps passed through
-     d. Wrap in FiniteDifferenceModel and rollback this segment
-     e. After rollback: if segTo is a monitoring time, call
-        cnEvolver.notifyDiscontinuity() — BUT the evolver is local to the
-        FiniteDifferenceModel, so this must happen BETWEEN segments
+When monitoringDampingSteps == 0: behavior IDENTICAL to original.
+When type != CrankNicolsonType: behavior IDENTICAL to original.
 
-CRITICAL SUBTLETY: FiniteDifferenceModel<CrankNicolsonScheme>::rollback()
-internally handles stopping times from the condition and calls
-condition->applyTo(a, t) at those times. The monitoring projection is
-applied by the condition inside the model's rollback. The
-notifyDiscontinuity() call must happen AFTER the model's rollback returns
-(i.e., after the projection has been applied at the segment boundary).
+Segmentation approach:
+- Collect stopping times from condition_ that lie within the CN phase interval
+- Split the CN rollback into segments at these times
+- For each segment, create FiniteDifferenceModel<CrankNicolsonScheme> and rollback
+- After each segment that ends at a stopping time, the step condition's applyTo
+  will have been called (by the model); then notify the next segment's evolver.
 
-IMPLEMENTATION APPROACH: Create a single CrankNicolsonScheme for the entire
-rollback. Between segments, call notifyDiscontinuity() on it. For each
-segment, create a new FiniteDifferenceModel wrapping the SAME scheme object.
-
-Wait — FiniteDifferenceModel takes the scheme by value (or reference?).
-Check the template: if it copies the scheme, the damping state won't persist
-across segments. If by reference, it will.
-
-Looking at finitedifferencemodel.hpp: the evolver is stored as a member
-`Evolver evolver_`. If the constructor takes it by value, modifications to
-the external scheme won't be seen. If by reference, they will.
-
-SAFEST APPROACH: Create the CN scheme, then for each segment:
-  a. Set the scheme's step size for this segment
-  b. Create FiniteDifferenceModel with the scheme (passed in)
-  c. Call model.rollback()
-  d. After return, call scheme.notifyDiscontinuity() if at monitoring boundary
-
-If FiniteDifferenceModel copies the evolver, then we need an alternative:
-use the scheme's built-in damping (from Round 3) which automatically does
-Euler half-steps after notifyDiscontinuity(). But if the copy happens before
-notifyDiscontinuity, the state is lost.
-
-FALLBACK APPROACH (most robust): Don't rely on the scheme's internal
-damping state at all. Instead, at each segment boundary after a monitoring
-event, explicitly run dampingSteps of implicit Euler (just like the initial
-damping), then run CN for the rest of the segment. This reuses the existing
-two-phase pattern and avoids the copy-vs-reference issue entirely.
-
-Choose this fallback approach. The modified rollback becomes:
-
-  void rollback(rhs, from, to, steps, dampingSteps) {
-      if (schemeDesc_.monitoringDampingSteps == 0 ||
-          schemeDesc_.type != CrankNicolsonType) {
-          // Original behavior unchanged
-          originalRollback(rhs, from, to, steps, dampingSteps);
-          return;
-      }
-
-      // Get monitoring times in [to, from]
-      auto monTimes = filterMonitoringTimes(condition_->stoppingTimes(), to, from);
-
-      // Build segment boundaries: from, mon_1, ..., mon_F, to
-      auto segments = buildSegments(from, to, monTimes);
-
-      // Distribute steps across segments proportional to time span
-      auto stepsPerSeg = distributeSteps(segments, steps);
-
-      for (size_t seg = 0; seg < segments.size()-1; ++seg) {
-          Time segFrom = segments[seg];
-          Time segTo = segments[seg+1];
-          Size segSteps = stepsPerSeg[seg];
-          Size segDamping = (seg == 0) ? dampingSteps
-                                        : schemeDesc_.monitoringDampingSteps;
-
-          // Reuse existing two-phase pattern per segment
-          rollbackSegment(rhs, segFrom, segTo, segSteps, segDamping);
-      }
-  }
-
-Where rollbackSegment encapsulates the original "damping then main" pattern.
+See the template's Round 4 for detailed segment distribution logic.
+The key difference: use CrankNicolsonScheme::notifyDiscontinuity() from Round 3.
 
 
 === FILE 2: Modified FdmBlackScholesSolver ===
 
-Simpler change: add bool useFittedOperator_ member and constructor parameter.
-
-Constructor gains:
-  bool useFittedOperator = false
+Add operator selection based on schemeDesc_.operatorType:
 
 In performCalculations():
   ext::shared_ptr<FdmLinearOpComposite> op;
-  if (useFittedOperator_) {
-      op = ext::make_shared<FdmFittedBlackScholesOp>(
-          solverDesc_.mesher, process_.currentLink(), strike_,
-          localVol_, illegalLocalVolOverwrite_, 0,
-          quantoHelper_.empty() ? ext::shared_ptr<FdmQuantoHelper>()
-                                : quantoHelper_.currentLink());
-  } else {
-      op = ext::make_shared<FdmBlackScholesOp>(/* same args */);
+  switch (schemeDesc_.operatorType) {
+      case 0:  // standard
+          op = ext::make_shared<FdmBlackScholesOp>(
+              solverDesc_.mesher, process_.currentLink(), strike_,
+              localVol_, illegalLocalVolOverwrite_, 0, quantoHelper);
+          break;
+      case 1:  // Scheme 1: exponentially fitted
+          op = ext::make_shared<FdmFittedBlackScholesOp>(
+              solverDesc_.mesher, process_.currentLink(), strike_,
+              localVol_, illegalLocalVolOverwrite_, 0, quantoHelper);
+          break;
+      case 2:  // Scheme 2: CN variant
+          op = ext::make_shared<FdmCNVariantBlackScholesOp>(
+              solverDesc_.mesher, process_.currentLink(), strike_,
+              Null<Real>(),  // auto-compute ω
+              localVol_, illegalLocalVolOverwrite_, 0, quantoHelper);
+          break;
+      default:
+          QL_FAIL("Unknown operator type " << schemeDesc_.operatorType);
   }
   solver_ = ext::make_shared<Fdm1DimSolver>(solverDesc_, schemeDesc_, op);
 
-Include the new header:
+Include the new headers in the .cpp (NOT in .hpp):
   #include <ql/methods/finitedifferences/operators/fdmfittedblackscholesop.hpp>
+  #include <ql/methods/finitedifferences/operators/fdmcnvariantblackscholesop.hpp>
 
 </implementation_guidance>
 
 <constraints>
-- When monitoringDampingSteps == 0: rollback behavior must be IDENTICAL to
-  the original implementation (byte-for-byte same numerical results)
-- When monitoringDampingSteps > 0 but no monitoring times exist in the
-  condition's stopping times: behavior identical to monitoringDampingSteps==0
-- Do NOT modify FiniteDifferenceModel — work around its copy semantics
-- The switch statement for other scheme types (Douglas, Hundsdorfer, etc.)
-  must remain unchanged
-- FdmBlackScholesSolver's existing constructor signature must remain valid
-  (new parameter has default value)
+- When monitoringDampingSteps==0: rollback IDENTICAL to original
+- When operatorType==0: solver IDENTICAL to original
+- Do NOT modify FiniteDifferenceModel
+- New operator headers #included in .cpp only (not .hpp)
+- If any .cpp source file content is missing, STOP and ask
 </constraints>
 
 <output_specification>
 Produce exactly 4 files:
-1. fdmbackwardsolver.hpp (modified — FdmBackwardSolver class gains
-   rollbackSegment helper; FdmSchemeDesc from Round 3 retained)
-2. fdmbackwardsolver.cpp (modified — restructured rollback)
-3. fdmblackscholessolver.hpp (modified — new constructor parameter)
+1. fdmbackwardsolver.hpp (from Round 3, possibly with FdmBackwardSolver changes)
+2. fdmbackwardsolver.cpp (modified rollback)
+3. fdmblackscholessolver.hpp (modified — no new public API needed if operatorType
+   is in FdmSchemeDesc; if constructor changes are needed, add with defaults)
 4. fdmblackscholessolver.cpp (modified — conditional operator creation)
 </output_specification>
 
 <quality_checklist>
-□ Original rollback behavior preserved when monitoringDampingSteps == 0
-□ Segment boundaries computed correctly in backward-time direction
-□ Step counts distributed proportionally and sum to total
-□ Each segment's damping + main stepping fills exactly that segment's time span
-□ No double-application of monitoring projections
-□ FdmBlackScholesSolver compiles with both old and new constructor forms
-□ FdmFittedBlackScholesOp header is #included in the .cpp, not the .hpp
+□ Original rollback behavior preserved when monitoringDampingSteps==0
+□ Original solver behavior preserved when operatorType==0
+□ CN phase segmented at stopping times; notifyDiscontinuity used for restart
+□ Step counts distributed proportionally across segments
+□ Other scheme types (Douglas, Hundsdorfer) unchanged
+□ New headers #included in .cpp only
+□ If any required .cpp source is missing, STOP and ask
 </quality_checklist>

@@ -1,76 +1,138 @@
 <system_context>
-You are an expert C++ developer implementing improvements to QuantLib v1.23's
-finite difference framework for Black-Scholes option pricing. You have deep
-familiarity with QuantLib's coding conventions, class hierarchy, and the modern
-Fdm* framework (not the deprecated legacy MixedScheme framework).
+You are an expert C++ developer implementing two positivity-preserving finite
+difference schemes from Milev & Tagliani (2010) into QuantLib v1.23's modern
+Fdm* framework. The schemes address spurious oscillations and negative prices
+that standard Crank–Nicolson produces when σ² ≪ r and payoffs are discontinuous.
+
+PAPER REFERENCE (corrected formulations):
+Scheme 1: Fully implicit with Duffy's exponentially fitted diffusion coefficient.
+Scheme 2: Crank–Nicolson variant with a modified 6-node reaction-term stencil.
+Both are described in the GOLDEN REFERENCE DOCUMENT (Round 1.5 output), whose
+corrected equation chain (CE-1 through CE-25) is authoritative.
+
+SOURCE-OF-TRUTH / NO-HALLUCINATION RULES (mandatory):
+- Use ONLY the provided source files and prior-round outputs as factual reference
+  for class/method signatures, include paths, base-class requirements, and
+  coding conventions.
+- If any referenced file content is missing (i.e., an [INSERT FULL CONTENT ...]
+  placeholder is not filled), DO NOT guess or reconstruct.
+  STOP and ask the user to provide the missing file(s).
+- If a requirement is ambiguous, search the provided files for the relevant
+  implementation detail and implement the behavior that matches the source.
+  If still ambiguous, STOP and ask a precise clarification question.
+
+INTERNAL VERIFICATION PROTOCOL (mandatory; do before coding; do not print):
+- Verify what the 1D BS mesher stores as spatial coordinate x (ln(S), ln(S/K),
+  or other) by reading FdmBlackScholesMesher and FdmBlackScholesOp.
+- Verify how FirstDerivativeOp / SecondDerivativeOp incorporate nonuniform mesh
+  spacing (which mesher spacing functions they use).
+- Verify the TripleBandLinearOp sign conventions: which off-diagonal coefficients
+  must be nonneg for the system matrix (I − θ·dt·L) to be an M-matrix.
+- Verify how FiniteDifferenceModel handles StepCondition::applyTo (every step
+  vs stopping times, and whether at the initial 'from' time).
 
 CODING CONVENTIONS (mandatory):
 - Namespace: all classes in `namespace QuantLib { }`
 - Smart pointers: use `ext::shared_ptr`, NOT `std::shared_ptr`
-- Return arrays: use `Array` (QuantLib uses move semantics; match existing
-  method signatures — if similar methods return `Disposable<Array>`, do so too)
-- Assertions: use `QL_REQUIRE(condition, message)` for preconditions,
+- Return arrays: use `Array`; if similar methods return `Disposable<Array>`, match
+- Assertions: `QL_REQUIRE(condition, message)` for preconditions,
   `QL_ENSURE(condition, message)` for postconditions
-- Include guards: `#ifndef quantlib_<path_underscored>_hpp` /
-  `#define quantlib_<path_underscored>_hpp`
+- Include guards: `#ifndef quantlib_<path_underscored>_hpp`
 - Copyright header: match the style of adjacent files in the same directory
 - Includes: use angle brackets `<ql/...>` for QuantLib headers
 - No `using namespace std;` in headers
-- Follow existing naming: `camelCase` for methods, `camelCase_` for private
-  members, `CamelCase` for classes
+- Naming: `camelCase` for methods, `camelCase_` for private members,
+  `CamelCase` for classes
 
 OUTPUT RULES:
 - Produce COMPLETE files, never diffs or partial snippets
 - Only output files that are new or modified in this round
-- Each file must compile against unmodified QuantLib v1.23 headers (plus any
-  files produced in prior rounds, which will be provided if needed)
+- Each file must compile against unmodified QuantLib v1.23 headers plus any
+  files produced in prior rounds
 - Include all necessary #include directives
 </system_context>
 
 <mathematical_context>
-PDE in log-price x = ln(S/K), time-to-maturity τ (τ=0 at payoff, τ=T today):
+PAPER'S ORIGINAL PDE (S-space, time-to-expiry τ; CE-1):
+  −∂V/∂τ + rS·∂V/∂S + ½σ²S²·∂²V/∂S² − rV = 0
 
-  -u_τ + a(x,τ)·u_xx + b(x,τ)·u_x − r·u = 0
+QUANTLIB LOG-SPACE PDE (x = ln(S), backward time τ):
+  −u_τ + b·u_x + a·u_xx − r·u = 0
+  where a = σ²/2,  b = (r − q) − σ²/2
 
-where a(x,τ) = σ²/2,  b(x,τ) = (r−q) − σ²/2.
+═══ SCHEME 1: EXPONENTIALLY FITTED OPERATOR (CE-7 through CE-15) ═══
 
-EXPONENTIAL FITTING:
-  θ_j = b_j·h / (2·a_j)       (local Péclet parameter)
-  ρ_j = θ_j·coth(θ_j)         (fitting factor; ρ ≈ 1 + θ²/3 for |θ| < 1e-8)
+In log-space, the Péclet parameter and fitting factor at interior node j are:
+  θ_j = b · h_j / (2·a)                   (local Péclet)
+  ρ_j = θ_j · coth(θ_j)                   (fitting factor; ρ → 1+θ²/3 for |θ|<1e-8)
 
-Fitted stencil at interior node j (uniform grid spacing h):
-  ℓ_j = a_j·ρ_j/h² − b_j/(2h)     (lower off-diagonal)
-  d_j = −2·a_j·ρ_j/h² − r          (main diagonal)
-  u_j⁺ = a_j·ρ_j/h² + b_j/(2h)    (upper off-diagonal)
+Fitted stencil (replacing the standard centered operator):
+  ℓ_j = a·ρ_j/h² − b/(2h)     (lower off-diagonal; GUARANTEED ≥ 0)
+  d_j = −2·a·ρ_j/h² − r        (main diagonal)
+  u_j = a·ρ_j/h² + b/(2h)     (upper off-diagonal; GUARANTEED ≥ 0)
 
-IMPORTANT: Exponential fitting GUARANTEES ℓ_j ≥ 0 and u_j⁺ ≥ 0 for all
-finite a_j > 0 (proof: ℓ_j = (b_j/(2h))·(coth(θ_j)−1) which is non-negative
-for all signs of b_j). Upwind fallback is only needed as a degenerate guard
-when a_j ≈ 0.
+PROOF OF NON-NEGATIVITY (critical for M-matrix):
+  ℓ_j = (b/(2h))·(coth(θ) − 1) ≥ 0  for all θ (b>0 ⟹ coth>1; b<0 ⟹ both negative)
+  u_j = (b/(2h))·(coth(θ) + 1) ≥ 0  for all θ (same sign argument)
 
-This stencil decomposes as: b_j·(∂/∂x) + a_j·ρ_j·(∂²/∂x²) − r·I,
-which means it can be assembled via TripleBandLinearOp::axpyb():
-  mapT_.axpyb(b_array, firstDerivOp, secondDerivOp.mult(aρ_array), Array(1,-r))
+This GUARANTEES the system matrix (I − θ·dt·L) is an M-matrix for any h, dt.
 
-RANNACHER-SMOOTHED CN: After each discontinuity event (payoff at τ=0,
-monitoring projection), perform 2 implicit Euler half-steps at dt/2, then
-resume Crank-Nicolson.
+Artificial diffusion (CE-15, low-σ limit): ½·r·S·ΔS·V_SS in S-space,
+equivalently ½·|b|·h·u_xx in log-space when |θ| ≫ 1.
 
-GREEKS: Δ = u_x/S,  Γ = (u_xx − u_x)/S²  where x = ln(S/K).
+NONUNIFORM GRID NOTE: For non-uniform meshes, compute a per-node effective
+spacing consistent with QuantLib's derivative operators:
+  h_j := 0.5*(dplus_j + dminus_j)
 
-SINH MESH: x(ξ) = x_center + c·sinh(α·(ξ − ξ₀)) for ξ ∈ [0,1], with ξ₀
-found by bisection to satisfy endpoint constraints x(0)=xMin, x(1)=xMax.
+═══ SCHEME 2: CN VARIANT WITH MODIFIED REACTION TERM (CE-16 through CE-23) ═══
+
+The standard −r·u_j is replaced by the 6-node stencil:
+  −r·[ω·u_{j−1} + (1−2ω)·u_j + ω·u_{j+1}]
+
+at each time level, with ω₁ = ω₂ = ω (symmetric weighting).
+
+In log-space, this adds off-diagonal reaction contributions to the operator:
+  ℓ'_j = a/h² − b/(2h) − rω   (modified lower)
+  d'_j = −2a/h² − r(1−2ω)     (modified diagonal)
+  u'_j = a/h² + b/(2h) − rω   (modified upper)
+
+PARAMETER CHOICE (CE-19, adapted to log-space):
+  S-space optimal: ω = −r/(16σ²)   (from completing-the-square in S_j)
+  Log-space: since coefficients are constant, ω must satisfy:
+    ℓ'_j ≥ 0  ⟹  ω ≤ (a/h² − b/(2h))/r
+    u'_j ≥ 0  ⟹  ω ≤ (a/h² + b/(2h))/r
+  The binding constraint (tighter) determines the maximum |ω|.
+
+TIME-STEP CONSTRAINT (CE-20): For Scheme 2 with CN time-stepping, the
+diagonal of the explicit-side matrix N must be non-negative:
+  Δt < 1 / [r(½ − 2ω) + ½(σM)²]   (S-space form)
+
+Artificial diffusion (CE-23): ⅛·(r·ΔS/σ)²·V_SS in S-space.
+
+═══ DISCRETE BARRIER MONITORING (CE-6) ═══
+
+At each monitoring date t_i, after the time-step solve:
+  U_j ← U_j · 𝟙_{[L,U]}(S_j)
+This re-introduces discontinuities that the schemes must handle.
+
+═══ M-MATRIX DIAGNOSTIC (CE-10, Proposition 4.1) ═══
+
+For the system matrix (I − θ·dt·L) stored as mapT_:
+  M-matrix satisfied ⟺ all off-diagonals of mapT_ are NON-NEGATIVE
+  (because system off-diag = −θ·dt·(operator off-diag), and θ·dt > 0)
 </mathematical_context>
 
 <task>
-ROUND 3 OF 7: Modify CrankNicolsonScheme to support monitoring-restart damping,
-and modify FdmSchemeDesc to carry the new configuration parameter.
+ROUND 3 OF 7: Modify CrankNicolsonScheme to support Rannacher-style damping
+restart after discrete monitoring events (where CE-6 re-introduces discontinuities),
+and modify FdmSchemeDesc to carry the new configuration parameters including
+scheme selection for Scheme 1 vs Scheme 2.
 
 These changes are internal to the scheme layer and do not depend on Rounds 1-2.
 
-OUTPUT: 3 files (1 modified header containing FdmSchemeDesc and FdmBackwardSolver
-declaration, 1 modified CN scheme header, 1 modified CN scheme implementation).
-NOTE: In this round, only FdmSchemeDesc changes inside fdmbackwardsolver.hpp —
+OUTPUT: 3 files (1 modified FdmSchemeDesc/FdmBackwardSolver header,
+1 modified CN scheme header, 1 modified CN scheme implementation).
+NOTE: Only FdmSchemeDesc changes inside fdmbackwardsolver.hpp —
 the FdmBackwardSolver class body is NOT changed until Round 4.
 </task>
 
@@ -90,7 +152,7 @@ FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -173,7 +235,7 @@ FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -243,7 +305,7 @@ FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.cpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -304,7 +366,7 @@ FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -349,7 +411,7 @@ namespace QuantLib {
         friend class CrankNicolsonScheme;
         void step(array_type& a, Time t, Real theta);
 
-        Disposable<Array> apply(const Array& r, Real theta) const;
+        Array apply(const Array& r, Real theta) const;
           
         Time dt_;
         ext::shared_ptr<Size> iterations_;
@@ -379,7 +441,7 @@ FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp
  under the terms of the QuantLib license.  You should have received a
  copy of the license along with this program; if not, please email
  <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
+ <https://www.quantlib.org/license.shtml>.
 
  This program is distributed in the hope that it will be useful, but WITHOUT
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
@@ -427,114 +489,49 @@ namespace QuantLib {
 
 #endif
 
-
-FILE: ql/methods/finitedifferences/schemes/boundaryconditionschemehelper.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-
-/*
- Copyright (C) 2012 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <http://quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
-
-
-/*! \file boundaryconditionschemehelper.hpp
-*/
-
-#ifndef quantlib_boundary_condition_scheme_helper_hpp
-#define quantlib_boundary_condition_scheme_helper_hpp
-
-#include <ql/methods/finitedifferences/utilities/fdmboundaryconditionset.hpp>
-#include <utility>
-
-namespace QuantLib {
-
-    class BoundaryConditionSchemeHelper {
-      public:
-        typedef OperatorTraits<FdmLinearOp>::array_type array_type;
-        typedef OperatorTraits<FdmLinearOp>::operator_type operator_type;
-
-        explicit BoundaryConditionSchemeHelper(OperatorTraits<FdmLinearOp>::bc_set bcSet)
-        : bcSet_(std::move(bcSet)) {}
-
-        void applyBeforeApplying(operator_type& op) const {
-            for (const auto& i : bcSet_)
-                i->applyBeforeApplying(op);
-        }
-        void applyBeforeSolving(operator_type& op, array_type& a) const {
-            for (const auto& i : bcSet_)
-                i->applyBeforeSolving(op, a);
-        }
-        void applyAfterApplying(array_type& a) const {
-            for (const auto& i : bcSet_)
-                i->applyAfterApplying(a);
-        }
-        void applyAfterSolving(array_type& a) const {
-            for (const auto& i : bcSet_)
-                i->applyAfterSolving(a);
-        }
-        void setTime(Time t) const {
-            for (const auto& i : bcSet_)
-                i->setTime(t);
-        }
-
-      private:
-        BoundaryConditionSchemeHelper() = default;
-        OperatorTraits<FdmLinearOp>::bc_set bcSet_;
-    };
-
-}
-
-#endif
-
 </source_files>
 
 <implementation_guidance>
 
 === FILE 1: Modified FdmSchemeDesc (in fdmbackwardsolver.hpp) ===
 
-FdmSchemeDesc gains a new field: Size monitoringDampingSteps.
+FdmSchemeDesc gains two new fields:
+  Size monitoringDampingSteps;    // Rannacher half-steps after each monitoring event
+  Size operatorType;              // 0 = standard, 1 = fitted (Scheme 1), 2 = CN variant (Scheme 2)
 
-APPROACH: Check whether the existing members (type, theta, mu) are const or
-non-const in the provided header. Then:
+APPROACH: Check whether existing members are const or non-const. Add fields
+accordingly (see template Round 3 for the two approaches).
 
-If members are NON-CONST (likely): simply add the new field with a default
-  value and update all static factories to set it to 0.
+New static factories:
+  static FdmSchemeDesc FittedImplicit();
+  // Returns {ImplicitEulerType, 1.0, 0.0, 0, 1}
+  // Scheme 1 with fully implicit time-stepping (paper's recommendation)
 
-If members are CONST: add a second constructor that takes the additional
-  parameter, and update all factories. Keep the old constructor for backward
-  compatibility (initializing new field to 0).
+  static FdmSchemeDesc FittedCrankNicolson();
+  // Returns {CrankNicolsonType, 0.5, 0.0, 0, 1}
+  // Scheme 1 with CN time-stepping (not in paper, but useful for 2nd-order accuracy)
 
-Add a new static factory:
-  static FdmSchemeDesc CrankNicolsonWithMonitoringDamping(
-      Size monitoringDampingSteps = 2);
-  // Returns {CrankNicolsonType, 0.5, 0.0, monitoringDampingSteps}
+  static FdmSchemeDesc CNVariant(Size monitoringDampingSteps = 0);
+  // Returns {CrankNicolsonType, 0.5, 0.0, monitoringDampingSteps, 2}
+  // Scheme 2 with CN time-stepping (paper's formulation)
 
-CRITICAL: Do NOT change the FdmBackwardSolver class declaration or
-implementation in this round. Only FdmSchemeDesc changes. Leave the
-FdmBackwardSolver class body exactly as-is.
+  static FdmSchemeDesc CrankNicolsonWithDamping(Size monitoringDampingSteps = 2);
+  // Returns {CrankNicolsonType, 0.5, 0.0, monitoringDampingSteps, 0}
+  // Standard operator with monitoring restart damping
+
+All EXISTING static factories must still compile and produce identical behavior
+(operatorType=0, monitoringDampingSteps=0).
+
+CRITICAL: Do NOT change FdmBackwardSolver class body in this round.
 
 
-=== FILE 2: Modified CrankNicolsonScheme ===
+=== FILES 2-3: Modified CrankNicolsonScheme ===
 
-The header gains:
-1. A new constructor parameter: Size dampingHalfSteps = 0
-2. Two new public methods: notifyDiscontinuity(), isDamping()
-3. Three new private members: dampingHalfSteps_, dampingRemaining_,
-   inDampingPhase_
+Add Rannacher monitoring-restart capability. After a discrete monitoring event
+re-introduces a discontinuity, perform implicit Euler damping half-steps before
+resuming CN to suppress the spurious oscillations documented in CE-25 / C25.
 
-Modified constructor signature:
+Modified constructor:
   CrankNicolsonScheme(
       Real theta,
       const ext::shared_ptr<FdmLinearOpComposite>& map,
@@ -542,7 +539,7 @@ Modified constructor signature:
       Real relTol = 1e-8,
       ImplicitEulerScheme::SolverType solverType
           = ImplicitEulerScheme::BiCGstab,
-      Size dampingHalfSteps = 0);    // NEW — defaults to 0 (no restart damping)
+      Size dampingHalfSteps = 0);    // NEW — must be even; 0 = no restart damping
 
 New methods:
   void notifyDiscontinuity();
@@ -550,83 +547,52 @@ New methods:
   // If dampingHalfSteps_ == 0, this is a no-op
 
   bool isDamping() const;
-  // Returns inDampingPhase_
 
-Modified step() method logic:
+QL_REQUIRE: dampingHalfSteps must be even (0 allowed).
+
+Modified step() method:
   void CrankNicolsonScheme::step(array_type& a, Time t) {
       if (inDampingPhase_ && dampingRemaining_ > 0) {
-          // Two implicit Euler half-steps at dt_/2
+          // Two implicit Euler half-steps at dt/2
           Time halfDt = dt_ * 0.5;
           implicit_->setStep(halfDt);
-
-          // First half-step
-          implicit_->step(a, t, 1.0);
-
-          // Second half-step (at t - halfDt, covering remaining half)
-          implicit_->step(a, t - halfDt, 1.0);
-
-          // Restore full step for future use
-          implicit_->setStep(dt_);
-
+          implicit_->step(a, t, 1.0);              // t → t−dt/2
+          implicit_->step(a, t - halfDt, 1.0);     // t−dt/2 → t−dt
+          implicit_->setStep(dt_);                  // restore
           dampingRemaining_ -= 2;
-          if (dampingRemaining_ <= 0) {
-              inDampingPhase_ = false;
-          }
+          if (dampingRemaining_ <= 0) inDampingPhase_ = false;
           return;
       }
-
-      // Standard CN: explicit half + implicit half
-      if (theta_ != 1.0)
-          explicit_->step(a, t, 1.0 - theta_);
-      if (theta_ != 0.0)
-          implicit_->step(a, t, theta_);
+      // Standard CN (unchanged):
+      if (theta_ != 1.0) explicit_->step(a, t, 1.0 - theta_);
+      if (theta_ != 0.0) implicit_->step(a, t, theta_);
   }
 
-IMPORTANT TIMING NOTE: In QuantLib's backward-in-time convention, step(a, t)
-advances FROM time t backward. The implicit scheme's step(a, t, theta) solves
-(I - theta*dt*L(t-dt, t)) u_new = ... So two half-steps at dt/2 from time t
-go: t → t-dt/2 → t-dt, covering the same interval as one full step.
-
-Verify that ImplicitEulerScheme::setStep() only stores dt_ and does not
-trigger expensive recomputation. If it does, add a comment noting the
-performance implication.
-
-Modified setStep():
-  void CrankNicolsonScheme::setStep(Time dt) {
-      dt_ = dt;
-      explicit_->setStep(dt);
-      implicit_->setStep(dt);
-      // NOTE: do not reset damping state here — setStep is called by
-      // FiniteDifferenceModel before each rollback segment
-  }
+Default behavior (dampingHalfSteps=0) must be BIT-IDENTICAL to original.
 
 </implementation_guidance>
 
 <constraints>
-- The default behavior when dampingHalfSteps=0 must be IDENTICAL to the
-  original CrankNicolsonScheme — no behavioral change for existing code
+- Default behavior must be IDENTICAL to original CrankNicolsonScheme
 - notifyDiscontinuity() when dampingHalfSteps_==0 must be a no-op
-- Do NOT modify any other scheme files (Douglas, Hundsdorfer, etc.)
-- Do NOT modify FdmBackwardSolver in this round
-- All existing static factories on FdmSchemeDesc must still compile and
-  produce the same behavior
+- Do NOT modify any other scheme files
+- Do NOT modify FdmBackwardSolver class in this round
+- All existing FdmSchemeDesc factories produce identical behavior
 </constraints>
 
 <output_specification>
 Produce exactly 3 files:
-1. fdmbackwardsolver.hpp (modified — FdmSchemeDesc struct changed,
-   FdmBackwardSolver class unchanged)
+1. fdmbackwardsolver.hpp (FdmSchemeDesc modified, FdmBackwardSolver unchanged)
 2. cranknicolsonscheme.hpp (modified)
 3. cranknicolsonscheme.cpp (modified — complete implementation)
 </output_specification>
 
 <quality_checklist>
-□ FdmSchemeDesc::CrankNicolson() returns monitoringDampingSteps = 0
-□ All other FdmSchemeDesc factories return monitoringDampingSteps = 0
+□ All existing FdmSchemeDesc factories return operatorType=0, monitoringDampingSteps=0
+□ New factories produce correct operatorType values
 □ CrankNicolsonScheme with dampingHalfSteps=0 behaves identically to original
-□ notifyDiscontinuity() with dampingHalfSteps_=0 is a no-op
+□ QL_REQUIRE enforces dampingHalfSteps is even
 □ step() during damping performs exactly 2 implicit Euler half-steps per call
-□ implicit_->setStep is restored to dt_ after damping half-steps
-□ numberOfIterations() still works correctly (returns implicit's count)
-□ FdmBackwardSolver class declaration is byte-for-byte identical to original
+□ implicit_->setStep restored to dt_ after damping half-steps
+□ FdmBackwardSolver class declaration unchanged from input
 </quality_checklist>
