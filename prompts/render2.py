@@ -148,31 +148,37 @@ def _extract_preamble(doc: str) -> str:
         sys.exit("ERROR: SHARED PREAMBLE section not found in template.")
     return m.group(1).rstrip("\n")
 
-
 def _extract_rounds(doc: str) -> dict[int, dict]:
     """
     Return ``{round_num: {'title': …, 'content': …}}`` for every
     ``### ROUND N`` section found in the document.
     """
     rounds: dict[int, dict] = {}
-    
-    # Sections are separated by horizontal rules (---)
-    for section in re.split(r"\n\s*-{3,}\s*\n", doc):
+
+    # The original template used --- horizontal rules between sections.
+    # framework_0218.md uses ### headers instead.  Try --- first; if that
+    # yields only a single blob, fall back to splitting on ### headers.
+    sections = re.split(r"\n\s*-{3,}\s*\n", doc)
+    if len(sections) <= 1:
+        # Lookahead split keeps the ### header attached to its section
+        sections = re.split(r"(?=^### )", doc, flags=re.MULTILINE)
+
+    for section in sections:
         # Relaxed regex:
         # 1. Matches "ROUND <N>"
         # 2. Allows optional text like "(OPTIONAL)" before the dash
         # 3. Makes the dash and title optional (for "### ROUND 1")
         hdr = re.search(
-            r"###\s+(?:Optional\s+)?ROUND\s+(\d+)(?:.*?)(?:[-—–]+\s*(.*))?", 
-            section, 
+            r"###\s+(?:Optional\s+)?ROUND\s+(\d+)(?:.*?)(?:[-—–]+\s*(.*))?",
+            section,
             re.IGNORECASE
         )
-        
+
         if not hdr:
             continue
 
         num = int(hdr.group(1))
-        
+
         # Use the captured title if present, otherwise default to "Round N"
         title_text = hdr.group(2)
         title = title_text.strip() if title_text else f"Round {num}"
@@ -183,10 +189,8 @@ def _extract_rounds(doc: str) -> dict[int, dict]:
                                content=xml_block.group(1))
         else:
             print(f"  Warning: Round {num} — no ```xml block", file=sys.stderr)
-            
+
     return rounds
-
-
 # ═══════════════════ INSERT-directive classification ══════════════════════
 
 # Matches [INSERT …] (may span multiple lines because of the [^\]]* class)

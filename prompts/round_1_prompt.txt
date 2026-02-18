@@ -7,14 +7,286 @@ that standard Crank–Nicolson produces when σ² ≪ r and payoffs are disconti
 PAPER REFERENCE (corrected formulations):
 Scheme 1: Fully implicit with Duffy's exponentially fitted diffusion coefficient.
 Scheme 2: Crank–Nicolson variant with a modified 6-node reaction-term stencil.
-Both are described in the GOLDEN REFERENCE DOCUMENT (Round 1.5 output), whose
+Both are described in the GOLDEN REFERENCE DOCUMENT (ROUND 1.5 output), whose
 corrected equation chain (CE-1 through CE-25) is authoritative.
 
 SOURCE-OF-TRUTH / NO-HALLUCINATION RULES (mandatory):
-- Use ONLY the provided source files and prior-round outputs as factual reference
+- Use ONLY the provided source files and prior-ROUND outputs as factual reference
   for class/method signatures, include paths, base-class requirements, and
   coding conventions.
-- If any referenced file content is missing (i.e., an 
+- If any referenced file content is missing (i.e., an [INSERT FULL CONTENT ...]
+  placeholder is not filled), DO NOT guess or reconstruct.
+  STOP and ask the user to provide the missing file(s).
+- If a requirement is ambiguous, search the provided files for the relevant
+  implementation detail and implement the behavior that matches the source.
+  If still ambiguous, STOP and ask a precise clarification question.
+
+INTERNAL VERIFICATION PROTOCOL (mandatory; do before coding; do not print):
+- Verify what the 1D BS mesher stores as spatial coordinate x (ln(S), ln(S/K),
+  or other) by reading FdmBlackScholesMesher and FdmBlackScholesOp.
+- Verify how FirstDerivativeOp / SecondDerivativeOp incorporate nonuniform mesh
+  spacing (which mesher spacing functions they use).
+- Verify the TripleBandLinearOp sign conventions: which off-diagonal coefficients
+  must be nonneg for the system matrix (I − θ·dt·L) to be an M-matrix.
+- Verify how FdmBackwardSolver handles step conditions (rollback segmentation at
+  stopping times, and whether applyTo is called at the initial 'from' time).
+- Verify that ext::make_shared<T>(...) is available in QuantLib's ext namespace.
+  If it is not aliased, fall back to ext::shared_ptr<T>(new T(...)).
+
+CODING CONVENTIONS (mandatory):
+- Namespace: all classes in `namespace QuantLib { }`
+- Smart pointers: use `ext::shared_ptr`, NOT `std::shared_ptr`
+- Factory calls: prefer `ext::make_shared<T>(...)` if available; verify from
+  provided headers before use. Fallback: `ext::shared_ptr<T>(new T(...))`.
+- Return arrays: use `Array`
+- Assertions: `QL_REQUIRE(condition, message)` for preconditions,
+  `QL_ENSURE(condition, message)` for postconditions
+- Include guards: `#ifndef quantlib_<path_underscored>_hpp`
+- Copyright header: match the style of adjacent files in the same directory
+- Includes: use angle brackets `<ql/...>` for QuantLib headers
+- No `using namespace std;` in headers
+- Naming: `camelCase` for methods, `camelCase_` for private members,
+  `CamelCase` for classes
+
+OUTPUT RULES:
+- Produce COMPLETE files, never diffs or partial snippets
+- Only output files that are new or modified in this ROUND
+- Each file must compile against unmodified QuantLib 1.42-dev headers plus any
+  files produced in prior ROUNDs
+- Include all necessary #include directives
+</system_context>
+
+
+<mathematical_context>
+PAPER'S ORIGINAL PDE (S-space, time-to-expiry τ; CE-1):
+  −∂V/∂τ + rS·∂V/∂S + ½σ²S²·∂²V/∂S² − rV = 0
+
+NOTATION WARNING — TWO DIFFERENT σ's IN THE PAPER:
+  Document 5 (Eq. 2) rewrites the PDE in generalized form:
+    −V_t + μ(S,t)·V_S + σ(S,t)·V_SS + b(S,t)·V = 0
+  where σ(S,t) = ½σ²_vol·S² is the DIFFUSION COEFFICIENT, NOT the volatility.
+  The fitting factor formula (Eq. 3) uses this diffusion coefficient σ(S,t).
+  An implementer who substitutes σ_vol directly for σ(S,t) will get completely
+  wrong results. In log-space this ambiguity is resolved: a = σ²_vol/2 is
+  always the half-variance, and b = (r−q) − σ²_vol/2 is the drift.
+
+DIVIDEND YIELD NOTE:
+  The original papers assume q = 0. The QuantLib implementation generalizes
+  to q ≥ 0 via b = (r−q) − σ²/2. All paper-specific analysis uses q = 0.
+
+QUANTLIB LOG-SPACE PDE (x = ln(S), backward time τ):
+  −u_τ + b·u_x + a·u_xx − r·u = 0
+  where a = σ²/2,  b = (r − q) − σ²/2
+
+═══ SCHEME 1: EXPONENTIALLY FITTED OPERATOR (CE-7 through CE-15) ═══
+
+In log-space, the Péclet parameter and fitting factor at interior node j are:
+  Pe_j = b · h_j / (2·a)                   (local Péclet number)
+  ρ_j = Pe_j · coth(Pe_j)                  (fitting factor; ρ → 1+Pe²/3 for |Pe|→0)
+
+SPATIAL VARIATION NOTE:
+  In S-space, the Péclet parameter α_j = r·ΔS/(σ²·S_j) varies with S_j:
+  it is large for small S_j (upwind regime) and small for large S_j (centered
+  regime). In log-space with uniform h, Pe = bh/(2a) is CONSTANT across nodes,
+  but with nonuniform h (concentrated meshes), Pe_j varies per node. The fitting
+  factor ρ_j ≥ 1 for all Pe_j, regardless of sign or magnitude.
+
+Fitted stencil (replacing the standard centered operator):
+  ℓ_j = a·ρ_j/h² − b/(2h)     (lower off-diagonal)
+  d_j = −2·a·ρ_j/h² − r        (main diagonal)
+  u_j = a·ρ_j/h² + b/(2h)     (upper off-diagonal)
+
+NON-NEGATIVITY PROOF (for M-matrix):
+  The lower off-diagonal can be rewritten as:
+    ℓ_j = (b/(2h))·(coth(Pe) − 1)
+  and the upper as:
+    u_j = (b/(2h))·(coth(Pe) + 1)
+
+  For b > 0 (Pe > 0): coth(Pe) > 1, so coth(Pe)−1 > 0; b/(2h) > 0. ℓ_j > 0.
+                       coth(Pe) + 1 > 0; u_j > 0.
+  For b < 0 (Pe < 0): coth(Pe) < −1, so coth(Pe)−1 < −2 (neg); b/(2h) < 0.
+                       Product of two negatives: ℓ_j > 0.
+                       coth(Pe)+1 < 0 (neg); b/(2h) < 0. u_j > 0.
+  For b = 0: ρ → 1, ℓ_j = a/h² > 0, u_j = a/h² > 0.
+
+  KEY PROPERTY: The inequality ρ_j ≥ 1 holds for ALL real Pe_j because
+  x·coth(x) ≥ 1 for all x (equality only at x=0 in the limit). This guarantee
+  is per-node and holds on ANY mesh (uniform or nonuniform).
+
+  On UNIFORM meshes this guarantees system matrix (I − θ·dt·L) is an M-matrix
+  for any h > 0 and any parameter values.
+  On NONUNIFORM meshes, the guarantee holds when the mesh ratio d⁺/d⁻ is
+  moderate (typically < 3:1). The mMatrixViolationCount() diagnostic verifies
+  this at runtime.
+
+This ensures the system matrix (I − θ·dt·L) is an M-matrix.
+
+Artificial diffusion (CE-15, low-σ limit): ½·r·S·ΔS·V_SS in S-space.
+In log-space with uniform grid: ½·b·h·u_xx (from the upwind limiting scheme).
+
+NOTE ON PAPER TYPO (p. 227): The upwind scheme formulas on p. 227 show a
+denominator of 2h, but direct computation shows the correct denominator is h.
+The subsequent consistency analysis (eq. 7) and numerical diffusion formula
+½μh·V_SS are correct — they correspond to the actual limiting scheme with h.
+
+NONUNIFORM GRID NOTE: For non-uniform meshes, compute a per-node effective
+spacing consistent with QuantLib's derivative operators:
+  h_j := 0.5*(dplus_j + dminus_j)
+At boundary nodes (first/last), dplus or dminus is Null<Real>(); skip these
+nodes in per-node computations (they are handled by boundary conditions).
+
+═══ SCHEME 2: CN VARIANT WITH MODIFIED REACTION TERM (CE-16 through CE-23) ═══
+
+The paper's CN variant replaces −r·u_j with the 6-node stencil:
+  −r·[ω·u_{j−1} + (1−2ω)·u_j + ω·u_{j+1}]
+at each time level, with ω₁ = ω₂ = ω (symmetric weighting).
+
+PARAMETER CHOICE (CE-19):
+  ω = −r/(16σ²)
+
+EFFECTIVE-DIFFUSION REFORMULATION FOR LOG-SPACE ASSEMBLY:
+  The paper's CN variant applies the FULL off-diagonal reaction weight ω at
+  each time level (eq. 8: each level sums to ½, but ω appears unsplit).
+  Standard CN time-stepping halves the operator. To compensate, the spatial
+  operator L must contain 2|rω| on its off-diagonals so that after CN's
+  ½-factor, the system matrix reproduces the paper's P and N.
+
+  This is mathematically equivalent to using an enhanced diffusion coefficient:
+    a_eff = σ²/2 + r²·h²/(8·σ²)
+  with the standard reaction term −r, assembled via the standard axpyb() pattern.
+
+  PROOF: With a_eff, standard CN produces system matrix P = I − ½Δt·L where:
+    L_lower = a_eff/h² − b/(2h) = σ²/(2h²) + r²/(8σ²) − b/(2h)
+    P_lower = −½Δt·L_lower
+    The additional off-diagonal vs standard CN: −½Δt·r²/(8σ²) = −Δt·r²/(16σ²)
+
+    In the paper's S-space P matrix (Document 5, p. 228), the additional
+    off-diagonal from the distributed reaction is rω₂ = −r²/(16σ²), which
+    when multiplied by Δt (to convert from the paper's 1/Δt-normalized form)
+    gives −Δt·r²/(16σ²). These match. ∎
+
+  IMPORTANT: The coefficient is r²h²/(8σ²), NOT r²h²/(16σ²).
+  The factor-of-2 arises because the paper places FULL ω at each CN time level
+  while standard CN halves the operator contribution. Without the doubling, we
+  would get r²h²/(16σ²) — which is wrong by exactly a factor of 2.
+
+M-MATRIX GUARANTEE FOR CN VARIANT (corrected from audit §4b):
+  In S-space, the P lower entry with ω = −r/(16σ²) is:
+    P_lower = rω + rS_j/(4ΔS) − σ²S_j²/(4ΔS²)
+            = −r²/(16σ²) + rj/4 − σ²j²/4     (where j = S_j/ΔS)
+  Completing the square:
+    = −(σ²/4)·(j − r/(2σ²))²
+  This is a SINGLE non-positive perfect square: P_lower ≤ 0 for ALL j ≥ 0.
+  Similarly, P_upper = −r²/(16σ²) − rj/4 − σ²j²/4 < 0 for j > 0.
+  Therefore P is ALWAYS an M-matrix, unconditionally — no parameter
+  restrictions needed for the off-diagonals.
+
+  In log-space, the equivalent condition on the L operator (L_lower ≥ 0) is:
+    a_eff/h² − b/(2h) ≥ 0,  i.e.,  a_eff ≥ bh/2
+  Since a_eff = σ²/2 + r²h²/(8σ²) and b ≈ r for q=0, σ≪r:
+    r²h²/(8σ²) ≥ rh/2  ⟺  rh/(4σ²) ≥ 1  ⟺  h ≥ 4σ²/r
+  For σ=0.001, r=0.05: h ≥ 8×10⁻⁵ — effectively always satisfied.
+
+TIME-STEP CONSTRAINT (CE-20, log-space form):
+  For N ≥ 0 (explicit-side diagonal non-negative):
+    1 − 0.5·Δt·(2·a_eff/h² + r) ≥ 0
+  ⟹  Δt < 1 / [σ²/(2h²) + r²/(8σ²) + r/2]
+  This is less restrictive than the S-space form (no growing (σM)² term)
+  but still very tight for small σ. For σ=0.001, r=0.05, h=0.01:
+  the r²/(8σ²) = 312.5 term dominates, giving Δt < 0.0032.
+
+ACCURACY CONSTRAINTS (from audit §5b):
+  Scheme 1 numerical diffusion (S-space): ½rSΔS·V_SS
+  For this to be negligible vs physical diffusion ½σ²S²·V_SS:
+    ΔS ≪ σ²S/r
+  At S=100, σ=0.001, r=0.05: ΔS ≪ 0.002. With ΔS=0.05, numerical diffusion
+  is ~25× the physical diffusion — the solution is heavily smeared.
+
+  Scheme 2 numerical diffusion (S-space): ⅛(rΔS/σ)²·V_SS
+  For this ≪ ½σ²S²·V_SS: need (rΔS/σ)² ≪ 4σ²S²
+  Equivalently: ΔS ≪ 2σ²S/r (same order as Scheme 1 at moderate S).
+
+  In log-space with uniform h:
+    Scheme 1 diffusion: ½bh·u_xx → need h ≪ 2a/b = σ²/(r−q−σ²/2) ≈ σ²/r
+    Scheme 2 diffusion: r²h²/(8σ²)·u_xx → need h ≪ 2σ/r (from r²h²/(8σ²) ≪ σ²/2)
+
+  PRACTICAL GUIDELINE: For σ=0.001, r=0.05, both schemes need h ≲ 2×10⁻⁵
+  (roughly 50,000+ log-space nodes on [ln(50), ln(150)]) for diffusion-free
+  accuracy. Coarser grids are usable but introduce measurable smearing.
+
+SCHEME CROSSOVER ANALYSIS (from audit §5c):
+  The two numerical diffusion terms are equal (in S-space) when:
+    ½rSΔS = ⅛(rΔS/σ)²  ⟹  ΔS = 4σ²S/r
+  For coarser grids (ΔS > 4σ²S/r), Scheme 1 has LESS diffusion.
+  For finer grids, Scheme 2 wins due to its ΔS² dependence.
+  For σ=0.001, r=0.05, S=100: crossover at ΔS ≈ 0.008.
+
+Artificial diffusion (CE-23): ⅛·(r·ΔS/σ)²·V_SS in S-space.
+
+NOTE ON FittedCrankNicolson POSITIVITY ANALYSIS:
+  Combining Scheme 1's fitted operator with CN time-stepping:
+  - P = I − ½Δt·L: off-diag = −½Δt·(fitted L off-diag) ≤ 0 (M-matrix ✓)
+    because fitted L off-diags are ≥ 0 (proven above).
+  - N = I + ½Δt·L: off-diag = ½Δt·(fitted L off-diag) ≥ 0 (non-negative ✓)
+  - N diagonal requires: 1 − ½Δt·(2aρ/h² + r) ≥ 0
+    ⟹ Δt ≤ 1/(aρ_max/h² + r/2)
+  Since ρ_max ≈ |Pe_max| for large Pe, and Pe = bh/(2a):
+    Δt ≤ 1/(|b|/(2h) + r/2)
+  This is LESS restrictive than the CN variant's constraint (no r²/(8σ²) term)
+  and may be preferable for very low volatility. However, the temporal accuracy
+  is O(Δt²) only, not the CN variant's O(Δt²,h²) — the spatial accuracy is
+  O(h) from the fitting.
+
+═══ DISCRETE BARRIER MONITORING (CE-6) ═══
+
+At each monitoring date t_i, after the time-step solve:
+  U_j ← U_j · 𝟙_{[L,U]}(S_j)
+This re-introduces discontinuities that the schemes must handle.
+
+GRID ALIGNMENT REQUIREMENT:
+  The barrier values L, U (and ideally the strike K) should be GRID POINTS.
+  The paper uses ΔS=0.05 with L=90, K=100, U=110 — all exact multiples.
+  Violating this introduces interpolation error that can reintroduce oscillations.
+  In log-space: ln(L), ln(U), ln(K) should be mesher locations. QuantLib's
+  Concentrating1dMesher can place nodes at specified points. The
+  FdmBlackScholesMesher already concentrates aROUND the strike; users should
+  also ensure barrier locations are mesher concentration points.
+
+S_MAX SELECTION (from Document 1, Eq. 5.2):
+  S_max = max{R·K, K·exp(√(2Tσ²·ln 100))},  R ≥ 2
+  For very low σ: S_max = R·K (rule of thumb: 3–4 times the strike).
+  For moderate σ: the exponential term dominates.
+  In log-space: x_max = ln(S_max), x_min = ln(S_min) with S_min small but >0.
+
+═══ M-MATRIX DIAGNOSTIC (CE-10, Proposition 4.1) ═══
+
+For the operator L stored in mapT_, the M-matrix condition for the system
+matrix (I − θ·dt·L) requires:
+  All off-diagonals of L (lower_[] and upper_[]) must be NON-NEGATIVE.
+  (Because system off-diag = −θ·dt·(operator off-diag), and θ·dt > 0.)
+
+To access protected lower_[]/upper_[] arrays of TripleBandLinearOp, construct
+a temporary ModTripleBandLinearOp from mapT_ and use its public accessors.
+
+═══ NOTE ON FittedCrankNicolson COMBINATION ═══
+
+The paper uses Scheme 1 (fitted operator) with fully-implicit time stepping ONLY.
+The FittedCrankNicolson factory (Scheme 1 operator + CN time stepping) is a
+natural EXTENSION not present in the original paper. It may offer improved
+temporal accuracy but its M-matrix and positivity properties differ from the
+paper's proven guarantees. See the positivity analysis above for details.
+Use with appropriate testing.
+
+═══ LOCAL VOLATILITY CAVEAT ═══
+
+With local or stochastic volatility, σ = σ(S,t):
+- The fitting factor must be recomputed every time step (handled by setTime())
+- The CN variant parameter ω = −r/(16σ²) becomes spatially varying
+- The M-matrix guarantees remain valid per-node (the algebraic identities
+  hold for any σ_j > 0) but the time-step constraint for the CN variant
+  becomes node-dependent; use the worst-case node.
+- Positivity guarantees for the quanto-adjusted case have NOT been verified.
+</mathematical_context>
 
 <task>
 ROUND 1 OF 7: Create the exponentially fitted spatial operator implementing
@@ -1595,7 +1867,9 @@ MATHEMATICAL BASIS (log-space adaptation of CE-7):
   ρ_j = Pe_j · coth(Pe_j)         (fitting factor; ρ ≥ 1 for all Pe)
 The fitted diffusion coefficient is a·ρ_j (replacing the physical a in the
 second-derivative stencil), guaranteeing non-negative off-diagonals on
-uniform meshes and typical nonuniform mesh Same member layout as FdmBlackScholesOp (dxMap_, dxxMap_, mapT_),
+uniform meshes and typical nonuniform meshes.
+
+Same member layout as FdmBlackScholesOp (dxMap_, dxxMap_, mapT_),
 same constructor signature plus any additional members for fitting.
 
 Constructor signature:
@@ -1631,20 +1905,28 @@ The setTime() method computes per-node fitting factors and assembles mapT_:
       //                dxxMap_.mult(fittedDiffusion), Array(1, -r));
   }
 
+
 Static fitting factor:
-  static Real fittingFactor(Real theta) {
-      if (std::fabs(theta) < 1e-8)
-          return 1.0 + theta*theta/3.0;    // Taylor: Pe·coth(Pe) ≈ 1 + Pe²/3
-      if (std::fabs(theta) > 300.0)
-          return std::fabs(theta);           // Prevent tanh returning exact ±1
-      return theta / std::tanh(theta);       // = Pe·coth(Pe)
+  static Real fittingFactor(Real Pe) {
+      if (std::fabs(Pe) < 1e-8)
+          return 1.0 + Pe*Pe/3.0;     // Taylor: Pe·coth(Pe) ≈ 1 + Pe²/3
+      if (std::fabs(Pe) > 300.0)
+          return std::fabs(Pe);        // tanh saturates to ±1 in IEEE 754
+      return Pe / std::tanh(Pe);       // = Pe·coth(Pe)
   }
 
-M-MATRIX DIAGNOSTIC METHODS (use ModTripleBandLinearOp fors):
+  NOTE ON GUARD THRESHOLDS:
+  - The small-Pe guard at 1e-8 is exact to machine precision (next Taylor
+    term Pe⁴/45 ≈ 2e-33 at Pe=1e-8).
+  - The large-Pe guard at 300 is conservative: std::tanh returns exactly ±1.0
+    for |x| ≳ 19.1 in IEEE 754 double precision, so |Pe| > 20 would suffice.
+    The value 300 is kept as a harmless margin.
+
+M-MATRIX DIAGNOSTIC METHODS (use ModTripleBandLinearOp for access):
 
   bool mMatrixSatisfied() const;
   // Construct ModTripleBandLinearOp from mapT_ (uses public copy constructor).
-  // Check that mod.lower(i) >= 0 and mod.upper(i) >= 0 for all i.
+  // Check that mod.lower(i) >= 0 and mod.upper(i) >= 0 for all interior i.
 
   Size mMatrixViolationCount() const;
   // Returns the number of nodes where any off-diagonal is negative.
@@ -1652,6 +1934,18 @@ M-MATRIX DIAGNOSTIC METHODS (use ModTripleBandLinearOp fors):
   // On nonuniform meshes, nonzero indicates the mesh is too skewed.
 
   INCLUDE: #include <ql/methods/finitedifferences/operators/modtriplebandlinearop.hpp>
+
+SPATIAL VARIATION NOTE (from audit §3a):
+  In log-space with a UNIFORM mesh, Pe = bh/(2a) is the same at every node,
+  so ρ is constant across the grid. The per-node loop is still necessary for
+  NONUNIFORM meshes (concentrated meshers) where h_i varies.
+
+LOCAL VOLATILITY CAVEAT:
+  When localVol = true, the per-node vol σ_i varies, making both a_i and b_i
+  spatially dependent. The fitting factor ρ_i = Pe_i·coth(Pe_i) with
+  Pe_i = b_i·h_i/(2·a_i) is then fully node-dependent. The M-matrix guarantee
+  (ρ_i ≥ 1) still holds per-node, but the operator's effective behavior
+  (amount of numerical diffusion) varies across the grid.
 
 Pure virtual methods from FdmLinearOpComposite: implement ALL of them,
 mirroring FdmBlackScholesOp's implementations for size(), setTime(),
@@ -1683,7 +1977,7 @@ Lightweight utility for verifying solution quality.
       // Full: all fields including oscillationScore
 
       static Real oscillationScore(const Array& u);
-      // Count sign changes in Δu_j = u[j+1]−u[ ignoring |Δu| < 1e-15.
+      // Count sign changes in Δu_j = u[j+1]−u[j], ignoring |Δu| < 1e-15.
       // Normalize by max(1, size−2). Score of 0 = monotone; >0.1 = oscillating.
       // Algorithm is O(N) with no heap allocation.
 
@@ -1699,10 +1993,10 @@ Lightweight utility for verifying solution quality.
 </implementation_guidance>
 
 <constraints>
-- Do NOT modify any existing QuantLib files in this round
-- The fitted operator must use axpyb() to populate mapT_ —OT attempt
-  to access protected TripleBandLinearOp members
-- For the fitting factor: use theta/tanh(theta), NOT theta*coth(theta), to
+- Do NOT modify any existing QuantLib files in this ROUND
+- The fitted operator must use axpyb() to populate mapT_ — do NOT attempt
+  to access protected TripleBandLinearOp members for assembly
+- For the fitting factor: use Pe/tanh(Pe), NOT Pe*coth(Pe), to
   avoid implementing coth manually (tanh is in <cmath>)
 - The M-matrix diagnostic must use ModTripleBandLinearOp(mapT_) for access
   to the protected lower_[]/upper_[] arrays
@@ -1725,17 +2019,19 @@ Each file must be complete and self-contained.
 </output_specification>
 
 <quality_checklist>
-□ FdmFittedBlackScholesOp implements ALL pure virtual methods of FdmLinearOomposite
+□ FdmFittedBlackScholesOp implements ALL pure virtual methods of FdmLinearOpComposite
 □ setTime() uses axpyb() — no protected member access on TripleBandLinearOp
 □ fittingFactor returns 1.0 + Pe²/3 for small Pe, Pe/tanh(Pe) otherwise
 □ Extra guard for |Pe| > 300 to prevent tanh returning exact ±1
 □ Fitting factor uses a_i = max(0.5*σ², 1e-20) to prevent division by zero
 □ Per-node h_i is computed consistently with derivative operators (dplus+dminus)/2
 □ Boundary nodes (Null<Real> spacing) are skipped in fitting computation
-□ mMatrixSatisfied() uses ModTripleBandLrOp for protected member access
+□ mMatrixSatisfied() uses ModTripleBandLinearOp for protected member access
 □ mMatrixViolationCount() should return 0 on uniform meshes (mathematical guarantee)
 □ Diagnostics oscillationScore is O(N) and allocation-free
 □ All ext::shared_ptr, not std::shared_ptr
 □ Include guards match QuantLib naming convention
 □ If any needed source file content is missing, STOP and ask
+□ For uniform meshes, verify Pe is constant across interior nodes (add debug assert)
+□ Document that local vol makes the fitting factor spatially varying
 </quality_checklist>
