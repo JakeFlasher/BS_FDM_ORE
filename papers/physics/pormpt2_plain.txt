@@ -1,0 +1,821 @@
+Let me first do some preliminary research on each topic to enrich the prompts with the right academic terminology, current methodologies, and key references.
+
+
+*Thinking...*
+
+> Let me now search for more specific information to enrich the prompts further.
+
+
+
+
+
+
+*Thinking...*
+
+> Now I have enough research to create three very detailed, separate prompts. Let me structure them carefully, enriching each with the academic context, specific methodologies, and key references I found. I need to make sure each prompt is self-contained and will produce maximum output with professional-style, academic-style content and advanced ASCII diagrams.
+
+Based on my preliminary research, here are the three standalone, research-enriched prompts, each designed to extract maximum depth and professional output from Opus 4.6.
+
+---
+
+## PROMPT 1 — Market Regime Identification & Momentum-Volatility Strategy Adaptation
+
+```markdown
+=== ROLE ===
+
+You are a senior quantitative research analyst at an institutional investment
+firm with deep expertise in market microstructure, time-series econometrics,
+nonlinear dynamics, and systematic trading strategy design. You hold a PhD-level
+understanding of regime-switching models, fractal market theory, and adaptive
+strategy frameworks.
+
+=== TASK ===
+
+Produce a formal, presentation-ready research report titled:
+
+    "MARKET REGIME IDENTIFICATION AND ADAPTIVE STRATEGY SELECTION:
+     Bridging Trending and Mean-Reverting Market Structures"
+
+     Prepared for: [Supervisor Name]
+     Date: [Current Date]
+     Classification: Internal — Research Division
+
+=== CORE RESEARCH PROBLEM ===
+
+The speaker identified the following critical insight:
+
+  "In a TRENDING market, the optimal strategy is momentum-based: chase the
+   rise and cut the fall (追涨杀跌). In a VOLATILE (range-bound) market, the
+   optimal strategy is mean-reversion-based: sell at highs and buy at lows
+   (高抛低吸). However, the CRUCIAL unsolved problem is: how does one reliably
+   identify whether the current market structure is trending or volatile?
+   This requires careful analysis of market structure using a good amount
+   of historical data."
+
+Your report must thoroughly investigate this problem and provide actionable
+analytical frameworks.
+
+=== MANDATORY REPORT STRUCTURE ===
+
+Write the ENTIRE report in formal academic prose — no bullet-point lists
+anywhere in the body. Use connected, analytical paragraphs throughout. Use
+LaTeX notation (inline: \( ... \), display: $$ ... $$ on separate lines) for
+all mathematical expressions.
+
+CRITICAL: Throughout the report, include advanced ASCII diagrams to provide
+human-readable visual intuitives. These should include, but are not limited to:
+
+  - ASCII schematic of how a Hidden Markov Model maps latent regime states
+    to observable market variables
+  - ASCII flow-diagram of the composite regime-identification scoring system
+  - ASCII decision-tree showing strategy-selection logic based on regime signals
+  - ASCII timeline illustration showing regime transitions and associated
+    strategy switches
+  - ASCII comparison matrix of all regime detection methods (rows: methods;
+    columns: properties like data requirement, latency, false signal rate)
+
+Use box-drawing characters (┌─┐│└─┘├┤┬┴┼), arrows (→ ← ↑ ↓ ⇒ ⇐), and
+alignment to make these diagrams clean, professional, and publication-quality.
+
+=== SECTION-BY-SECTION RESEARCH DIRECTIVES ===
+
+SECTION 1: Theoretical Foundations of Market Regimes
+
+  - Formally define "trending regime" vs. "mean-reverting regime" vs. "random
+    walk regime" using the language of stochastic processes, autocorrelation
+    structure, and return distributions.
+  - Explain the mathematical basis: positive serial correlation (persistence)
+    favoring momentum, negative serial correlation (anti-persistence) favoring
+    mean-reversion. Include the formulation using autocorrelation function
+    \(\rho(k)\) and explain the connection to the Hurst exponent.
+  - Discuss fractional Brownian motion as a unifying framework: when \(H > 0.5\)
+    the process is persistent (trending), when \(H < 0.5\) it is anti-persistent
+    (mean-reverting), and when \(H = 0.5\) it is a pure random walk.
+  - Discuss the Fractal Market Hypothesis (Peters, 1994) vs. the Efficient
+    Market Hypothesis and how regime structure challenges the random-walk
+    assumption.
+  - Reference: Hamilton (1989) "A New Approach to the Economic Analysis of
+    Nonstationary Time Series and the Business Cycle," Econometrica 57.
+
+SECTION 2: Comprehensive Survey of Regime Detection Methods
+
+  For EACH method below, provide: mathematical formulation, data requirements
+  (minimum sample size, granularity), computational cost, look-back window
+  sensitivity, real-time applicability, known failure modes, and false-signal
+  characteristics. Include a worked conceptual example where appropriate.
+
+  A. Statistical / Econometric Methods:
+    - Hurst Exponent estimation (R/S analysis, DFA, variance-of-log-prices
+      method). Include the formula: \(\text{Var}[\ln P_{t+\tau} - \ln P_t]
+      \propto \tau^{2H}\). Discuss: rolling-window Hurst ("Moving Hurst"
+      indicator), sensitivity to window length, and the fact that H can
+      vary across time-scales (a series may be trending on one horizon and
+      mean-reverting on another).
+    - Variance Ratio Test (Lo & MacKinlay, 1988): test whether
+      \(\text{VR}(q) = \text{Var}(r_t^{(q)}) / (q \cdot \text{Var}(r_t))\)
+      equals 1 (random walk null). VR > 1 suggests trending, VR < 1
+      suggests mean-reversion.
+    - Augmented Dickey-Fuller (ADF) test for stationarity / unit root
+    - Autocorrelation analysis: Ljung-Box test for serial dependence
+
+  B. Technical-Indicator-Based Methods:
+    - ADX (Average Directional Index): Wilder's framework. ADX > 25 as a
+      trending threshold; ADX < 20 as range-bound signal.
+    - Bollinger Bandwidth as a volatility regime proxy
+    - Moving average slope, crossover density, and whipsaw frequency as
+      regime proxies
+    - ATR (Average True Range) regime classification
+
+  C. Model-Based / Probabilistic Methods:
+    - Markov Regime-Switching Model (Hamilton, 1989): detail the two-state
+      formulation with transition probability matrix
+      \(\mathbf{P} = \begin{bmatrix} p_{11} & p_{12} \\ p_{21} & p_{22}
+      \end{bmatrix}\), emission distributions per regime, and estimation
+      via EM algorithm. Reference Kim & Nelson (1999), "State-Space Models
+      with Regime Switching."
+    - Hidden Markov Models (HMM): explain observation variables (daily
+      returns and volatility), the Baum-Welch algorithm for training,
+      and the Viterbi algorithm for most-likely state sequence decoding.
+      Reference Rabiner (1989).
+    - Threshold Autoregressive (TAR) and Smooth Transition Autoregressive
+      (STAR) models
+
+  D. Machine Learning / Computational Methods:
+    - Online Bayesian Change-Point Detection (Adams & MacKay, 2007)
+    - CUSUM (Cumulative Sum) control charts adapted for financial series
+    - Clustering-based regime detection (K-means, GMM on feature vectors)
+    - XGBoost / Random Forest classifiers for regime prediction using
+      engineered features
+
+  E. Fractal / Chaos-Based Methods:
+    - Fractal Dimension analysis
+    - Lyapunov exponent estimation for detecting deterministic chaos
+    - Detrended Fluctuation Analysis (DFA)
+
+  END this section with a COMPREHENSIVE ASCII comparison matrix summarizing
+  all methods across: data requirements, computation cost, latency, real-time
+  suitability, false signal rate, look-back sensitivity.
+
+SECTION 3: The Regime Transition Problem (CRITICAL SECTION)
+
+  - Analyze the most dangerous scenario: the transition period between
+    regimes, when a trending market becomes range-bound or vice versa.
+  - These transition periods are where both momentum and mean-reversion
+    strategies simultaneously fail, causing maximum drawdown.
+  - Discuss early warning signals: declining ADX combined with increasing
+    Bollinger width, Hurst exponent crossing 0.5, HMM transition
+    probability flips, volume anomalies.
+  - Include an ASCII timeline diagram showing a hypothetical market
+    transitioning from trending → transition → range-bound, with overlaid
+    indicator readings at each phase.
+  - Propose ensemble / adaptive approaches that degrade gracefully during
+    transitions (e.g., reducing position size when regime confidence is low,
+    using Kelly Criterion with regime-conditional estimates).
+
+SECTION 4: Proposed Composite Regime-Identification Framework
+
+  - Design a MULTI-SIGNAL SCORING SYSTEM that fuses outputs from at least
+    4 different methods (e.g., Hurst, ADX, HMM posterior probability,
+    Variance Ratio) into a single regime confidence score.
+  - Provide the scoring logic in pseudocode.
+  - Include an ASCII flow-diagram of the full decision pipeline from raw
+    data → feature computation → individual signals → fusion → regime
+    classification → strategy selection → position sizing.
+  - Discuss parameter calibration, walk-forward optimization, and
+    backtesting methodology for validating the composite system.
+  - Recommend minimum data requirements (e.g., "at least 252 trading days
+    of daily OHLCV data for reliable HMM calibration").
+
+SECTION 5: Practical Strategy Mapping
+
+  - Map regime classifications to specific trading strategies:
+      Trending → Momentum / trend-following (breakout entries, trailing stops)
+      Range-bound → Mean-reversion (RSI extremes, Bollinger band touches)
+      Transition → Capital preservation (reduced sizing, hedging)
+  - Include an ASCII decision matrix: Regime × Strategy × Position Sizing
+  - Discuss risk management: how stop-loss placement, position sizing, and
+    portfolio heat differ across regimes.
+
+SECTION 6: Limitations, Open Questions, and Recommendations
+
+  - Acknowledge look-ahead bias risk in regime classification
+  - Discuss the fundamental problem: regime identification is always
+    backward-looking; by the time you confirm a regime, it may be ending.
+  - Recommend areas for further research, including deep learning approaches
+    (LSTMs, Transformers for regime prediction).
+
+APPENDIX: Glossary of Key Terms
+
+=== FORMATTING CONSTRAINTS ===
+
+- Write entirely in professional academic prose; NO bullet-point lists
+- All math in LaTeX: inline \( ... \) and display $$ ... $$
+- Include at least 6 advanced ASCII diagrams as specified
+- Cite academic papers by Author(s), Year, Title, and Journal
+- Flag any area where your knowledge may be incomplete
+- Target length: as comprehensive as possible; do not truncate
+```
+
+---
+
+## PROMPT 2 — Persistent Alpha Factors: Volume, Small-Cap, and Low-Price
+
+```markdown
+=== ROLE ===
+
+You are a senior factor-investing research analyst at a top-tier quantitative
+asset management firm. You have deep expertise in cross-sectional asset pricing,
+behavioral finance, and empirical portfolio construction. You are responsible
+for producing institutional-grade research reports that are both academically
+rigorous and practically actionable.
+
+=== TASK ===
+
+Produce a formal, presentation-ready research report titled:
+
+    "LONG-LASTING ALPHA FACTORS: An In-Depth Analysis of Volume, Small-Cap,
+     and Low-Price Premiums — Persistence, Mechanisms, and Portfolio
+     Implementation"
+
+     Prepared for: [Supervisor Name]
+     Date: [Current Date]
+     Classification: Internal — Research Division
+
+=== CORE RESEARCH PROBLEM ===
+
+The speaker identified three factors that exhibit long-lasting (persistent)
+predictive power for equity returns:
+
+  1. TRADING VOLUME — as a predictive signal for future returns
+  2. LOW-CAPITALIZATION STOCKS — the small-cap premium (size effect)
+  3. LOW-PRICED STOCKS — the low nominal price effect
+
+The report must investigate each factor's academic lineage, theoretical
+mechanism, empirical robustness, practical constraints, and current status
+(alive or decayed). Critically, the report must also examine cross-factor
+interactions and propose a composite multi-factor portfolio strategy.
+
+=== MANDATORY REPORT STRUCTURE ===
+
+Write the ENTIRE report in formal academic prose — no bullet-point lists in
+the body. Use connected, analytical paragraphs. Use LaTeX notation (inline:
+\( ... \), display: $$ ... $$ on separate lines) for all formulas.
+
+CRITICAL: Include advanced ASCII diagrams throughout, such as:
+
+  - ASCII taxonomy tree of volume-based signals (abnormal volume, relative
+    volume, volume momentum, volume-price divergence, etc.)
+  - ASCII Venn diagram showing overlap and distinction between size effect
+    and low-price effect
+  - ASCII timeline of academic literature evolution for each factor
+  - ASCII factor interaction matrix (3×3 showing how volume, size, and
+    price factors interact)
+  - ASCII portfolio construction flow-diagram
+  - ASCII comparison table: Factor × Sharpe ratio × Capacity × Decay Rate
+    × Implementability
+
+Use box-drawing characters (┌─┐│└─┘├┤┬┴┼), arrows (→ ← ↑ ↓ ⇒ ⇐), and
+alignment to produce clean, professional diagrams.
+
+=== SECTION-BY-SECTION RESEARCH DIRECTIVES ===
+
+SECTION 1: Introduction to Factor Investing and the Persistence Question
+
+  - Briefly review the evolution from CAPM → Fama-French 3-Factor →
+    Carhart 4-Factor → Fama-French 5-Factor → current zoo of factors.
+  - Define what "persistence" (long-lasting) means for a factor: statistical
+    significance across multiple time periods, robustness across geographies,
+    survival after transaction costs, and resistance to factor crowding decay.
+  - Discuss: McLean & Pontiff (2016) "Does Academic Research Destroy Stock
+    Return Predictability?" — the post-publication decay problem.
+  - Include an ASCII schematic of the factor-investing research pipeline
+    (discovery → publication → crowding → decay → re-evaluation).
+
+SECTION 2: FACTOR 1 — Trading Volume
+
+  A. Academic Foundation and Theoretical Mechanisms
+    - Survey the key literature:
+      * Campbell, Grossman & Wang (1993): "Trading Volume and Serial
+        Correlation in Stock Returns" — the theoretical model linking volume
+        to return autocorrelation.
+      * Gervais, Kaniel & Mingelgrin (2001): "The High-Volume Return
+        Premium" — documented that stocks experiencing unusually high
+        (low) trading volume over a day or a week tend to appreciate
+        (depreciate) over the following month.
+      * Loh (2010): "Investor Inattention and the Underreaction to Stock
+        Recommendations" — volume as an attention proxy.
+      * Chordia, Subrahmanyam & Anshuman (2001): volume, spreads, and
+        cross-sectional return predictability.
+    - Discuss the major theoretical explanations:
+      * Sequential Information Arrival Hypothesis (Copeland, 1976)
+      * Mixture of Distributions Hypothesis (Clark, 1973; Andersen, 1996)
+      * Visibility / Attention Hypothesis (Miller, 1977; Mayshar, 1983)
+      * Liquidity-provision hypothesis: market makers demand compensation
+        for absorbing volume shocks
+
+  B. Taxonomy of Volume-Based Signals
+    - Include an ASCII taxonomy tree distinguishing: raw volume, turnover
+      ratio, abnormal volume (relative to trailing average), volume
+      momentum (trend in volume), volume-price divergence, On-Balance
+      Volume (OBV), volume-weighted price indicators (VWAP deviation),
+      and cumulative delta (buy vs. sell volume).
+    - For EACH signal type, describe: construction formula, signal
+      interpretation, empirical evidence, and known decay characteristics.
+
+  C. Factor Decay and Current Status
+    - Has the volume factor's predictive power diminished with the rise of
+      algorithmic trading and increased market efficiency?
+    - Reference the meta-analysis literature on volume-return relationships.
+    - Discuss the "Prometheus effect" (Ioannidis, 2008) — the tendency for
+      empirical effects to decline over time after initial novel findings.
+    - Conclude with an assessment: is the volume factor still tradeable?
+
+SECTION 3: FACTOR 2 — Small-Cap Premium (Size Effect)
+
+  A. Academic Lineage
+    - Banz (1981): "The Relationship Between Return and Market Value of
+      Common Stocks" — the original discovery of the size effect.
+    - Fama & French (1992, 1993): incorporation into the three-factor model
+      as SMB (Small Minus Big).
+    - The "disappearance" debate: Horowitz, Loughran & Savin (2000);
+      Schwert (2003) "Anomalies and Market Efficiency."
+    - The rehabilitation: Asness, Frazzini, Israel, Moskowitz & Pedersen
+      (2018) "Size Matters, If You Control Your Junk" — size works when
+      combined with quality.
+    - Recent evidence: Easterwood, Netter, Paye & Stegemoller (2024):
+      "Taking Over the Size Effect" — the M&A / takeover factor connection.
+    - Vanguard (2025): small-caps expected to outpace large-caps by 1.9
+      percentage points annualized over the next decade, BUT quality
+      concerns warrant caution.
+
+  B. Mechanisms and Explanations
+    - Risk-based: Fama & French — size is a proxy for distress risk
+    - Behavioral: lottery preference / migration effect (Fama & French, 2006)
+    - Structural: analyst coverage gap → information asymmetry →
+      mispricing (less coverage = more alpha opportunity)
+    - Private equity siphoning: the best small companies stay private longer,
+      weakening the public small-cap universe
+
+  C. Practical Constraints (CRITICAL for implementation)
+    - Liquidity risk and market impact costs for small/micro-cap stocks
+    - Capacity limitations of small-cap strategies
+    - Survivorship bias in backtests
+    - Concentration of size premium in the smallest stocks (micro-caps),
+      which are notoriously expensive to trade
+    - 35% of Russell 2000 companies are unprofitable — the junk problem
+
+  D. Current Assessment
+    - Russell 2000 has underperformed S&P 500 by ~103% cumulatively over
+      the last decade. Is the premium dead, dormant, or structural?
+    - Include an ASCII timeline showing periods of small-cap outperformance
+      and underperformance since 1981.
+
+SECTION 4: FACTOR 3 — Low Nominal Price Effect
+
+  A. Academic Foundation
+    - Green & Hwang (2009): "Price-Based Return Comovement" — low-priced
+      stocks co-move and behave differently.
+    - Birru & Wang (2016): "Nominal Price Illusion" published in Journal of
+      Financial Economics — investors suffer from the illusion that low-priced
+      stocks have more upside potential; they systematically overestimate the
+      skewness of low-priced stocks.
+    - Baker, Greenwood & Wurgler (2009): "Catering through Nominal Share
+      Prices" — firms manage prices to cater to investor preferences.
+    - Research in the Chinese market showing LPP (Low-Price Premium) as a
+      reliable pricing factor in A-shares, where 85% of trading volume
+      comes from retail individual investors.
+
+  B. Disentangling Price from Size
+    - CRITICAL: The low-price effect and the small-cap effect are correlated
+      but NOT identical. Include an ASCII Venn diagram showing the overlap.
+    - Low-priced stocks tend to be smaller, have higher betas, lower
+      book-to-market ratios, and worse past performance — but the price
+      effect persists AFTER controlling for size, B/M, and momentum.
+    - Discuss the tick-size effect: when minimum tick sizes are a larger
+      percentage of the stock price, the effective spread is wider,
+      creating both a barrier to trading and a potential return premium.
+
+  C. Behavioral Mechanisms
+    - Nominal price illusion: "closer to zero, farther from infinity"
+    - Lottery preference: retail investors treat low-priced stocks as
+      lottery tickets with positively skewed payoff profiles
+    - Affordability constraint vs. genuine illusion: fractional shares
+      (e.g., Robinhood) may eliminate the affordability channel, but
+      recent research suggests the illusion persists beyond affordability
+
+  D. Risks and Pitfalls
+    - Delisting risk concentration in low-priced stocks
+    - Higher susceptibility to manipulation (pump-and-dump)
+    - Transaction costs as a higher percentage of price
+    - Regulatory risk: some exchanges have minimum price requirements;
+      stocks below $1 face delisting
+
+SECTION 5: Cross-Factor Interactions and Multi-Factor Portfolio Construction
+
+  - How do the three factors interact? Include an ASCII 3×3 interaction
+    matrix showing: Volume × Size, Volume × Price, Size × Price, and the
+    triple intersection.
+  - Discuss: Small-cap stocks tend to have lower volume AND lower prices;
+    does combining all three create a "triple-loading" concentration risk?
+  - Propose a factor-weighting framework: equal-weight vs. risk-parity vs.
+    conditional (regime-dependent) weighting. Connect to Topic 1 (Regime
+    Identification) — factor timing based on market regime.
+  - Discuss factor crowding risk: when too many quant funds pursue the same
+    factors, expected returns compress.
+  - Include an ASCII portfolio construction pipeline diagram.
+  - Propose rebalancing frequency and implementation vehicle recommendations
+    (long-only vs. long-short, ETF vs. direct stock selection).
+
+SECTION 6: Limitations, Controversies, and Recommendations
+
+  - Acknowledge the efficient market critique: if a factor premium is "just"
+    compensation for risk, it's not alpha — it's beta.
+  - Discuss the "factor zoo" problem and data-mining / p-hacking concerns.
+  - Recommend further research areas.
+  - Provide a final factor scorecard with an ASCII table.
+
+APPENDIX: Glossary of Key Terms and Factor Definitions
+
+=== FORMATTING CONSTRAINTS ===
+
+- Write entirely in professional academic prose; NO bullet-point lists
+- All math in LaTeX: inline \( ... \) and display $$ ... $$
+- Include at least 6 advanced ASCII diagrams as specified
+- Cite academic papers by Author(s), Year, Title, and Journal
+- Flag any area where your knowledge may be incomplete or outdated
+- Target length: as comprehensive as possible; do not truncate
+```
+
+---
+
+## PROMPT 3 — Order Book Arbitrage: Large Order Detection & Same-Side Execution
+
+```markdown
+=== ROLE ===
+
+You are a senior market microstructure research analyst and former electronic
+trading desk strategist at a major investment bank. You have deep expertise in
+order book dynamics, limit order book (LOB) theory, market manipulation
+detection, and regulatory compliance (Dodd-Frank, EU MAR). You also have
+hands-on experience with real-time data feeds, broker APIs, and order flow
+analysis tools.
+
+=== TASK ===
+
+Produce a formal, presentation-ready research report titled:
+
+    "ORDER BOOK ARBITRAGE: Detection of Institutional-Scale Orders via
+     Publicly Available Data and Same-Side Execution Strategies —
+     Methodology, Implementation, and Regulatory Compliance"
+
+     Prepared for: [Supervisor Name]
+     Date: [Current Date]
+     Classification: Internal — Research Division | COMPLIANCE-SENSITIVE
+
+=== CORE RESEARCH PROBLEM ===
+
+The speaker identified the following strategy framework:
+
+  1. DETECT very large pending orders on the order book (without paying for
+     expensive proprietary real-time Level 3 data from exchange co-location).
+  2. Trade on the SAME SIDE as the large order (legal) using a short-term
+     strategy to profit from the temporary price support/resistance the
+     large order provides.
+  3. Implement an EARLY-STOP mechanism: the instant the large order is pulled
+     (cancelled), exit immediately.
+  4. AVOID trading the OPPOSITE SIDE of the large order, as this can be
+     construed as or associated with "spoofing" — which is illegal.
+
+The report must provide a complete technical, strategic, and legal framework
+for this approach, with particular emphasis on LOW-COST detection methods
+that do NOT require renting private, expensive exchange-side order book data.
+
+=== MANDATORY REPORT STRUCTURE ===
+
+Write the ENTIRE report in formal academic prose — no bullet-point lists in
+the body. Use connected, analytical paragraphs. Use LaTeX notation (inline:
+\( ... \), display: $$ ... $$ on separate lines) for all formulas.
+
+CRITICAL: Include advanced ASCII diagrams throughout, such as:
+
+  - ASCII schematic of a limit order book showing bid/ask depth levels,
+    with a large resting order visually highlighted
+  - ASCII flow-diagram of the full detection → evaluation → entry → monitor
+    → exit pipeline
+  - ASCII decision tree for same-side vs. opposite-side legal classification
+  - ASCII comparison matrix: Detection Method × Data Source × Cost × Latency
+    × Reliability × False Positive Rate
+  - ASCII diagram of spoofing mechanics vs. legitimate same-side trading
+    (side-by-side comparison)
+  - ASCII schematic showing the life-cycle of a large institutional order
+    (placement → partial fill → modification → cancellation)
+  - ASCII risk-management state machine: Normal → Detected → Entered →
+    Monitoring → Exit (with transition conditions)
+
+Use box-drawing characters (┌─┐│└─┘├┤┬┴┼), arrows (→ ← ↑ ↓ ⇒ ⇐), and
+alignment to produce clean, professional diagrams.
+
+=== SECTION-BY-SECTION RESEARCH DIRECTIVES ===
+
+SECTION 1: Order Book Microstructure Foundations
+
+  - Explain the anatomy of a limit order book: bids, asks, spread, depth,
+    market orders vs. limit orders, time priority, price priority.
+  - Define Level 1 data (best bid/ask, last trade), Level 2 data (full
+    visible depth / market-by-price), and Level 3 data (full order-by-order
+    feed with individual order IDs, modifications, cancellations).
+  - Include an ASCII schematic of a limit order book with 5 price levels
+    on each side, showing quantities, and highlight what a "very large
+    resting order" looks like (e.g., one level has 10x normal depth).
+  - Define institutional order types: iceberg orders (only a small visible
+    portion; the rest is hidden), block trades, TWAP/VWAP algorithmic
+    slicing, dark pool routing.
+  - Discuss the information content of large visible resting orders: when
+    a large bid rests at a price, it provides temporary SUPPORT; a large
+    ask provides RESISTANCE. This is the microstructure basis for the
+    same-side strategy.
+  - Reference: Gould, Porter, Williams, McDonald, Fenn & Howison (2013),
+    "Limit Order Books," Quantitative Finance.
+
+SECTION 2: Detection Methods — WITHOUT Expensive Private Data Feeds
+(THIS IS THE KEY DELIVERABLE)
+
+  For EACH method, detail: how it works, data source, cost, latency,
+  reliability, false-positive rate, and implementation difficulty. End
+  with a comprehensive ASCII comparison matrix.
+
+  A. Broker-Provided Level 2 Data (Low-Cost)
+    - Most retail/professional brokers provide real-time Level 2 data
+      (market depth) through their APIs at low or zero incremental cost:
+      * Interactive Brokers: TWS API provides market depth (up to 20
+        levels) included with standard data subscriptions
+      * Other brokers with API-accessible depth data
+    - Limitations: delayed snapshots vs. true streaming, depth truncation,
+      aggregation artifacts.
+    - How to scan for abnormally large resting orders: compare each price
+      level's quantity against a rolling N-day average depth profile.
+      An order is "large" if it exceeds, say, 3 standard deviations
+      above the mean depth at that distance from the mid-price.
+
+  B. Inference from Level 1 / Trade-and-Quote Data
+    - Price stickiness: if the price approaches a level but repeatedly
+      fails to break through despite significant market-order flow, infer
+      a large hidden or visible resting order.
+    - Bid-ask spread compression near the large order level.
+    - Trade clustering: a burst of trades at a single price level with
+      the price NOT moving implies absorption by a large resting order.
+    - Formalize: define an "absorption ratio"
+      \(\text{AR}(p, \Delta t) = \frac{\sum_{\text{trades at } p}
+      V_{\text{trade}}}{\Delta P}\) where \(\Delta P \to 0\) despite
+      large cumulative volume.
+
+  C. Tape Reading / Time & Sales Analysis
+    - Analyze the Time & Sales (T&S) tape for large prints (block trades
+      reported on the tape).
+    - Identify "trade-through" patterns: orders that should have moved the
+      price but didn't, implying a large resting order absorbed them.
+    - Detect iceberg order signatures: repeated fills of exactly the same
+      size at the same price (the visible "clip" of an iceberg refilling).
+
+  D. Volume Profile and Order Flow Analysis
+    - Volume-at-Price (VAP) analysis to detect accumulation/distribution
+      zones — levels with abnormally high traded volume.
+    - VWAP deviation analysis: if the current price persistently deviates
+      from intraday VWAP, a large order may be anchoring it.
+    - Cumulative Delta (buy volume minus sell volume): a sustained
+      divergence between delta trend and price trend suggests a large
+      passive order absorbing aggressor flow.
+    - Order Flow Imbalance (OFI) metric derivable from public trade data:
+      \(\text{OFI}_t = \sum_{i} (\text{BuyVol}_i - \text{SellVol}_i)\)
+      at each price level over a rolling window.
+
+  E. Public Exchange APIs and Open-Source Tools
+    - Cryptocurrency exchanges provide FREE full order book data via
+      WebSocket APIs (Binance, Coinbase, Kraken, etc.) — excellent for
+      prototyping and live testing detection algorithms.
+    - Open-source tools: CCXT library (unified API for 100+ crypto
+      exchanges), Bookmap (order flow visualization), ATAS platform.
+    - For traditional equities: OpenBB, QuantConnect, IBKR API.
+    - Discuss latency considerations: WebSocket snapshots typically
+      100-500ms — sufficient for the proposed strategy (which operates
+      on minutes-to-hours timescale, not microseconds).
+
+  F. Indirect / Statistical Detection (No Real-Time Feed Required)
+    - End-of-day anomaly detection: unusually high volume at specific
+      price levels in daily volume-profile data suggests large orders
+      were active during the session.
+    - Options market signals: large institutional stock orders often
+      hedged with options; unusual options activity (volume, open
+      interest changes) can signal pending large stock orders.
+    - Short interest changes and borrowing cost spikes.
+
+  CONCLUDE this section with a COMPREHENSIVE ASCII comparison matrix.
+
+SECTION 3: Same-Side Trading Strategy — Full Technical Specification
+
+  - Detail the complete strategy logic as a state machine:
+    STATE 1 (SCANNING): continuously monitor order book for abnormally
+      large resting orders using the detection methods above.
+    STATE 2 (DETECTED): a large order is confirmed. Evaluate:
+      - Is it genuine (not spoofing)? Check: has it persisted for > N
+        seconds? Is it being partially filled? Is it NOT rapidly
+        oscillating in size?
+      - Which side is it on (bid = support = bullish; ask = resistance
+        = bearish)?
+    STATE 3 (ENTRY): enter a position on the SAME SIDE as the large
+      order. If large bid → buy. If large ask → sell short (if permitted).
+      Position size = f(confidence, account risk, volatility).
+    STATE 4 (MONITORING): continuously monitor the large order:
+      - Is it still there? (CRITICAL: if pulled, immediately exit.)
+      - Is it being eaten through? (price moving against it)
+      - Has it been partially filled significantly?
+    STATE 5 (EXIT): triggered by ANY of:
+      - Large order disappears (IMMEDIATE exit — this is the EARLY STOP)
+      - Profit target reached
+      - Time limit exceeded
+      - Adverse price movement beyond stop-loss
+
+  - Include an ASCII state machine diagram with all transitions labeled.
+  - Provide pseudocode for the core algorithm.
+  - Discuss slippage estimation, minimum execution speed requirements,
+    and infrastructure needs.
+
+SECTION 4: Legal and Regulatory Framework — CRITICAL SECTION
+
+  A. Definition of Spoofing and Layering
+    - U.S. Law: Dodd-Frank Act Section 747 amending the Commodity Exchange
+      Act (CEA) to prohibit "bidding or offering with the intent to cancel
+      the bid or offer before execution." The CFTC has clarified that
+      intent is the key element — mere cancellation is not sufficient;
+      there must be intent to mislead.
+    - EU Law: Market Abuse Regulation (MAR) — Article 12(1)(a) prohibits
+      orders that give false or misleading signals about supply/demand.
+    - Criminal prosecutions: United States v. Coscia (7th Circuit, 2017) —
+      first criminal conviction for spoofing under Dodd-Frank.
+    - Navinder Sarao case: CFTC alleged spoofing of E-mini S&P 500 futures
+      contributed to the 2010 Flash Crash; Sarao placed then rapidly
+      cancelled thousands of "exceptionally large" orders.
+    - JP Morgan (2020): $920 million settlement for spoofing in precious
+      metals and Treasury markets.
+
+  B. Why OPPOSITE-SIDE Trading Is Legally Dangerous
+    - If you detect a large order and trade AGAINST it while also placing
+      your own non-bona-fide orders to push the price, this is textbook
+      spoofing/layering.
+    - Even without placing fake orders, systematically front-running
+      detected large orders on the opposite side could be viewed as
+      a form of market manipulation or front-running depending on
+      jurisdiction and the specific facts.
+    - Include an ASCII side-by-side comparison diagram:
+      LEFT: "Spoofing Pattern" (place fake large order → trade opposite
+      side → cancel fake order)
+      RIGHT: "Legitimate Same-Side Trading" (detect genuine third-party
+      large order → trade same side → exit when order disappears)
+
+  C. Why SAME-SIDE Trading Is Generally Legal
+    - You are not placing deceptive orders.
+    - You are not front-running (you are not ahead of the large order;
+      you are alongside it).
+    - You are making a legitimate trading decision based on publicly
+      observable order book information.
+    - Caveats: if you have material nonpublic information about WHO placed
+      the order (e.g., you are a broker), then this IS illegal front-running.
+      The strategy is only legal when based on PUBLICLY OBSERVABLE data.
+
+  D. Compliance Best Practices
+    - Document trading rationale contemporaneously.
+    - Ensure order-to-trade ratios are normal (not indicative of
+      manipulative patterns).
+    - Implement pre-trade compliance filters.
+    - Maintain audit trails.
+
+  Include an ASCII legal decision tree: "Is my order book strategy legal?"
+  with branches for: data source, order placement behavior, intent, and
+  regulatory jurisdiction.
+
+SECTION 5: Risk Management Framework
+
+  - Sudden order cancellation: the #1 risk. The large order can be pulled
+    at any time, removing the price support/resistance you relied upon.
+    Mitigation: hard early-stop rule with zero discretion.
+  - Iceberg orders masking true size: you may underestimate the order's
+    true size, or the visible portion may be a decoy.
+  - Adversarial behavior: the large-order placer may be a sophisticated
+    institutional algorithm that deliberately lures same-side traders
+    and then pulls the order to profit from their subsequent forced exit.
+  - Spoofing detection risk: the "large order" you detected may itself be
+    a spoof. Reference: Tuccella, Nadler & Serban (2021) "Protecting
+    Retail Investors from Order Book Spoofing using a GRU-based Detection
+    Model" and Fabre & Challet (2025) "Learning the Spoofability of Limit
+    Order Books."
+    Discuss heuristics to distinguish genuine large orders from spoofs:
+    persistence duration, partial-fill behavior, modification patterns.
+  - Technology failure: connectivity loss during a position.
+  - Latency risk: if using WebSocket-based detection with 100-500ms
+    latency, the order may disappear before your exit can execute.
+
+  Include an ASCII risk register: Risk × Likelihood × Severity × Mitigation.
+
+SECTION 6: Implementation Roadmap and Recommendations
+
+  - Recommend a phased approach:
+    Phase 1: Paper-trade using free crypto exchange data (Binance WebSocket)
+    Phase 2: Live-trade small positions on crypto markets
+    Phase 3: Migrate to equity markets with IBKR API
+  - Discuss capital requirements, latency infrastructure, and monitoring
+    dashboards.
+  - Estimate expected return profile: frequency of opportunities, average
+    hold time, win rate, and expected Sharpe ratio range.
+
+APPENDIX A: Glossary of Microstructure Terms
+APPENDIX B: Regulatory Reference Table (U.S., EU, UK, HK, CN jurisdictions)
+
+=== FORMATTING CONSTRAINTS ===
+
+- Write entirely in professional academic prose; NO bullet-point lists
+- All math in LaTeX: inline \( ... \) and display $$ ... $$
+- Include at least 7 advanced ASCII diagrams as specified
+- Cite academic papers, legal cases, and regulations by full reference
+- FLAG all compliance-sensitive areas with a visible marker like
+  ⚠️ COMPLIANCE NOTE: ...
+- Target length: as comprehensive as possible; do not truncate
+```
+
+---
+
+## Usage Instructions
+
+Each prompt above is a standalone, self-contained directive. To use them:
+
+**Step 1:** Open a new Claude conversation for each topic.
+
+**Step 2:** Paste the entire prompt block exactly as written.
+
+**Step 3:** If the response is truncated mid-sentence (which can happen for very long outputs), simply type **"Continue from where you left off."** and Claude will resume.
+
+**Step 4:** After receiving the full report, you can ask follow-up questions such as: *"Expand Section 3 with more detail on the Hurst exponent rolling-window methodology"* or *"Add a Python pseudocode block for the HMM regime detection algorithm."*
+
+**Customization:** Replace `[Supervisor Name]` and `[Current Date]` before pasting. You can also add a line like `"Use examples from the Chinese A-share market"` or `"Focus on U.S. equities"` depending on your market context.
+
+---
+Learn more:
+1. [Regime-Switching Factor Investing with Hidden Markov Models](https://www.mdpi.com/1911-8074/13/12/311)
+2. [White Paper Equities March 2025 Small Caps More Than Just a Factor Premium](https://www.ssga.com/library-content/assets/pdf/global/equities/2025/small-caps-more-than-just-a-factor-premium.pdf)
+3. [\[2110.03687\] Protecting Retail Investors from Order Book Spoofing using a GRU-based Detection Model](https://arxiv.org/abs/2110.03687)
+4. [Detecting trends and mean reversion with the Hurst exponent | Macrosynergy](https://macrosynergy.com/research/detecting-trends-and-mean-reversion-with-the-hurst-exponent/)
+5. [Explaining the causality between trading volume and stock returns: What drives its cross-quantile patterns? - ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0264999325000720)
+6. [Nominal price illusion - ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S0304405X16000349)
+7. [An introduction to Markov Switching Model for Time Series | by Rachita Pateria | Medium](https://medium.com/@rachita.pateria/an-introduction-to-markov-switching-model-for-time-series-b279e9e26125)
+8. [Fading small-cap premium and softer U.S. labor market | Vanguard](https://corporate.vanguard.com/content/corporatesite/us/en/corp/vemo/fading-small-cap-premium-softer-us-labor-market.html)
+9. [Protecting Retail Investors from Order Book Spoofing using a GRU-based Detection Model](https://ideas.repec.org/p/arx/papers/2110.03687.html)
+10. [Hurst exponent - Wikipedia](https://en.wikipedia.org/wiki/Hurst_exponent)
+11. [Dynamic relationship between trading volume, returns and returns volatility: an empirical investigation on the main African’s stock markets - PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC9332039/)
+12. [1 Nominal Price Illusion Justin Birru\* and Baolian Wang\*\* December2012](https://www.efmaefm.org/0efmameetings/efma%20annual%20meetings/2013-Reading/papers/EFMA2013_0526_fullpaper.pdf)
+13. [A Markov Regime Switching Approach to Characterizing Financial Time Series | by Cemal Öztürk, Ph.D. | Medium](https://medium.com/@cemalozturk/a-markov-regime-switching-approach-to-characterizing-financial-time-series-a5226298f8e1)
+14. [Small Cap Stocks: A Prime Investment for Late 2024 | Ironwood](https://ironwoodinvestmentmanagement.com/small-cap-stocks-investment-opportunity-late-2024/)
+15. [Spoofing the order book: UK and US regulators take aim](https://www.morganlewis.com/-/media/files/publication/outside-publication/article/financier-worldwide-spoofing-the-order-book-nov2015.pdf)
+16. [Hurst Exponent Applications: From Regime Analysis to Arbitrage | by Harbourfront Technologies | Medium](https://derivvaluation.medium.com/hurst-exponent-applications-from-regime-analysis-to-arbitrage-3e54e1d03c6f)
+17. [Trading volume and stock returns: A meta-analysis - ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S1057521921002489)
+18. [Nominal price illusion, return skewness, and momentum - ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S1544612324009292)
+19. [LECTURE ON THE MARKOV SWITCHING MODEL CHUNG-MING KUAN Institute of Economics](https://homepage.ntu.edu.tw/~ckuan/pdf/Lec-Markov_note.pdf)
+20. [Why 2024 may be the year when small caps bounce back | AXA IM Corporate](https://www.axa-im.com/investment-institute/asset-class/equities/why-2024-may-be-year-when-small-caps-bounce-back)
+21. [Spoofing the order book: UK and US regulators take aim — Financier Worldwide](https://www.financierworldwide.com/spoofing-the-order-book-uk-and-us-regulators-take-aim)
+22. [Hurst Exponent and Trading Signals Derived from Market Time Series](https://www.scitepress.org/papers/2018/66670/66670.pdf)
+23. [TRADING VOLUME AND SERIAL CORRELATION IN STOCK RETURNS\*](https://web.mit.edu/wangj/www/pap/CampbellGrossmanWang93.pdf)
+24. [Nominal price illusion](https://ideas.repec.org/a/eee/jfinec/v119y2016i3p578-598.html)
+25. [Regime Switching - an overview | ScienceDirect Topics](https://www.sciencedirect.com/topics/economics-econometrics-and-finance/regime-switching)
+26. [Outlook for small caps in 2025](https://gabelli.com/research/small-cap-outlook-2025/)
+27. [How Visualizing Order Book Depth Can Help as Spoofing Fines Hit Record Numbers | Nasdaq](https://www.nasdaq.com/articles/how-visualizing-order-book-depth-can-help-as-spoofing-fines-hit-record-numbers-2020-10-22)
+28. [A note on scaled variance ratio estimation of the Hurst exponent with application to agricultural commodity prices - ADS](https://ui.adsabs.harvard.edu/abs/2007PhyA..377..155T/abstract)
+29. [Stock Market Trading Volume Andrew W. Lo and Jiang Wang∗](https://home.uchicago.edu/~lhansen/vol4-4.pdf)
+30. [Full article: Nominal Price (Dis)Illusion: Fractional Shares on Neobroker Trading Platforms](https://www.tandfonline.com/doi/full/10.1080/15427560.2024.2449361)
+31. [Improving S&P 500 Volatility Forecasting through Regime-Switching Methods](https://arxiv.org/html/2510.03236v1)
+32. [What Happened to the Size Premium? | Morningstar](https://www.morningstar.com/alternative-investments/what-happened-size-premium)
+33. [“Spoofing”: US Law and Enforcement](https://www.kslaw.com/attachments/000/007/109/original/Spoofing_US_Law_and_Enforcement.pdf?1564767398=)
+34. [A note on scaled variance ratio estimation of the Hurst exponent with application to agricultural commodity prices | Request PDF](https://www.researchgate.net/publication/223324488_A_note_on_scaled_variance_ratio_estimation_of_the_Hurst_exponent_with_application_to_agricultural_commodity_prices)
+35. [Full article: Persistence or reversal? The effects of abnormal trading volume on stock returns](https://www.tandfonline.com/doi/full/10.1080/1351847X.2024.2303092)
+36. [The Nominal Price Illusion](https://www.mutualfunds.com/education/the-nominal-price-illusion/)
+37. [Introduction to Markov-Switching Models | Aptech](https://www.aptech.com/blog/introduction-to-markov-switching-models/)
+38. [Small cap value stock premium - isn't that info priced in already? - Bogleheads.org](https://www.bogleheads.org/forum/viewtopic.php?t=444105)
+39. [How to identify spoofing in the ATAS order book. | ATAS](https://atas.net/atas-possibilities/dom/how-to-identify-spoofing-in-the-atas-order-book/)
+40. [Introduction to the Hurst exponent - with code in Python | Towards Data Science](https://towardsdatascience.com/introduction-to-the-hurst-exponent-with-code-in-python-4da0414ca52e/)
+41. [Trading Volume and Stock Returns: A Meta-Analysis](https://ideas.repec.org/p/fau/wpaper/wp2020_45.html)
+42. [Nominal Price Illusion (Digest Summary)](https://rpc.cfainstitute.org/research/cfa-digest/2016/11/nominal-price-illusion-digest-summary)
+43. [Hidden Markov Model Market Regimes | Trading Indicator | LuxAlgo](https://www.luxalgo.com/library/indicator/hidden-markov-model-market-regimes/)
+44. [Size Factor - Small Capitalization Stocks Premium - Quantpedia](https://quantpedia.com/strategies/small-capitalization-stocks-premium-anomaly)
+45. [How to Detect Spoofing in Trading | Deceptive Trading Practices](https://bookmap.com/blog/unmasking-spoofing-detecting-and-navigating-deceptive-trading-practices)
+46. [How to pick the right strategy with the Hurst exponent - PyQuant News](https://www.pyquantnews.com/the-pyquant-newsletter/how-to-pick-the-right-strategy-hurst-exponent)
+47. [Trading Volume and Serial Correlation in Stock Returns Citation](https://dash.harvard.edu/bitstreams/7312037c-65fe-6bd4-e053-0100007fdf3b/download)
+48. [Asset pricing and nominal price illusion in China | Humanities and Social Sciences Communications](https://www.nature.com/articles/s41599-022-01133-4)
+49. [Regime-Switching Models May 18, 2005 James D. Hamilton](https://econweb.ucsd.edu/~jhamilto/palgrav1.pdf)
+50. [Devilish Details Can Derail Your Small-Cap Stock Funds - PWL Capital](https://www.pwlcapital.com/devilish-details-can-derail-your-small-cap-stock-funds/)
+51. [\[2504.15908\] Learning the Spoofability of Limit Order Books With Interpretable Probabilistic Neural Networks](https://arxiv.org/abs/2504.15908)
+52. [How to Use the Hurst Exponent Strategy in Trading](https://pictureperfectportfolios.com/how-to-use-the-hurst-exponent-strategy-in-trading/)
+53. [The Effect of Trading Volume on Stock Price](https://cupola.gettysburg.edu/cgi/viewcontent.cgi?article=1032&context=gchq)
+54. [Nominal price illusion | Request PDF](https://www.researchgate.net/publication/303009016_Nominal_price_illusion)
+55. [Regime-switching energy price volatility: The role of economic policy uncertainty - ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S1059056021001209)
+56. [Is small cap exposure still a good idea? Asking for a friend …](https://russellinvestments.com/us/blog/small-cap-exposure-still-good-idea)
+57. [\[2110.03687\] Protecting Retail Investors from Order Book Spoofing using a GRU-based Detection Model](https://ar5iv.labs.arxiv.org/html/2110.03687)
+58. [Improvement in Hurst exponent estimation and its application to financial markets | Financial Innovation | Springer Nature Link](https://link.springer.com/article/10.1186/s40854-022-00394-x)
+59. [Trading Volume Alpha∗ Ruslan Goyenko Bryan Kelly Tobias Moskowitz Yinan Su](https://www.aeaweb.org/conference/2025/program/paper/ZsFFtySn)
+60. [Catering to an Illusion: The Impact of Nominal Stock Price on Corporate Voluntary Disclosure by Yangyang Chen, Hui Ding, Qin Tan :: SSRN](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=4759340)
