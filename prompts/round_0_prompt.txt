@@ -403,7 +403,6 @@ what additional file is needed.
 
 <source_files>
 FILE: ql/methods/finitedifferences/operators/fdmblackscholesop.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file fdmblackscholesop.hpp
@@ -464,7 +463,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/fdmblackscholesop.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 #include <ql/instruments/payoffs.hpp>
@@ -586,7 +584,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/triplebandlinearop.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file triplebandlinearop.hpp
@@ -665,7 +662,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/triplebandlinearop.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 #include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
@@ -950,7 +946,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/modtriplebandlinearop.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file modtriplebandlinearop.hpp
@@ -987,7 +982,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file fdmlinearopcomposite.hpp
@@ -1033,7 +1027,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/firstderivativeop.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file firstderivativeop.hpp
@@ -1059,7 +1052,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/firstderivativeop.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 #include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
@@ -1105,7 +1097,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/secondderivativeop.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file secondderivativeop.hpp
@@ -1130,7 +1121,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/operators/secondderivativeop.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 #include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
@@ -1168,7 +1158,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/fdm1dmesher.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file fdm1dmesher.hpp
@@ -1205,7 +1194,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file fdmblackscholesmesher.hpp
@@ -1254,7 +1242,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/fdmblackscholesmesher.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file fdmblackscholesmesher.cpp
@@ -1391,7 +1378,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/fdmmesher.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file fdmmesher.hpp
@@ -1436,7 +1422,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/fdmmeshercomposite.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
@@ -1537,7 +1522,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/concentrating1dmesher.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file concentrating1dmesher.hpp
@@ -1575,7 +1559,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/uniform1dmesher.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file uniform1dmesher.hpp
@@ -1614,7 +1597,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file cranknicolsonscheme.hpp
@@ -1668,7 +1650,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 #include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
@@ -1711,7 +1692,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file impliciteulerscheme.hpp
@@ -1768,7 +1748,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 #include <ql/math/matrixutilities/bicgstab.hpp>
@@ -1842,7 +1821,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 
@@ -1889,7 +1867,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 
@@ -1922,7 +1899,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 
@@ -1990,7 +1966,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 
@@ -2176,7 +2151,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/finitedifferencemodel.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 
@@ -2317,7 +2291,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/stepcondition.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 
@@ -2358,7 +2331,6 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 /*! \file fdmstepconditioncomposite.hpp
@@ -2414,7 +2386,6 @@ namespace QuantLib {
 
 
 FILE: ql/math/array.hpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
 
 
@@ -3310,27 +3281,7 @@ namespace QuantLib {
 
 
 FILE: ql/methods/finitedifferences/meshers/concentrating1dmesher.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2014 Johannes Göttker-Schnetmann
- Copyright (C) 2014 Klaus Spanderen
- Copyright (C) 2015 Peter Caspers
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file concentrating1dmesher.cpp
     \brief One-dimensional grid mesher concentrating around critical points
@@ -3534,26 +3485,7 @@ namespace QuantLib {
 
 FILE: ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp
 
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008, 2009 Ralph Schreyer
- Copyright (C) 2008, 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmblackscholessolver.hpp
 */
@@ -3608,26 +3540,7 @@ namespace QuantLib {
 
 FILE: ql/methods/finitedifferences/solvers/fdmblackscholessolver.cpp
 
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008, 2009 Ralph Schreyer
- Copyright (C) 2008, 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
 #include <ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp>
@@ -3684,28 +3597,68 @@ namespace QuantLib {
         return solver_->thetaAt(std::log(s));
     }
 }
+FILE: ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp
 
-FILE: ql/pricingengines/barrier/fdblackscholesbarrierengine.cpp
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008, 2009 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
+/*! \file fdblackscholesbarrierengine.hpp
+    \brief Finite-differences Black/Scholes barrier-option engine
 */
+
+#ifndef quantlib_fd_black_scholes_barrier_engine_hpp
+#define quantlib_fd_black_scholes_barrier_engine_hpp
+
+#include <ql/processes/blackscholesprocess.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/instruments/barrieroption.hpp>
+
+namespace QuantLib {
+
+    //! Finite-differences Black/Scholes barrier-option engine
+    /*! \ingroup barrierengines
+
+        \test the correctness of the returned value is tested by
+              reproducing results available in web/literature
+              and comparison with Black pricing.
+    */
+    class FdBlackScholesBarrierEngine : public BarrierOption::engine {
+      public:
+        explicit FdBlackScholesBarrierEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>());
+
+        explicit FdBlackScholesBarrierEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+            DividendSchedule dividends,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>());
+
+        void calculate() const override;
+
+      private:
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
+        DividendSchedule dividends_;
+        Size tGrid_, xGrid_, dampingSteps_;
+        FdmSchemeDesc schemeDesc_;
+        bool localVol_;
+        Real illegalLocalVolOverwrite_;
+    };
+
+}
+
+#endif
+FILE: ql/pricingengines/barrier/fdblackscholesbarrierengine.cpp
+
+
 
 #include <ql/exercise.hpp>
 #include <ql/instruments/vanillaoption.hpp>
@@ -3894,29 +3847,65 @@ namespace QuantLib {
         }
     }
 }
+FILE: ql/pricingengines/barrier/fdblackscholesrebateengine.hpp
 
+
+
+
+/*! \file fdblackscholesrebateengine.hpp
+    \brief Finite-differences Black/Scholes barrier option rebate helper engine
+*/
+
+#ifndef quantlib_fd_black_scholes_rebate_engine_hpp
+#define quantlib_fd_black_scholes_rebate_engine_hpp
+
+#include <ql/processes/blackscholesprocess.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/instruments/barrieroption.hpp>
+
+namespace QuantLib {
+
+    //! Finite-differences Black/Scholes barrier-option rebate helper engine
+    /*! \ingroup barrierengines */
+    class FdBlackScholesRebateEngine : public BarrierOption::engine {
+      public:
+        explicit FdBlackScholesRebateEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>());
+
+        explicit FdBlackScholesRebateEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+            DividendSchedule dividends,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>());
+
+        void calculate() const override;
+
+      private:
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
+        DividendSchedule dividends_;
+        Size tGrid_, xGrid_, dampingSteps_;
+        FdmSchemeDesc schemeDesc_;
+        bool localVol_;
+        Real illegalLocalVolOverwrite_;
+    };
+
+}
+
+#endif
 FILE: ql/pricingengines/barrier/fdblackscholesrebateengine.cpp
 
-/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008, 2009 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/exercise.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
@@ -4042,7 +4031,979 @@ namespace QuantLib {
         results_.theta = solver->thetaAt(spot);
     }
 }
+
+FILE: ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp
+
+
+
+
+/*! \file fdm1dimsolver.hpp
+*/
+
+#ifndef quantlib_fdm_1_dim_solver_hpp
+#define quantlib_fdm_1_dim_solver_hpp
+
+#include <ql/handle.hpp>
+#include <ql/math/matrix.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+
+
+namespace QuantLib {
+
+    class CubicInterpolation;
+    class FdmSnapshotCondition;
+
+    class Fdm1DimSolver : public LazyObject {
+      public:
+        Fdm1DimSolver(const FdmSolverDesc& solverDesc,
+                      const FdmSchemeDesc& schemeDesc,
+                      ext::shared_ptr<FdmLinearOpComposite> op);
+
+        Real interpolateAt(Real x) const;
+        Real thetaAt(Real x) const;
+
+        Real derivativeX(Real x) const;
+        Real derivativeXX(Real x) const;
+
+      protected:
+        void performCalculations() const override;
+
+      private:
+        const FdmSolverDesc solverDesc_;
+        const FdmSchemeDesc schemeDesc_;
+        const ext::shared_ptr<FdmLinearOpComposite> op_;
+
+        const ext::shared_ptr<FdmSnapshotCondition> thetaCondition_;
+        const ext::shared_ptr<FdmStepConditionComposite> conditions_;
+
+        std::vector<Real> x_, initialValues_;
+        mutable Array resultValues_;
+        mutable ext::shared_ptr<CubicInterpolation> interpolation_;
+    };
+}
+
+#endif
+
+FILE: ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp
+
+/*! \file fdblackscholesvanillaengine.hpp
+    \brief Finite-differences Black Scholes vanilla option engine
+*/
+
+#ifndef quantlib_fd_black_scholes_vanilla_engine_hpp
+#define quantlib_fd_black_scholes_vanilla_engine_hpp
+
+#include <ql/pricingengine.hpp>
+#include <ql/pricingengines/vanilla/cashdividendeuropeanengine.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+
+namespace QuantLib {
+
+    class FdmQuantoHelper;
+    class GeneralizedBlackScholesProcess;
+
+    //! Finite-differences Black Scholes vanilla option engine
+    /*! \ingroup vanillaengines
+
+        \test the correctness of the returned value is tested by
+              reproducing results available in web/literature
+              and comparison with Black pricing.
+    */
+    class FdBlackScholesVanillaEngine : public VanillaOption::engine {
+      public:
+        enum CashDividendModel {
+            Spot = CashDividendEuropeanEngine::Spot,
+            Escrowed = CashDividendEuropeanEngine::Escrowed
+        };
+
+        explicit FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            DividendSchedule dividends,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        FdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            DividendSchedule dividends,
+            ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+            bool localVol = false,
+            Real illegalLocalVolOverwrite = -Null<Real>(),
+            CashDividendModel cashDividendModel = Spot);
+
+        void calculate() const override;
+
+      private:
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
+        DividendSchedule dividends_;
+        Size tGrid_, xGrid_, dampingSteps_;
+        FdmSchemeDesc schemeDesc_;
+        bool localVol_;
+        Real illegalLocalVolOverwrite_;
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
+        CashDividendModel cashDividendModel_;
+    };
+
+
+    class MakeFdBlackScholesVanillaEngine {
+      public:
+        explicit MakeFdBlackScholesVanillaEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess> process);
+
+        MakeFdBlackScholesVanillaEngine& withQuantoHelper(
+            const ext::shared_ptr<FdmQuantoHelper>& quantoHelper);
+
+        MakeFdBlackScholesVanillaEngine& withTGrid(Size tGrid);
+        MakeFdBlackScholesVanillaEngine& withXGrid(Size xGrid);
+        MakeFdBlackScholesVanillaEngine& withDampingSteps(
+            Size dampingSteps);
+
+        MakeFdBlackScholesVanillaEngine& withFdmSchemeDesc(
+            const FdmSchemeDesc& schemeDesc);
+
+        MakeFdBlackScholesVanillaEngine& withLocalVol(bool localVol);
+        MakeFdBlackScholesVanillaEngine& withIllegalLocalVolOverwrite(
+            Real illegalLocalVolOverwrite);
+
+        MakeFdBlackScholesVanillaEngine& withCashDividends(
+            const std::vector<Date>& dividendDates,
+            const std::vector<Real>& dividendAmounts);
+
+        MakeFdBlackScholesVanillaEngine& withCashDividendModel(
+            FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel);
+
+        operator ext::shared_ptr<PricingEngine>() const;
+      private:
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
+        DividendSchedule dividends_;
+        Size tGrid_ = 100, xGrid_ = 100, dampingSteps_ = 0;
+        ext::shared_ptr<FdmSchemeDesc> schemeDesc_;
+        bool localVol_ = false;
+        Real illegalLocalVolOverwrite_;
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper_;
+        FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel_ = FdBlackScholesVanillaEngine::Spot;
+    };
+
+}
+
+#endif
+FILE: ql/pricingengines/vanilla/fdblackscholesvanillaengine.cpp
+
+
+#include <ql/exercise.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+#include <ql/methods/finitedifferences/utilities/escroweddividendadjustment.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmescrowedloginnervaluecalculator.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+
+namespace QuantLib {
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)), tGrid_(tGrid), xGrid_(xGrid),
+      dampingSteps_(dampingSteps), schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+    }
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        DividendSchedule dividends,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)), dividends_(std::move(dividends)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps), schemeDesc_(schemeDesc),
+      localVol_(localVol), illegalLocalVolOverwrite_(illegalLocalVolOverwrite),
+      cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+    }
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), quantoHelper_(std::move(quantoHelper)),
+      cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+        registerWith(quantoHelper_);
+    }
+
+    FdBlackScholesVanillaEngine::FdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        DividendSchedule dividends,
+        ext::shared_ptr<FdmQuantoHelper> quantoHelper,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite,
+        CashDividendModel cashDividendModel)
+    : process_(std::move(process)), dividends_(std::move(dividends)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), quantoHelper_(std::move(quantoHelper)),
+      cashDividendModel_(cashDividendModel) {
+        registerWith(process_);
+        registerWith(quantoHelper_);
+    }
+
+
+    void FdBlackScholesVanillaEngine::calculate() const {
+
+        // 0. Cash dividend model
+        const Date exerciseDate = arguments_.exercise->lastDate();
+        const Time maturity = process_->time(exerciseDate);
+        const Date settlementDate = process_->riskFreeRate()->referenceDate();
+
+        Real spotAdjustment = 0.0;
+        DividendSchedule dividendSchedule = DividendSchedule();
+
+        ext::shared_ptr<EscrowedDividendAdjustment> escrowedDivAdj;
+
+        switch (cashDividendModel_) {
+          case Spot:
+            dividendSchedule = dividends_;
+            break;
+          case Escrowed:
+            if  (arguments_.exercise->type() != Exercise::European)
+                // add dividend dates as stopping times
+                for (const auto& cf: dividends_)
+                    dividendSchedule.push_back(
+                        ext::make_shared<FixedDividend>(0.0, cf->date()));
+
+            QL_REQUIRE(quantoHelper_ == nullptr,
+                "Escrowed dividend model is not supported for Quanto-Options");
+
+            escrowedDivAdj = ext::make_shared<EscrowedDividendAdjustment>(
+                dividends_,
+                process_->riskFreeRate(),
+                process_->dividendYield(),
+                [&](Date d){ return process_->time(d); },
+                maturity
+            );
+
+            spotAdjustment =
+                escrowedDivAdj->dividendAdjustment(process_->time(settlementDate));
+
+            QL_REQUIRE(process_->x0() + spotAdjustment > 0.0,
+                    "spot minus dividends becomes negative");
+
+            break;
+          default:
+              QL_FAIL("unknwon cash dividend model");
+        }
+
+        // 1. Mesher
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+
+        const ext::shared_ptr<Fdm1dMesher> equityMesher =
+            ext::make_shared<FdmBlackScholesMesher>(
+                    xGrid_, process_, maturity, payoff->strike(), 
+                    Null<Real>(), Null<Real>(), 0.0001, 1.5,
+                    std::pair<Real, Real>(payoff->strike(), 0.1),
+                    dividendSchedule, quantoHelper_,
+                    spotAdjustment);
+        
+        const ext::shared_ptr<FdmMesher> mesher =
+            ext::make_shared<FdmMesherComposite>(equityMesher);
+        
+        // 2. Calculator
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator =
+            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0);
+
+        ext::shared_ptr<FdmInnerValueCalculator> earlyExerciseCalculator;
+        switch (cashDividendModel_) {
+          case Spot:
+              earlyExerciseCalculator = calculator;
+            break;
+          case Escrowed:
+              earlyExerciseCalculator = ext::make_shared<FdmEscrowedLogInnerValueCalculator>(
+                  escrowedDivAdj, payoff, mesher, 0);
+            break;
+          default:
+              QL_FAIL("unknwon cash dividend model");
+        }
+
+        // 3. Step conditions
+        const ext::shared_ptr<FdmStepConditionComposite> conditions = 
+            FdmStepConditionComposite::vanillaComposite(
+                dividendSchedule, arguments_.exercise, mesher,
+                earlyExerciseCalculator,
+                process_->riskFreeRate()->referenceDate(),
+                process_->riskFreeRate()->dayCounter());
+
+        // 4. Boundary conditions
+        const FdmBoundaryConditionSet boundaries;
+
+        // 5. Solver
+        FdmSolverDesc solverDesc = {
+            mesher, boundaries, conditions, calculator, maturity, tGrid_, dampingSteps_
+        };
+
+        const ext::shared_ptr<FdmBlackScholesSolver> solver(
+            ext::make_shared<FdmBlackScholesSolver>(
+                Handle<GeneralizedBlackScholesProcess>(process_),
+                payoff->strike(), solverDesc, schemeDesc_,
+                localVol_, illegalLocalVolOverwrite_,
+                Handle<FdmQuantoHelper>(quantoHelper_)));
+
+        const Real spot = process_->x0() + spotAdjustment;
+
+        results_.value = solver->valueAt(spot);
+        results_.delta = solver->deltaAt(spot);
+        results_.gamma = solver->gammaAt(spot);
+        results_.theta = solver->thetaAt(spot);
+    }
+
+    MakeFdBlackScholesVanillaEngine::MakeFdBlackScholesVanillaEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process)
+    : process_(std::move(process)),
+      schemeDesc_(ext::make_shared<FdmSchemeDesc>(FdmSchemeDesc::Douglas())),
+      illegalLocalVolOverwrite_(-Null<Real>()) {}
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withQuantoHelper(
+        const ext::shared_ptr<FdmQuantoHelper>& quantoHelper) {
+        quantoHelper_ = quantoHelper;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withTGrid(Size tGrid) {
+        tGrid_ = tGrid;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withXGrid(Size xGrid) {
+        xGrid_ = xGrid;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withDampingSteps(Size dampingSteps) {
+        dampingSteps_ = dampingSteps;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withFdmSchemeDesc(
+        const FdmSchemeDesc& schemeDesc) {
+        schemeDesc_ = ext::make_shared<FdmSchemeDesc>(schemeDesc);
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withLocalVol(bool localVol) {
+        localVol_ = localVol;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withIllegalLocalVolOverwrite(
+        Real illegalLocalVolOverwrite) {
+        illegalLocalVolOverwrite_ = illegalLocalVolOverwrite;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withCashDividends(
+            const std::vector<Date>& dividendDates,
+            const std::vector<Real>& dividendAmounts) {
+        dividends_ = DividendVector(dividendDates, dividendAmounts);
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine&
+    MakeFdBlackScholesVanillaEngine::withCashDividendModel(
+        FdBlackScholesVanillaEngine::CashDividendModel cashDividendModel) {
+        cashDividendModel_ = cashDividendModel;
+        return *this;
+    }
+
+    MakeFdBlackScholesVanillaEngine::operator
+    ext::shared_ptr<PricingEngine>() const {
+        return ext::make_shared<FdBlackScholesVanillaEngine>(
+                process_,
+                dividends_,
+                quantoHelper_,
+                tGrid_, xGrid_, dampingSteps_,
+                *schemeDesc_,
+                localVol_,
+                illegalLocalVolOverwrite_,
+                cashDividendModel_);
+    }
+
+}
+FILE: ql/pricingengines/vanilla/fdblackscholesshoutengine.hpp
+
+
+/*! \file fdblackscholesshoutengine.hpp
+    \brief Finite-Differences Black Scholes shout option engine
+*/
+
+#ifndef quantlib_fd_black_scholes_shout_engine_hpp
+#define quantlib_fd_black_scholes_shout_engine_hpp
+
+#include <ql/pricingengine.hpp>
+#include <ql/instruments/vanillaoption.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+
+namespace QuantLib {
+
+    class GeneralizedBlackScholesProcess;
+
+    class FdBlackScholesShoutEngine : public VanillaOption::engine {
+      public:
+        // Constructor
+        explicit FdBlackScholesShoutEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas());
+
+        FdBlackScholesShoutEngine(
+            ext::shared_ptr<GeneralizedBlackScholesProcess>,
+            DividendSchedule dividends,
+            Size tGrid = 100,
+            Size xGrid = 100,
+            Size dampingSteps = 0,
+            const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas());
+
+        void calculate() const override;
+
+      private:
+        const ext::shared_ptr<GeneralizedBlackScholesProcess> process_;
+        DividendSchedule dividends_;
+        const Size tGrid_, xGrid_, dampingSteps_;
+        const FdmSchemeDesc schemeDesc_;
+    };
+
+}
+
+#endif
+FILE: ql/pricingengines/vanilla/fdblackscholesshoutengine.cpp
+
+
+/*! \file fdblackscholesshoutengine.cpp
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/methods/finitedifferences/utilities/escroweddividendadjustment.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmshoutloginnervaluecalculator.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesshoutengine.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+
+namespace QuantLib {
+
+    FdBlackScholesShoutEngine::FdBlackScholesShoutEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc) {
+        registerWith(process_);
+    }
+
+    FdBlackScholesShoutEngine::FdBlackScholesShoutEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        DividendSchedule dividends,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc)
+    : process_(std::move(process)), dividends_(std::move(dividends)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc) {
+        registerWith(process_);
+    }
+
+    void FdBlackScholesShoutEngine::calculate() const {
+
+        const Date exerciseDate = arguments_.exercise->lastDate();
+        const Time maturity = process_->time(exerciseDate);
+        const Date settlementDate = process_->riskFreeRate()->referenceDate();
+
+        const auto escrowedDividendAdj =
+            ext::make_shared<EscrowedDividendAdjustment>(
+                dividends_,
+                process_->riskFreeRate(),
+                process_->dividendYield(),
+                [&](Date d){ return process_->time(d); },
+                maturity);
+
+        const Real divAdj = escrowedDividendAdj
+            ->dividendAdjustment(process_->time(settlementDate));
+
+        QL_REQUIRE(process_->x0() + divAdj > 0.0,
+                            "spot minus dividends becomes negative");
+
+        const auto payoff =
+            ext::dynamic_pointer_cast<PlainVanillaPayoff>(arguments_.payoff);
+
+        QL_REQUIRE(payoff, "non plain vanilla payoff given");
+
+        const DividendSchedule emptyDividendSchedule;
+
+        const auto mesher = ext::make_shared<FdmMesherComposite>(
+            ext::make_shared<FdmBlackScholesMesher>(
+                xGrid_, process_, maturity, payoff->strike(),
+                Null<Real>(), Null<Real>(), 0.0001, 1.5,
+                std::pair<Real, Real>(payoff->strike(), 0.1),
+                emptyDividendSchedule,
+                ext::shared_ptr<FdmQuantoHelper>(),
+                divAdj));
+
+        const auto innerValuecalculator =
+            ext::make_shared<FdmShoutLogInnerValueCalculator>(
+                process_->blackVolatility(),
+                escrowedDividendAdj, maturity, payoff, mesher, 0);
+
+        DividendSchedule zeroDividendSchedule = DividendSchedule();
+        for (const auto& cf: dividends_)
+            zeroDividendSchedule.push_back(
+                ext::make_shared<FixedDividend>(0.0, cf->date()));
+
+        const auto conditions =
+            FdmStepConditionComposite::vanillaComposite(
+                zeroDividendSchedule,
+                arguments_.exercise, mesher,
+                innerValuecalculator,
+                process_->riskFreeRate()->referenceDate(),
+                process_->riskFreeRate()->dayCounter());
+
+        const FdmSolverDesc solverDesc = {
+            mesher, FdmBoundaryConditionSet(),
+            conditions, innerValuecalculator,
+            maturity, tGrid_, dampingSteps_ };
+
+        const auto solver =
+            ext::make_shared<FdmBlackScholesSolver>(
+                Handle<GeneralizedBlackScholesProcess>(process_),
+                payoff->strike(), solverDesc, schemeDesc_);
+
+        const Real spot = process_->x0() + divAdj;
+
+        results_.value = solver->valueAt(spot);
+        results_.delta = solver->deltaAt(spot);
+        results_.gamma = solver->gammaAt(spot);
+        results_.theta = solver->thetaAt(spot);
+    }
+}
+FILE: ql/methods/finitedifferences/solvers/fdm1dimsolver.cpp
+
+
+
+#include <ql/math/interpolations/cubicinterpolation.hpp>
+#include <ql/methods/finitedifferences/finitedifferencemodel.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmsnapshotcondition.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    Fdm1DimSolver::Fdm1DimSolver(const FdmSolverDesc& solverDesc,
+                                 const FdmSchemeDesc& schemeDesc,
+                                 ext::shared_ptr<FdmLinearOpComposite> op)
+    : solverDesc_(solverDesc), schemeDesc_(schemeDesc), op_(std::move(op)),
+      thetaCondition_(ext::make_shared<FdmSnapshotCondition>(
+          0.99 * std::min(1.0 / 365.0,
+                          solverDesc.condition->stoppingTimes().empty() ?
+                              solverDesc.maturity :
+                              solverDesc.condition->stoppingTimes().front()))),
+      conditions_(FdmStepConditionComposite::joinConditions(thetaCondition_, solverDesc.condition)),
+      x_(solverDesc.mesher->layout()->size()), initialValues_(solverDesc.mesher->layout()->size()),
+      resultValues_(solverDesc.mesher->layout()->size()) {
+
+        for (const auto& iter : *solverDesc.mesher->layout()) {
+            initialValues_[iter.index()]
+                 = solverDesc_.calculator->avgInnerValue(iter,
+                                                         solverDesc.maturity);
+            x_[iter.index()] = solverDesc.mesher->location(iter, 0);
+        }
+    }
+
+
+    void Fdm1DimSolver::performCalculations() const {
+        Array rhs(initialValues_.size());
+        std::copy(initialValues_.begin(), initialValues_.end(), rhs.begin());
+
+        FdmBackwardSolver(op_, solverDesc_.bcSet, conditions_, schemeDesc_)
+            .rollback(rhs, solverDesc_.maturity, 0.0,
+                      solverDesc_.timeSteps, solverDesc_.dampingSteps);
+
+        std::copy(rhs.begin(), rhs.end(), resultValues_.begin());
+        interpolation_ = ext::make_shared<MonotonicCubicNaturalSpline>(x_.begin(), x_.end(),
+                                        resultValues_.begin());
+    }
+
+    Real Fdm1DimSolver::interpolateAt(Real x) const {
+        calculate();
+        return (*interpolation_)(x);
+    }
+
+    Real Fdm1DimSolver::thetaAt(Real x) const {
+        if (conditions_->stoppingTimes().front() == 0.0)
+            return Null<Real>();
+
+        calculate();
+        Array thetaValues(resultValues_.size());
+
+        const Array& rhs = thetaCondition_->getValues();
+        std::copy(rhs.begin(), rhs.end(), thetaValues.begin());
+
+        Real temp = MonotonicCubicNaturalSpline(
+            x_.begin(), x_.end(), thetaValues.begin())(x);
+        return ( temp - interpolateAt(x) ) / thetaCondition_->getTime();
+    }
+
+
+    Real Fdm1DimSolver::derivativeX(Real x) const {
+        calculate();
+        return interpolation_->derivative(x);
+    }
+
+    Real Fdm1DimSolver::derivativeXX(Real x) const {
+        calculate();
+        return interpolation_->secondDerivative(x);
+    }
+}
+
+FILE: ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp
+
+/*! \file fdmsolverdesc.hpp
+*/
+
+#ifndef quantlib_fdm_solver_desc_hpp
+#define quantlib_fdm_solver_desc_hpp
+
+#include <ql/methods/finitedifferences/utilities/fdmboundaryconditionset.hpp>
+
+namespace QuantLib {
+
+    class FdmMesher;
+    class FdmInnerValueCalculator;
+    class FdmStepConditionComposite;
+    class FdmInnerValueCalculator;
+
+    struct FdmSolverDesc {
+        const ext::shared_ptr<FdmMesher> mesher;
+        const FdmBoundaryConditionSet bcSet;
+        const ext::shared_ptr<FdmStepConditionComposite> condition;
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator;
+        const Time maturity;
+        const Size timeSteps;
+        const Size dampingSteps;
+    };
+}
+
+#endif
+
+FILE: ql/methods/finitedifferences/utilities/fdmboundaryconditionset.hpp
+
+/*! \file fdmboundaryconditionset.hpp
+*/
+
+#ifndef quantlib_fdm_boundary_condition_set_hpp
+#define quantlib_fdm_boundary_condition_set_hpp
+
+#include <ql/methods/finitedifferences/operatortraits.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearop.hpp>
+
+namespace QuantLib {
+
+    typedef OperatorTraits<FdmLinearOp>::bc_set FdmBoundaryConditionSet;
+
+}
+
+#endif
+
+FILE: ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp
+
+/*! \file fdmlinearoplayout.hpp
+    \brief memory layout of a fdm linear operator
+*/
+
+#ifndef quantlib_linear_op_layout_hpp
+#define quantlib_linear_op_layout_hpp
+
+#include <ql/methods/finitedifferences/operators/fdmlinearopiterator.hpp>
+#include <functional>
+
+namespace QuantLib {
+
+    class FdmLinearOpLayout {
+      public:
+        explicit FdmLinearOpLayout(std::vector<Size> dim)
+        : dim_(std::move(dim)), spacing_(dim_.size()) {
+            spacing_[0] = 1;
+            std::partial_sum(dim_.begin(), dim_.end()-1,
+                spacing_.begin()+1, std::multiplies<>());
+
+            size_ = spacing_.back()*dim_.back();
+        }
+
+        FdmLinearOpIterator begin() const {
+            return FdmLinearOpIterator(dim_);
+        }
+
+        FdmLinearOpIterator end() const {
+            return FdmLinearOpIterator(size_);
+        }
+
+        const std::vector<Size>& dim() const {
+            return dim_;
+        }
+
+        const std::vector<Size>& spacing() const {
+            return spacing_;
+        }
+
+        Size size() const {
+            return size_;
+        }
+
+        Size index(const std::vector<Size>& coordinates) const {
+            return std::inner_product(coordinates.begin(),
+                                      coordinates.end(),
+                                      spacing_.begin(), Size(0));
+        }
+
+        Size neighbourhood(const FdmLinearOpIterator& iterator,
+                           Size i, Integer offset) const;
+
+        Size neighbourhood(const FdmLinearOpIterator& iterator,
+                           Size i1, Integer offset1,
+                           Size i2, Integer offset2) const;
+
+        // smart but sometimes too slow
+        FdmLinearOpIterator iter_neighbourhood(
+            const FdmLinearOpIterator& iterator, Size i, Integer offset) const;
+
+      private:
+        Size size_;
+        std::vector<Size> dim_, spacing_;
+    };
+}
+
+#endif
+
+FILE: ql/methods/finitedifferences/operators/fdmlinearoplayout.cpp
+
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+
+namespace QuantLib {
+
+    Size FdmLinearOpLayout::neighbourhood(const FdmLinearOpIterator& iterator,
+                                          Size i, Integer offset) const {
+        Size myIndex = iterator.index()
+            - iterator.coordinates()[i]*spacing_[i];
+
+        Integer coorOffset = Integer(iterator.coordinates()[i])+offset;
+        if (coorOffset < 0) {
+            coorOffset=-coorOffset;
+        }
+        else if (Size(coorOffset) >= dim_[i]) {
+            coorOffset = 2*(dim_[i]-1) - coorOffset;
+        }
+        return myIndex + coorOffset*spacing_[i];
+    }
+
+    Size FdmLinearOpLayout::neighbourhood(const FdmLinearOpIterator& iterator,
+                                          Size i1, Integer offset1,
+                                          Size i2, Integer offset2) const {
+
+        Size myIndex = iterator.index()
+            - iterator.coordinates()[i1]*spacing_[i1]
+            - iterator.coordinates()[i2]*spacing_[i2];
+
+        Integer coorOffset1 = Integer(iterator.coordinates()[i1])+offset1;
+        if (coorOffset1 < 0) {
+            coorOffset1=-coorOffset1;
+        }
+        else if (Size(coorOffset1) >= dim_[i1]) {
+            coorOffset1 = 2*(dim_[i1]-1) - coorOffset1;
+        }
+
+        Integer coorOffset2 = Integer(iterator.coordinates()[i2])+offset2;
+        if (coorOffset2 < 0) {
+            coorOffset2=-coorOffset2;
+        }
+        else if (Size(coorOffset2) >= dim_[i2]) {
+            coorOffset2 = 2*(dim_[i2]-1) - coorOffset2;
+        }
+
+        return myIndex + coorOffset1*spacing_[i1]+coorOffset2*spacing_[i2];
+    }
+
+    // smart but sometimes too slow
+    FdmLinearOpIterator FdmLinearOpLayout::iter_neighbourhood(
+        const FdmLinearOpIterator& iterator, Size i, Integer offset) const {
+
+        std::vector<Size> coordinates = iterator.coordinates();
+
+        Integer coorOffset = Integer(coordinates[i])+offset;
+        if (coorOffset < 0) {
+            coorOffset=-coorOffset;
+        }
+        else if (Size(coorOffset) >= dim_[i]) {
+            coorOffset = 2*(dim_[i]-1) - coorOffset;
+        }
+        coordinates[i] = Size(coorOffset);
+
+        return FdmLinearOpIterator(dim_, coordinates,
+                                   index(coordinates));
+    }
+
+}
+
+FILE: ql/methods/finitedifferences/operators/fdmlinearopiterator.hpp
+/*! \file fdmlinearopiterator.hpp
+    \brief iterator for a linear fdm operator
+*/
+
+#ifndef quantlib_linear_op_iterator_hpp
+#define quantlib_linear_op_iterator_hpp
+
+#include <ql/types.hpp>
+#include <numeric>
+#include <utility>
+#include <vector>
+
+namespace QuantLib {
+
+    class FdmLinearOpIterator {
+      public:
+        explicit FdmLinearOpIterator(Size index = 0)
+        : index_(index) {}
+
+        explicit FdmLinearOpIterator(std::vector<Size> dim)
+        : index_(0),
+          dim_(std::move(dim)),
+          coordinates_(dim_.size(), 0) {}
+
+        FdmLinearOpIterator(std::vector<Size> dim, std::vector<Size> coordinates, Size index)
+        : index_(index), dim_(std::move(dim)), coordinates_(std::move(coordinates)) {}
+
+        void operator++() {
+            ++index_;
+            for (Size i=0; i < dim_.size(); ++i) {
+                if (++coordinates_[i] == dim_[i]) {
+                    coordinates_[i] = 0;
+                }
+                else {
+                    break;
+                }
+            }
+        }
+
+        // this is not really a dereference, but is intended to make this class compatible with range-bound for loops
+        const FdmLinearOpIterator& operator*() const {
+            return *this;
+        }
+
+        bool operator!=(const FdmLinearOpIterator& iterator) const {
+            return index_ != iterator.index_;
+        }
+
+        Size index() const {
+            return index_;
+        }
+
+        const std::vector<Size> & coordinates() const {
+            return coordinates_;
+        }
+
+        void swap(FdmLinearOpIterator& iter) noexcept {
+            std::swap(iter.index_, index_);
+            dim_.swap(iter.dim_);
+            coordinates_.swap(iter.coordinates_);
+        }
+
+      private:
+        Size index_;
+        std::vector<Size> dim_;
+        std::vector<Size> coordinates_;
+    };
+}
+
+#endif
 </source_files>
+
+
 For detailed implementation integration, we prefer the following: 
 Operator-selection API (preferred for correctness/clarity):
 Add an explicit “spatial discretization” selector to FdmBlackScholesSolver (and engines), leaving FdmSchemeDesc strictly as time-stepping.
