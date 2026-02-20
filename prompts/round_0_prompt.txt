@@ -42,7 +42,6 @@ CODING CONVENTIONS (mandatory):
 - Assertions: `QL_REQUIRE(condition, message)` for preconditions,
   `QL_ENSURE(condition, message)` for postconditions
 - Include guards: `#ifndef quantlib_<path_underscored>_hpp`
-- Copyright header: match the style of adjacent files in the same directory
 - Includes: use angle brackets `<ql/...>` for QuantLib headers
 - No `using namespace std;` in headers
 - Naming: `camelCase` for methods, `camelCase_` for private members,
@@ -406,24 +405,6 @@ what additional file is needed.
 FILE: ql/methods/finitedifferences/operators/fdmblackscholesop.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008, 2009 Ralph Schreyer
- Copyright (C) 2008, 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmblackscholesop.hpp
     \brief Black Scholes linear operator
@@ -485,24 +466,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/fdmblackscholesop.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008, 2009 Ralph Schreyer
- Copyright (C) 2008, 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/instruments/payoffs.hpp>
 #include <ql/math/functional.hpp>
@@ -625,25 +588,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/triplebandlinearop.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
- Copyright (C) 2014 Johannes Göttker-Schnetmann
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file triplebandlinearop.hpp
     \brief general triple band linear operator
@@ -723,25 +667,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/triplebandlinearop.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
- Copyright (C) 2014 Johannes Göttker-Schnetmann
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
 #include <ql/methods/finitedifferences/tridiagonaloperator.hpp>
@@ -1027,22 +952,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/modtriplebandlinearop.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2013 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file modtriplebandlinearop.hpp
     \brief modifiable triple band linear operator
@@ -1080,24 +989,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/fdmlinearopcomposite.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008, 2012 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmlinearopcomposite.hpp
     \brief composite pattern for linear operators
@@ -1144,24 +1035,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/firstderivativeop.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file firstderivativeop.hpp
     \brief first derivative linear operator
@@ -1188,24 +1061,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/firstderivativeop.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
@@ -1252,24 +1107,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/secondderivativeop.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file secondderivativeop.hpp
     \brief second derivative operator
@@ -1295,24 +1132,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/operators/secondderivativeop.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/methods/finitedifferences/meshers/fdmmesher.hpp>
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
@@ -1351,24 +1170,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/meshers/fdm1dmesher.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdm1dmesher.hpp
     \brief One-dimensional simple FDM mesher object working on an index
@@ -1406,22 +1207,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmblackscholesmesher.hpp
     \brief 1-d mesher for the Black-Scholes process (in ln(S))
@@ -1471,22 +1256,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/meshers/fdmblackscholesmesher.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmblackscholesmesher.cpp
     \brief 1-d mesher for the Black-Scholes process (in ln(S))
@@ -1624,24 +1393,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/meshers/fdmmesher.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmmesher.hpp
     \brief mesher for a fdm grid
@@ -1687,24 +1438,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/meshers/fdmmeshercomposite.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
 #include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
@@ -1806,24 +1539,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/meshers/concentrating1dmesher.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2014 Johannes Göttker-Schnetmann
- Copyright (C) 2014 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file concentrating1dmesher.hpp
     \brief One-dimensional grid mesher concentrating around critical points
@@ -1862,24 +1577,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/meshers/uniform1dmesher.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file uniform1dmesher.hpp
     \brief One-dimensional simple uniform grid mesher
@@ -1919,22 +1616,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2019 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file cranknicolsonscheme.hpp
     \brief Crank-Nicolson scheme
@@ -1989,22 +1670,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/schemes/cranknicolsonscheme.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2019 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
 #include <ql/methods/finitedifferences/schemes/cranknicolsonscheme.hpp>
@@ -2048,24 +1713,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Andreas Gaida
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2009, 2017 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file impliciteulerscheme.hpp
     \brief Implicit-Euler scheme
@@ -2123,24 +1770,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/schemes/impliciteulerscheme.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Andreas Gaida
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2009, 2017 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 #include <ql/math/matrixutilities/bicgstab.hpp>
 #include <ql/math/matrixutilities/gmres.hpp>
@@ -2215,24 +1844,7 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Andreas Gaida
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2009 Klaus Spanderen
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file expliciteulerscheme.hpp
     \brief explicit-Euler scheme
@@ -2279,24 +1891,7 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/schemes/expliciteulerscheme.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Andreas Gaida
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2009 Klaus Spanderen
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
- */
 
 #include <ql/methods/finitedifferences/schemes/expliciteulerscheme.hpp>
 #include <utility>
@@ -2329,24 +1924,7 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Andreas Gaida
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2009 Klaus Spanderen
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmbackwardsolver.hpp
 */
@@ -2414,24 +1992,7 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/solvers/fdmbackwardsolver.cpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2009 Andreas Gaida
- Copyright (C) 2009 Ralph Schreyer
- Copyright (C) 2009 Klaus Spanderen
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmbackwardsolver.cpp
 */
@@ -2617,22 +2178,7 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/finitedifferencemodel.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file finitedifferencemodel.hpp
     \brief generic finite difference model
@@ -2773,22 +2319,7 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/stepcondition.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file stepcondition.hpp
     \brief conditions to be applied at every time step
@@ -2829,24 +2360,6 @@ namespace QuantLib {
 FILE: ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2008 Andreas Gaida
- Copyright (C) 2008 Ralph Schreyer
- Copyright (C) 2008 Klaus Spanderen
-
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file fdmstepconditioncomposite.hpp
     \brief composite of fdm step conditions
@@ -2903,24 +2416,7 @@ namespace QuantLib {
 FILE: ql/math/array.hpp
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*
- Copyright (C) 2000, 2001, 2002, 2003 RiskMap srl
- Copyright (C) 2003, 2004, 2005, 2006, 2009 StatPro Italia srl
- Copyright (C) 2004 Ferdinando Ametrano
 
- This file is part of QuantLib, a free-software/open-source library
- for financial quantitative analysts and developers - http://quantlib.org/
-
- QuantLib is free software: you can redistribute it and/or modify it
- under the terms of the QuantLib license.  You should have received a
- copy of the license along with this program; if not, please email
- <quantlib-dev@lists.sf.net>. The license is also available online at
- <https://www.quantlib.org/license.shtml>.
-
- This program is distributed in the hope that it will be useful, but WITHOUT
- ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- FOR A PARTICULAR PURPOSE.  See the license for more details.
-*/
 
 /*! \file array.hpp
     \brief 1-D array used in linear algebra.
@@ -3812,7 +3308,746 @@ namespace QuantLib {
 
 #endif
 
+
+FILE: ql/methods/finitedifferences/meshers/concentrating1dmesher.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2009 Ralph Schreyer
+ Copyright (C) 2014 Johannes Göttker-Schnetmann
+ Copyright (C) 2014 Klaus Spanderen
+ Copyright (C) 2015 Peter Caspers
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file concentrating1dmesher.cpp
+    \brief One-dimensional grid mesher concentrating around critical points
+*/ 
+
+#include <ql/errors.hpp>
+#include <ql/timegrid.hpp>
+#include <ql/utilities/null.hpp>
+#include <ql/math/array.hpp>
+#include <ql/math/functional.hpp>
+#include <ql/math/comparison.hpp>
+#include <ql/math/solvers1d/brent.hpp>
+#include <ql/math/interpolations/linearinterpolation.hpp>
+#include <ql/math/ode/adaptiverungekutta.hpp>
+#include <ql/methods/finitedifferences/meshers/concentrating1dmesher.hpp>
+#include <cmath>
+
+namespace QuantLib {
+
+    Concentrating1dMesher::Concentrating1dMesher(
+        Real start, Real end, Size size, const std::pair<Real, Real>& cPoints,
+        const bool requireCPoint)
+        : Fdm1dMesher(size) {
+
+        QL_REQUIRE(end > start, "end must be larger than start");
+
+        const Real cPoint = cPoints.first;
+        const Real density = cPoints.second == Null<Real>() ?
+            Null<Real>() : cPoints.second*(end - start);
+
+        QL_REQUIRE(cPoint == Null<Real>() || (cPoint >= start && cPoint <= end),
+            "cPoint must be between start and end");
+        QL_REQUIRE(density == Null<Real>() || density > 0.0,
+            "density > 0 required");
+        QL_REQUIRE(cPoint == Null<Real>() || density != Null<Real>(),
+            "density must be given if cPoint is given");
+        QL_REQUIRE(!requireCPoint || cPoint != Null<Real>(),
+            "cPoint is required in grid but not given");
+
+        const Real dx = 1.0 / (size - 1);
+
+        if (cPoint != Null<Real>()) {
+            std::vector<Real> u, z;
+            ext::shared_ptr<Interpolation> transform;
+            const Real c1 = std::asinh((start - cPoint) / density);
+            const Real c2 = std::asinh((end - cPoint) / density);
+            if (requireCPoint) {
+                u.push_back(0.0);
+                z.push_back(0.0);
+                if (!close(cPoint, start) && !close(cPoint, end)) {
+                    const Real z0 = -c1 / (c2 - c1);
+                    const Real u0 =
+                        std::max(std::min(std::lround(z0 * (size - 1)),
+                                          static_cast<long>(size) - 2),
+                                 1L) /
+                        ((Real)(size - 1));
+                    u.push_back(u0);
+                    z.push_back(z0);
+                }
+                u.push_back(1.0);
+                z.push_back(1.0);
+                transform = ext::shared_ptr<Interpolation>(
+                    new LinearInterpolation(u.begin(), u.end(), z.begin()));
+            }
+
+            for (Size i = 1; i < size - 1; ++i) {
+                const Real li = requireCPoint ? (*transform)(i*dx) : i*dx;
+                locations_[i] = cPoint
+                    + density*std::sinh(c1*(1.0 - li) + c2*li);
+            }
+        }
+        else {
+            for (Size i = 1; i < size - 1; ++i) {
+                locations_[i] = start + i*dx*(end - start);
+            }
+        }
+
+        locations_.front() = start;
+        locations_.back() = end;
+
+        for (Size i = 0; i < size - 1; ++i) {
+            dplus_[i] = dminus_[i + 1] = locations_[i + 1] - locations_[i];
+        }
+        dplus_.back() = dminus_.front() = Null<Real>();
+    }
+
+    namespace {
+        class OdeIntegrationFct {
+          public:
+            OdeIntegrationFct(const std::vector<Real>& points,
+                              const std::vector<Real>& betas,
+                              Real tol)
+          : rk_(tol), points_(points), betas_(betas) {}
+
+            Real solve(Real a, Real y0, Real x0, Real x1) {
+                AdaptiveRungeKutta<>::OdeFct1d odeFct([&](Real x, Real y){ return jac(a, x, y); });
+                return rk_(odeFct, y0, x0, x1);
+            }
+
+          private:
+            Real jac(Real a, Real, Real y) const {
+                Real s=0.0;
+                for (Size i=0; i < points_.size(); ++i) {
+                    s+=1.0/(betas_[i] + squared(y - points_[i]));
+                }
+                return a/std::sqrt(s);
+            }
+
+            AdaptiveRungeKutta<> rk_;
+            const std::vector<Real> &points_, &betas_;
+        };
+
+        bool equal_on_first(const std::pair<Real, Real>& p1,
+                            const std::pair<Real, Real>& p2) {
+            return close_enough(p1.first, p2.first, 1000);
+        }
+    }
+
+
+    Concentrating1dMesher::Concentrating1dMesher(
+        Real start, Real end, Size size,
+        const std::vector<std::tuple<Real, Real, bool> >& cPoints,
+        Real tol)
+    : Fdm1dMesher(size) {
+
+        QL_REQUIRE(end > start, "end must be larger than start");
+
+        std::vector<Real> points, betas;
+        for (const auto& cPoint : cPoints) {
+            points.push_back(std::get<0>(cPoint));
+            betas.push_back(squared(std::get<1>(cPoint) * (end - start)));
+        }
+
+        // get scaling factor a so that y(1) = end
+        Real aInit = 0.0;
+        for (Size i=0; i < points.size(); ++i) {
+            const Real c1 = std::asinh((start-points[i])/betas[i]);
+            const Real c2 = std::asinh((end-points[i])/betas[i]);
+            aInit+=(c2-c1)/points.size();
+        }
+
+        OdeIntegrationFct fct(points, betas, tol);
+        const Real a = Brent().solve(
+            [&](Real x) -> Real { return fct.solve(x, start, 0.0, 1.0) - end; },
+            tol, aInit, 0.1*aInit);
+
+        // solve ODE for all grid points
+        Array x(size), y(size);
+        x[0] = 0.0; y[0] = start;
+        const Real dx = 1.0/(size-1);
+        for (Size i=1; i < size; ++i) {
+            x[i] = i*dx;
+            y[i] = fct.solve(a, y[i-1], x[i-1], x[i]);
+        }
+
+        // eliminate numerical noise and ensure y(1) = end
+        const Real dy = y.back() - end;
+        for (Size i=1; i < size; ++i) {
+            y[i] -= i*dx*dy;
+        }
+
+        LinearInterpolation odeSolution(x.begin(), x.end(), y.begin());
+
+        // ensure required points are part of the grid
+        std::vector<std::pair<Real, Real> > w(1, std::make_pair(0.0, 0.0));
+
+        for (Size i=0; i < points.size(); ++i) {
+            if (std::get<2>(cPoints[i]) && points[i] > start && points[i] < end) {
+
+                const Size j = std::distance(y.begin(),
+                        std::lower_bound(y.begin(), y.end(), points[i]));
+
+                const Real e = Brent().solve(
+                    [&](Real x) -> Real { return odeSolution(x, true) - points[i]; },
+                    QL_EPSILON, x[j], 0.5/size);
+
+                w.emplace_back(std::min(x[size - 2], x[j]), e);
+            }
+        }
+        w.emplace_back(1.0, 1.0);
+        std::sort(w.begin(), w.end());
+        w.erase(std::unique(w.begin(), w.end(), equal_on_first), w.end());
+
+        std::vector<Real> u(w.size()), z(w.size());
+        for (Size i=0; i < w.size(); ++i) {
+            u[i] = w[i].first;
+            z[i] = w[i].second;
+        }
+        LinearInterpolation transform(u.begin(), u.end(), z.begin());
+
+        for (Size i=0; i < size; ++i) {
+            locations_[i] = odeSolution(transform(i*dx));
+        }
+
+        for (Size i=0; i < size-1; ++i) {
+            dplus_[i] = dminus_[i+1] = locations_[i+1] - locations_[i];
+        }
+        dplus_.back() = dminus_.front() = Null<Real>();
+    }
+}
+
+FILE: ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp
+
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+/*! \file fdmblackscholessolver.hpp
+*/
+
+#ifndef quantlib_fdm_black_scholes_solver_hpp
+#define quantlib_fdm_black_scholes_solver_hpp
+
+#include <ql/handle.hpp>
+#include <ql/patterns/lazyobject.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmsolverdesc.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmbackwardsolver.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmquantohelper.hpp>
+
+namespace QuantLib {
+
+    class Fdm1DimSolver;
+    class FdmSnapshotCondition;
+    class GeneralizedBlackScholesProcess;
+
+    class FdmBlackScholesSolver : public LazyObject {
+      public:
+        FdmBlackScholesSolver(Handle<GeneralizedBlackScholesProcess> process,
+                              Real strike,
+                              FdmSolverDesc solverDesc,
+                              const FdmSchemeDesc& schemeDesc = FdmSchemeDesc::Douglas(),
+                              bool localVol = false,
+                              Real illegalLocalVolOverwrite = -Null<Real>(),
+                              Handle<FdmQuantoHelper> quantoHelper = Handle<FdmQuantoHelper>());
+
+        Real valueAt(Real s) const;
+        Real deltaAt(Real s) const;
+        Real gammaAt(Real s) const;
+        Real thetaAt(Real s) const;
+
+      protected:
+        void performCalculations() const override;
+
+      private:
+        Handle<GeneralizedBlackScholesProcess> process_;
+        const Real strike_;
+        const FdmSolverDesc solverDesc_;
+        const FdmSchemeDesc schemeDesc_;
+        const bool localVol_;
+        const Real illegalLocalVolOverwrite_;
+        const Handle<FdmQuantoHelper> quantoHelper_;
+
+        mutable ext::shared_ptr<Fdm1DimSolver> solver_;
+    };
+}
+
+#endif /* quantlib_fdm_black_scholes_solver_hpp */
+
+FILE: ql/methods/finitedifferences/solvers/fdmblackscholessolver.cpp
+
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008, 2009 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/methods/finitedifferences/operators/fdmblackscholesop.hpp>
+#include <ql/methods/finitedifferences/solvers/fdm1dimsolver.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
+#include <ql/processes/blackscholesprocess.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdmBlackScholesSolver::FdmBlackScholesSolver(Handle<GeneralizedBlackScholesProcess> process,
+                                                 Real strike,
+                                                 FdmSolverDesc solverDesc,
+                                                 const FdmSchemeDesc& schemeDesc,
+                                                 bool localVol,
+                                                 Real illegalLocalVolOverwrite,
+                                                 Handle<FdmQuantoHelper> quantoHelper)
+    : process_(std::move(process)), strike_(strike), solverDesc_(std::move(solverDesc)),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite), quantoHelper_(std::move(quantoHelper)) {
+
+        registerWith(process_);
+        registerWith(quantoHelper_);
+    }
+
+    void FdmBlackScholesSolver::performCalculations() const {
+            const ext::shared_ptr<FdmBlackScholesOp> op(
+            ext::make_shared<FdmBlackScholesOp>(
+                solverDesc_.mesher, process_.currentLink(), strike_,
+                localVol_, illegalLocalVolOverwrite_, 0,
+                (quantoHelper_.empty())
+                    ? ext::shared_ptr<FdmQuantoHelper>()
+                    : quantoHelper_.currentLink()));
+
+        solver_ = ext::make_shared<Fdm1DimSolver>(solverDesc_, schemeDesc_, op);
+    }
+
+    Real FdmBlackScholesSolver::valueAt(Real s) const {
+        calculate();
+        return solver_->interpolateAt(std::log(s));
+    }
+
+    Real FdmBlackScholesSolver::deltaAt(Real s) const {
+        calculate();
+        return solver_->derivativeX(std::log(s))/s;
+    }
+
+    Real FdmBlackScholesSolver::gammaAt(Real s) const {
+        calculate();
+        return (solver_->derivativeXX(std::log(s))
+                -solver_->derivativeX(std::log(s)))/(s*s);
+    }
+
+    Real FdmBlackScholesSolver::thetaAt(Real s) const {
+        return solver_->thetaAt(std::log(s));
+    }
+}
+
+FILE: ql/pricingengines/barrier/fdblackscholesbarrierengine.cpp
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/instruments/vanillaoption.hpp>
+#include <ql/math/distributions/normaldistribution.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdirichletboundary.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdividendhandler.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/pricingengines/barrier/fdblackscholesbarrierengine.hpp>
+#include <ql/pricingengines/barrier/fdblackscholesrebateengine.hpp>
+#include <ql/pricingengines/vanilla/fdblackscholesvanillaengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdBlackScholesBarrierEngine::FdBlackScholesBarrierEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite)
+    : process_(std::move(process)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite) {
+
+        registerWith(process_);
+    }
+
+    FdBlackScholesBarrierEngine::FdBlackScholesBarrierEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        DividendSchedule dividends,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite)
+    : process_(std::move(process)), dividends_(std::move(dividends)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite) {
+
+        registerWith(process_);
+    }
+
+    void FdBlackScholesBarrierEngine::calculate() const {
+
+        // 1. Mesher
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+
+        QL_REQUIRE(payoff, "non-striked type payoff given");
+        QL_REQUIRE(payoff->strike() > 0.0, "strike must be positive");
+
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "only european style option are supported");
+
+        const auto spot = process_->x0();
+        QL_REQUIRE(spot > 0.0, "negative or null underlying given");
+        QL_REQUIRE(!triggered(spot), "barrier touched");
+
+        const Time maturity = process_->time(arguments_.exercise->lastDate());
+
+        Real xMin=Null<Real>();
+        Real xMax=Null<Real>();
+        if (   arguments_.barrierType == Barrier::DownIn
+            || arguments_.barrierType == Barrier::DownOut) {
+            xMin = std::log(arguments_.barrier);
+        }
+        if (   arguments_.barrierType == Barrier::UpIn
+            || arguments_.barrierType == Barrier::UpOut) {
+            xMax = std::log(arguments_.barrier);
+        }
+
+        const ext::shared_ptr<Fdm1dMesher> equityMesher(
+            new FdmBlackScholesMesher(
+                xGrid_, process_, maturity, payoff->strike(),
+                xMin, xMax, 0.0001, 1.5,
+                std::make_pair(Null<Real>(), Null<Real>()),
+                dividends_));
+        
+        const ext::shared_ptr<FdmMesher> mesher (
+            ext::make_shared<FdmMesherComposite>(equityMesher));
+
+        // 2. Calculator
+        ext::shared_ptr<FdmInnerValueCalculator> calculator(
+            ext::make_shared<FdmLogInnerValue>(payoff, mesher, 0));
+
+        // 3. Step conditions
+        std::list<ext::shared_ptr<StepCondition<Array> > > stepConditions;
+        std::list<std::vector<Time> > stoppingTimes;
+
+        // 3.1 Step condition if discrete dividends
+        ext::shared_ptr<FdmDividendHandler> dividendCondition(
+            ext::make_shared<FdmDividendHandler>(dividends_, mesher,
+                                   process_->riskFreeRate()->referenceDate(),
+                                   process_->riskFreeRate()->dayCounter(), 0));
+
+        if (!dividends_.empty()) {
+            stepConditions.push_back(dividendCondition);
+            std::vector<Time> dividendTimes = dividendCondition->dividendTimes();
+            // this effectively excludes times after maturity
+            for (auto& t: dividendTimes)
+                t = std::min(maturity, t);
+            stoppingTimes.push_back(dividendTimes);
+        }
+
+        ext::shared_ptr<FdmStepConditionComposite> conditions(
+            ext::make_shared<FdmStepConditionComposite>(stoppingTimes, stepConditions));
+
+        // 4. Boundary conditions
+        FdmBoundaryConditionSet boundaries;
+        if (   arguments_.barrierType == Barrier::DownIn
+            || arguments_.barrierType == Barrier::DownOut) {
+            boundaries.push_back(
+                ext::make_shared<FdmDirichletBoundary>(mesher, arguments_.rebate, 0,
+                                         FdmDirichletBoundary::Lower));
+
+        }
+
+        if (   arguments_.barrierType == Barrier::UpIn
+            || arguments_.barrierType == Barrier::UpOut) {
+            boundaries.push_back(
+                ext::make_shared<FdmDirichletBoundary>(mesher, arguments_.rebate, 0,
+                                         FdmDirichletBoundary::Upper));
+        }
+
+        // 5. Solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions, calculator,
+                                     maturity, tGrid_, dampingSteps_ };
+
+        ext::shared_ptr<FdmBlackScholesSolver> solver(
+            ext::make_shared<FdmBlackScholesSolver>(
+                               Handle<GeneralizedBlackScholesProcess>(process_),
+                               payoff->strike(), solverDesc, schemeDesc_,
+                               localVol_, illegalLocalVolOverwrite_));
+
+        results_.value = solver->valueAt(spot);
+        results_.delta = solver->deltaAt(spot);
+        results_.gamma = solver->gammaAt(spot);
+        results_.theta = solver->thetaAt(spot);
+
+        // 6. Calculate vanilla option and rebate for in-barriers
+        if (   arguments_.barrierType == Barrier::DownIn
+            || arguments_.barrierType == Barrier::UpIn) {
+            // Cast the payoff
+            ext::shared_ptr<StrikedTypePayoff> payoff =
+                    ext::dynamic_pointer_cast<StrikedTypePayoff>(
+                                                            arguments_.payoff);
+            // Calculate the vanilla option
+            
+            VanillaOption vanillaOption(payoff, arguments_.exercise);
+            
+            vanillaOption.setPricingEngine(
+                ext::make_shared<FdBlackScholesVanillaEngine>(
+                        process_, dividends_, tGrid_, xGrid_,
+                        0, // dampingSteps
+                        schemeDesc_, localVol_, illegalLocalVolOverwrite_));
+
+            // Calculate the rebate value
+            BarrierOption rebateOption(arguments_.barrierType,
+                                       arguments_.barrier,
+                                       arguments_.rebate,
+                                       payoff, arguments_.exercise);
+            
+            const Size min_grid_size = 50;
+            const Size rebateDampingSteps 
+                = (dampingSteps_ > 0) ? std::min(Size(1), dampingSteps_/2) : 0; 
+
+            rebateOption.setPricingEngine(ext::make_shared<FdBlackScholesRebateEngine>(
+                            process_, dividends_, tGrid_, std::max(min_grid_size, xGrid_/5), 
+                            rebateDampingSteps, schemeDesc_, localVol_, 
+                            illegalLocalVolOverwrite_));
+
+            results_.value = vanillaOption.NPV()   + rebateOption.NPV()   - results_.value;
+            results_.delta = vanillaOption.delta() + rebateOption.delta() - results_.delta;
+            results_.gamma = vanillaOption.gamma() + rebateOption.gamma() - results_.gamma;
+            results_.theta = vanillaOption.theta() + rebateOption.theta() - results_.theta;
+        }
+    }
+}
+
+FILE: ql/pricingengines/barrier/fdblackscholesrebateengine.cpp
+
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ Copyright (C) 2008 Andreas Gaida
+ Copyright (C) 2008, 2009 Ralph Schreyer
+ Copyright (C) 2008 Klaus Spanderen
+
+ This file is part of QuantLib, a free-software/open-source library
+ for financial quantitative analysts and developers - http://quantlib.org/
+
+ QuantLib is free software: you can redistribute it and/or modify it
+ under the terms of the QuantLib license.  You should have received a
+ copy of the license along with this program; if not, please email
+ <quantlib-dev@lists.sf.net>. The license is also available online at
+ <https://www.quantlib.org/license.shtml>.
+
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the license for more details.
+*/
+
+#include <ql/exercise.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmblackscholesmesher.hpp>
+#include <ql/methods/finitedifferences/meshers/fdmmeshercomposite.hpp>
+#include <ql/methods/finitedifferences/operators/fdmlinearoplayout.hpp>
+#include <ql/methods/finitedifferences/solvers/fdmblackscholessolver.hpp>
+#include <ql/methods/finitedifferences/stepconditions/fdmstepconditioncomposite.hpp>
+#include <ql/methods/finitedifferences/utilities/fdmdirichletboundary.hpp>
+#include <ql/methods/finitedifferences/utilities/fdminnervaluecalculator.hpp>
+#include <ql/pricingengines/barrier/fdblackscholesrebateengine.hpp>
+#include <utility>
+
+namespace QuantLib {
+
+    FdBlackScholesRebateEngine::FdBlackScholesRebateEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite)
+    : process_(std::move(process)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite) {
+
+        registerWith(process_);
+    }
+
+    FdBlackScholesRebateEngine::FdBlackScholesRebateEngine(
+        ext::shared_ptr<GeneralizedBlackScholesProcess> process,
+        DividendSchedule dividends,
+        Size tGrid,
+        Size xGrid,
+        Size dampingSteps,
+        const FdmSchemeDesc& schemeDesc,
+        bool localVol,
+        Real illegalLocalVolOverwrite)
+    : process_(std::move(process)), dividends_(std::move(dividends)),
+      tGrid_(tGrid), xGrid_(xGrid), dampingSteps_(dampingSteps),
+      schemeDesc_(schemeDesc), localVol_(localVol),
+      illegalLocalVolOverwrite_(illegalLocalVolOverwrite) {
+
+        registerWith(process_);
+    }
+
+    void FdBlackScholesRebateEngine::calculate() const {
+
+        // 1. Mesher
+        const ext::shared_ptr<StrikedTypePayoff> payoff =
+            ext::dynamic_pointer_cast<StrikedTypePayoff>(arguments_.payoff);
+        const Time maturity = process_->time(arguments_.exercise->lastDate());
+
+        Real xMin=Null<Real>();
+        Real xMax=Null<Real>();
+        if (   arguments_.barrierType == Barrier::DownIn
+            || arguments_.barrierType == Barrier::DownOut) {
+            xMin = std::log(arguments_.barrier);
+        }
+        if (   arguments_.barrierType == Barrier::UpIn
+            || arguments_.barrierType == Barrier::UpOut) {
+            xMax = std::log(arguments_.barrier);
+        }
+
+        const ext::shared_ptr<Fdm1dMesher> equityMesher(
+            new FdmBlackScholesMesher(
+                xGrid_, process_, maturity, payoff->strike(),
+                xMin, xMax, 0.0001, 1.5,
+                std::make_pair(Null<Real>(), Null<Real>()),
+                dividends_));
+        
+        const ext::shared_ptr<FdmMesher> mesher (
+            new FdmMesherComposite(equityMesher));
+        
+        // 2. Calculator
+        const ext::shared_ptr<StrikedTypePayoff> rebatePayoff(
+                new CashOrNothingPayoff(Option::Call, 0.0, arguments_.rebate));
+        const ext::shared_ptr<FdmInnerValueCalculator> calculator(
+                                new FdmLogInnerValue(rebatePayoff, mesher, 0));
+
+        // 3. Step conditions
+        QL_REQUIRE(arguments_.exercise->type() == Exercise::European,
+                   "only european style option are supported");
+        
+        const ext::shared_ptr<FdmStepConditionComposite> conditions =
+            FdmStepConditionComposite::vanillaComposite(
+                                dividends_, arguments_.exercise, 
+                                mesher, calculator, 
+                                process_->riskFreeRate()->referenceDate(),
+                                process_->riskFreeRate()->dayCounter());
+
+        // 4. Boundary conditions
+        FdmBoundaryConditionSet  boundaries;
+        if (   arguments_.barrierType == Barrier::DownIn
+            || arguments_.barrierType == Barrier::DownOut) {
+            boundaries.push_back(FdmBoundaryConditionSet::value_type(
+                new FdmDirichletBoundary(mesher, arguments_.rebate, 0,
+                                         FdmDirichletBoundary::Lower)));
+
+        }
+        if (   arguments_.barrierType == Barrier::UpIn
+            || arguments_.barrierType == Barrier::UpOut) {
+            boundaries.push_back(FdmBoundaryConditionSet::value_type(
+                new FdmDirichletBoundary(mesher, arguments_.rebate, 0,
+                                         FdmDirichletBoundary::Upper)));
+        }
+
+        // 5. Solver
+        FdmSolverDesc solverDesc = { mesher, boundaries, conditions, calculator,
+                                     maturity, tGrid_, dampingSteps_ };
+
+        const ext::shared_ptr<FdmBlackScholesSolver> solver(
+                new FdmBlackScholesSolver(
+                                Handle<GeneralizedBlackScholesProcess>(process_),
+                                payoff->strike(), solverDesc, schemeDesc_,
+                                localVol_, illegalLocalVolOverwrite_));
+
+        const Real spot = process_->x0();
+        results_.value = solver->valueAt(spot);
+        results_.delta = solver->deltaAt(spot);
+        results_.gamma = solver->gammaAt(spot);
+        results_.theta = solver->thetaAt(spot);
+    }
+}
 </source_files>
+For detailed implementation integration, we prefer the following: 
+Operator-selection API (preferred for correctness/clarity):
+Add an explicit “spatial discretization” selector to FdmBlackScholesSolver (and engines), leaving FdmSchemeDesc strictly as time-stepping.
+Pros: clean separation; doesn’t overload FdmSchemeDesc::type.
+Cons: public API changes in solver/engines.
 
 <output_specification>
 Output a structured preflight report with:
